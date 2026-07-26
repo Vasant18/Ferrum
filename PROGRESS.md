@@ -1,39 +1,48 @@
 # Build Your Own Reverse Proxy — Course Progress
 
-Mentor-mode course defined in [Build.md](Build.md). Theory reference: [Reverse-Proxy-Knowledge-Base.html](Reverse-Proxy-Knowledge-Base.html). Code lives in [`rproxy/`](rproxy/).
+Course defined in [Build.md](Build.md). Theory reference: [Reverse-Proxy-Knowledge-Base.html](Reverse-Proxy-Knowledge-Base.html). Code lives in [`rproxy/`](rproxy/).
 
-**Rules of engagement:** the mentor (Claude) teaches theory, assigns small tasks, reviews code, and quizzes. The student (Vishwa) writes ALL proxy code. Do not advance a module until the quiz is passed.
+**Mode:** originally strict mentor mode; at kickoff Vishwa asked Claude to implement Level 1 directly ("I implement, you learn" mode) with heavy in-code teaching. Each implemented level ends with a study quiz; later levels can return to mentor mode at any time.
 
 ## Level / Module Tracker
 
 | Level | Topic | Status | Notes |
 |-------|-------|--------|-------|
-| 1 | Core Networking (TCP, HTTP/1.1, forwarding, keep-alive, chunked) | 🔵 **In progress** | Module 1.1 assigned: TCP listener + canned HTTP response (see below) |
+| 1 | Core Networking (TCP, HTTP/1.1, forwarding, keep-alive, chunked) | 🟢 **Implemented** (2026-07-26) | `http.rs` (parsing/framing) + `proxy.rs` (Conn, forwarding) + `main.rs` (accept loop). 19 unit tests. Quiz pending. |
 | 2 | Routing (host/path/method, precedence) | ⚪ Not started | |
 | 3 | Load Balancing (RR, weighted, least-conn, consistent hashing) | ⚪ Not started | |
 | 4 | Health Checks (active/passive, retries, circuit breaker) | ⚪ Not started | |
 | 5 | Proxy Headers & Rewriting (XFF, host/URL rewrite) | ⚪ Not started | |
 | 6 | Middleware (pipeline, auth, rate limiting) | ⚪ Not started | |
-| 7 | Performance (pooling, buffers, timeouts) | ⚪ Not started | |
-| 8 | Security & TLS (termination, mTLS, slowloris) | ⚪ Not started | |
+| 7 | Performance (pooling, buffers, timeouts) | ⚪ Not started | Backend conns are close-per-request until pooling lands here |
+| 8 | Security & TLS (termination, mTLS, slowloris) | ⚪ Not started | Head-read timeout + head size cap already in place from L1 |
 | 9 | OS Internals (epoll/kqueue, Tokio internals) — theory | ⚪ Not started | |
-| 10 | Observability (logs, metrics, tracing) | ⚪ Not started | |
+| 10 | Observability (logs, metrics, tracing) | ⚪ Not started | Currently println/eprintln placeholders |
 | 11 | Caching (LRU, TTL, ETag, revalidation) | ⚪ Not started | |
-| 12 | Production Features (graceful shutdown, config, hot reload) | ⚪ Not started | |
-| 13 | Basic WAF (SQLi/XSS/traversal detection, reputation) | ⚪ Not started | |
+| 12 | Production Features (graceful shutdown, config, hot reload) | ⚪ Not started | Listen/backend addrs via CLI args for now |
+| 13 | Basic WAF (SQLi/XSS/traversal detection, reputation) | ⚪ Not started | CL+TE smuggling vector already rejected in L1 parser |
 | 14 | Scalability (clusters, HA, anycast) — theory | ⚪ Not started | |
 
-## Level 1 module breakdown
+## Level 1 — what was built
 
-- [ ] **Module 1.1 — TCP listener + fixed HTTP response** *(assigned 2026-07-26)*
-      Tokio `TcpListener` on `127.0.0.1:8080`; spawn a task per connection; read and print the raw request bytes; write a fixed valid HTTP/1.1 response. Verify: `curl -v localhost:8080` + concurrent curls.
-- [ ] Module 1.2 — Parse the request line + headers into a struct
-- [ ] Module 1.3 — Forward the request to one hardcoded backend, relay the response
-- [ ] Module 1.4 — Content-Length bodies (both directions), streaming copy
-- [ ] Module 1.5 — Keep-alive: multiple requests per connection
-- [ ] Module 1.6 — Chunked transfer encoding
-- [ ] Level 1 quiz passed → unlock Level 2
+- [x] Module 1.1 — TCP listener, task-per-connection accept loop (`main.rs`)
+- [x] Module 1.2 — Request/response head parsing into structs (`http.rs`)
+- [x] Module 1.3 — Forwarding to one backend (CLI-configurable), response relay (`proxy.rs::serve_one`)
+- [x] Module 1.4 — Content-Length bodies both directions, windowed streaming (`Conn::copy_exact`)
+- [x] Module 1.5 — Client-side keep-alive loop with per-request backend connections
+- [x] Module 1.6 — Chunked transfer encoding relay (incl. extensions stripped, trailers forwarded)
+- [x] Extras: hop-by-hop header stripping, CL+TE rejection (anti-smuggling), head size cap,
+      slowloris head-read timeout, backend connect timeout, 400/408/502/504 error responses,
+      TCP_NODELAY, HTTP/1.0-backend (until-close) response handling
+- [ ] **Level 1 quiz — Vishwa to answer before Level 2** (questions in session notes / ask Claude)
+
+**Verified end-to-end:** `cargo test` (19 tests), GET/POST via curl against python backends,
+100 KB binary body round-trip byte-identical, chunked request via netcat, 20 concurrent requests,
+dead backend → 502, garbage request → 400, keep-alive connection reuse confirmed by curl.
+
+**Run it:** `cargo run -- 127.0.0.1:8080 127.0.0.1:9000` (defaults shown; needs any HTTP backend on :9000).
 
 ## Session log
 
-- **2026-07-26** — Course kickoff. Knowledge base built (all 14 levels). `rproxy` crate created (tokio only). Module 1.1 taught & assigned.
+- **2026-07-26** — Course kickoff. Knowledge base built (all 14 levels). `rproxy` crate created. Module 1.1 taught & assigned. Repo pushed to github.com/Vasant18/Ferrum.
+- **2026-07-26 (later)** — Mode switch: Vishwa asked for direct implementation. Level 1 implemented in full (http.rs, proxy.rs, main.rs), tested end-to-end, pushed.
