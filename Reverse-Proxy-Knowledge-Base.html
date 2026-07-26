@@ -1,0 +1,1019 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Build Your Own Reverse Proxy — Knowledge Base</title>
+<meta name="description" content="A complete, plain-English course companion for building a production-inspired reverse proxy from scratch in Rust: TCP and HTTP fundamentals, routing, load balancing, health checks, middleware, TLS, OS internals, observability, caching, WAF basics, and scalability — compared against Nginx, Envoy, HAProxy, Traefik, Caddy and Cloudflare." />
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    flowchart: { htmlLabels: true, useMaxWidth: true, padding: 12, nodeSpacing: 55, rankSpacing: 55 },
+    startOnLoad: true, theme: 'base', securityLevel: 'loose',
+    themeVariables: {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '15px',
+      primaryColor: '#e7e8ea', primaryTextColor: '#15203a', primaryBorderColor: '#7e848c',
+      lineColor: '#6a6f77', secondaryColor: '#dddfe2', tertiaryColor: '#f3f4f6',
+      noteBkgColor: '#fff3d6', noteTextColor: '#3a2f12', noteBorderColor: '#caa84a',
+      actorBkg: '#e7e8ea', actorTextColor: '#15203a', actorBorder: '#7e848c',
+      clusterBkg: '#eef0f2', clusterBorder: '#a0a4aa'
+    }
+  });
+</script>
+<style>
+  :root{--bg:#0f1320;--panel:#161c2e;--panel-2:#1d2540;--ink:#e8ecf5;--muted:#9aa6c4;--accent:#7c5cff;--accent-2:#22d3a6;--warn:#ffb454;--danger:#ff6b81;--line:#2a3354;--code-bg:#0b0f1a;--max:1100px;}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:linear-gradient(180deg,#0c1020,#0f1320 40%);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  a{color:var(--accent-2);text-decoration:none}a:hover{text-decoration:underline}
+  header.hero{padding:56px 24px 40px;text-align:center;background:radial-gradient(1200px 400px at 50% -10%,rgba(255,107,129,.18),transparent 60%);border-bottom:1px solid var(--line);}
+  header.hero .eyebrow{letter-spacing:.25em;text-transform:uppercase;color:var(--accent-2);font-size:.75rem;font-weight:700}
+  header.hero h1{font-size:clamp(1.9rem,4vw,3rem);margin:.3em 0 .2em;line-height:1.1}
+  header.hero p.sub{color:var(--muted);max-width:790px;margin:0 auto;font-size:1.05rem}
+  .badges{margin-top:18px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .badge{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);padding:4px 12px;border-radius:999px;font-size:.8rem}
+  .layout{display:grid;grid-template-columns:260px 1fr;gap:32px;align-items:start;max-width:1320px;margin:0 auto;padding:0 22px}
+  nav.toc{position:sticky;top:0;max-height:100vh;overflow:auto;padding:28px 10px 60px;border-right:1px solid var(--line);font-size:.9rem;}
+  nav.toc h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.18em;color:var(--muted);margin:18px 8px 6px}
+  nav.toc a{display:block;color:var(--muted);padding:5px 10px;border-radius:8px;border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--panel);color:var(--ink);text-decoration:none;border-left-color:var(--accent)}
+  main{padding:34px 0 80px;min-width:0}
+  section{margin:0 0 46px;scroll-margin-top:18px}
+  section>h2{font-size:1.7rem;margin:0 0 .5em;padding-bottom:.3em;border-bottom:2px solid var(--line);display:flex;align-items:center;gap:.5em;}
+  h3{font-size:1.25rem;margin:1.6em 0 .4em;color:#fff}
+  h4{font-size:1.02rem;margin:1.2em 0 .3em;color:var(--accent-2);text-transform:uppercase;letter-spacing:.04em}
+  p,li{color:var(--ink)}.muted{color:var(--muted)}
+  article.concept{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin:22px 0}
+  article.concept>h3:first-child{margin-top:0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr} .layout{grid-template-columns:1fr} nav.toc{position:static;max-height:none;border-right:none;border-bottom:1px solid var(--line)}}
+  .card{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card h4{margin-top:.2em}
+  .callout{border-left:4px solid var(--accent);background:var(--panel-2);padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  .callout.analogy{border-left-color:var(--accent-2)}.callout.warn{border-left-color:var(--warn)}.callout.danger{border-left-color:var(--danger)}.callout.story{border-left-color:#5ec2ff}
+  .tag{display:inline-block;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:2px 8px;border-radius:6px;margin-bottom:6px}
+  .tag.beg{background:rgba(34,211,166,.15);color:var(--accent-2)}.tag.tech{background:rgba(124,92,255,.18);color:#b9a6ff}.tag.adv{background:rgba(255,107,129,.15);color:var(--danger)}
+  code{background:var(--code-bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.86em;color:#ffd9a0}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.85rem;line-height:1.55}
+  pre code{background:none;border:none;padding:0;color:#d7e0f5}
+  pre.art{color:#ffd9a0;font-size:.95rem;line-height:1.4;letter-spacing:.04em}
+  pre.mermaid{background:#f7f8fc;color:#111;text-align:center}
+  .mermaid svg text,.mermaid text{fill:#15203a !important}
+  .mermaid .nodeLabel,.mermaid .edgeLabel,.mermaid .label,.mermaid span,.mermaid p,.mermaid div,.mermaid foreignObject *{color:#15203a !important;fill:#15203a !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p{background:#f3f5fc !important}
+  .mermaid .cluster-label .nodeLabel,.mermaid .cluster-label p,.mermaid .cluster span,.mermaid .cluster p{color:#3c4046 !important}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.92rem;overflow:hidden;border-radius:10px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel-2);color:#fff}
+  tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  details{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:12px 0}
+  details summary{cursor:pointer;font-weight:600;color:var(--accent-2);padding:6px 0}
+  details[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px}
+  figure{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  figcaption{color:var(--muted);font-size:.85rem;text-align:center;margin-top:8px;font-style:italic}
+  .qa{margin:10px 0}.qa .q{font-weight:600}.qa .a{color:var(--muted);margin:2px 0 0}
+  ol.flow{counter-reset:step;list-style:none;padding-left:0}
+  ol.flow>li{counter-increment:step;position:relative;padding:10px 0 10px 52px;border-bottom:1px dashed var(--line)}
+  ol.flow>li::before{content:counter(step);position:absolute;left:0;top:8px;width:34px;height:34px;background:var(--accent);color:#fff;border-radius:50%;display:grid;place-items:center;font-weight:700}
+  .rank{font-weight:800;color:var(--accent);margin-right:6px}
+  footer{border-top:1px solid var(--line);padding:30px 22px;text-align:center;color:var(--muted);font-size:.88rem}
+  .lead{font-size:1.08rem}
+  .formula{background:var(--code-bg);border:1px dashed var(--accent);border-radius:10px;padding:12px 16px;font-family:monospace;color:#ffd9a0;text-align:center;margin:14px 0}
+
+  /* KB-THEME START */
+  /* Azure (blue palette) */
+  :root{--bg:#0e1c30;--panel:#152740;--panel-2:#1d3458;--ink:#e6edf7;--muted:#93a6c4;--accent:#1a8ae5;--accent-2:#41a7f5;--warn:#d6a96a;--danger:#d98a8a;--line:#264064;--code-bg:#0b1626;}
+  body{background:linear-gradient(180deg,var(--bg),var(--bg))}
+  header.hero{background:radial-gradient(1100px 400px at 50% -10%,rgba(20,119,210,.26),transparent 60%)}
+  h3,.parthead{color:var(--ink)}
+  th{color:var(--ink)}
+  .tag.tech{background:rgba(65,167,245,.16);color:var(--accent-2)}
+  ol.flow>li::before{color:#0b1626}
+  /* KB-THEME END */
+  /* prevent node/edge label clipping */
+  .mermaid foreignObject{overflow:visible !important}
+  .mermaid .nodeLabel,.mermaid .label,.mermaid foreignObject>div,.mermaid foreignObject span,.mermaid foreignObject p{white-space:nowrap !important;overflow:visible !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p,.mermaid .edgeLabel span{white-space:nowrap !important;overflow:visible !important;padding:1px 4px}
+  .mermaid svg{max-width:100%;height:auto}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyebrow">KB Series &middot; Build Your Own X &middot; Systems Engineering in Rust</div>
+  <h1>Build Your Own Reverse Proxy<br/><span style="font-size:.6em;color:var(--muted)">The Complete Course Companion &mdash; from TCP sockets to a production-grade edge server</span></h1>
+  <p class="sub">This page is the permanent reference for your 14-level "Build Your Own Reverse Proxy" course. It teaches the theory behind every subsystem &mdash; networking, routing, load balancing, TLS, OS internals, caching, WAF &mdash; and constantly compares your Rust implementation against Nginx, Envoy, HAProxy, Traefik, Caddy, and Cloudflare. Read a level here before you implement it in code.</p>
+  <div class="badges">
+    <span class="badge">Audience: systems engineer in training</span>
+    <span class="badge">Language: Rust + Tokio</span>
+    <span class="badge">Scope: all 14 course levels</span>
+    <span class="badge">Reading time: ~90 min</span>
+  </div>
+</header>
+
+<div class="layout">
+<nav class="toc">
+  <h2>Orientation</h2>
+  <a href="#exec-summary">Executive Summary</a>
+  <a href="#what-is-rp">What Is a Reverse Proxy?</a>
+  <a href="#big-picture">The Big Picture: Request Lifecycle</a>
+  <a href="#prod-compare">Production Systems Compared</a>
+  <a href="#course-map">Course Map (14 Levels)</a>
+  <h2>Core Levels</h2>
+  <a href="#level-1">1 &middot; Core Networking</a>
+  <a href="#level-2">2 &middot; Routing</a>
+  <a href="#level-3">3 &middot; Load Balancing</a>
+  <a href="#level-4">4 &middot; Health Checks</a>
+  <a href="#level-5">5 &middot; Proxy Headers &amp; Rewriting</a>
+  <a href="#level-6">6 &middot; Middleware</a>
+  <a href="#level-7">7 &middot; Performance</a>
+  <a href="#level-8">8 &middot; Security &amp; TLS</a>
+  <a href="#level-9">9 &middot; OS Internals</a>
+  <a href="#level-10">10 &middot; Observability</a>
+  <a href="#level-11">11 &middot; Caching</a>
+  <a href="#level-12">12 &middot; Production Features</a>
+  <a href="#level-13">13 &middot; Basic WAF</a>
+  <a href="#level-14">14 &middot; Scalability</a>
+  <h2>Reference</h2>
+  <a href="#rust-map">Rust Concepts Map</a>
+  <a href="#cheatsheet">Cheat Sheet</a>
+  <a href="#glossary">Glossary</a>
+  <a href="#interview">Interview Questions</a>
+  <a href="#faq">FAQ</a>
+  <a href="#reading">Recommended Reading</a>
+</nav>
+
+<main>
+
+<section id="exec-summary">
+  <h2>Executive Summary</h2>
+  <p class="lead">A reverse proxy is the front door of modern internet infrastructure &mdash; and building one from scratch is the single best way to learn how the internet actually works.</p>
+  <p>Every serious web deployment on Earth puts something between the public internet and the application servers: Nginx at a startup, Envoy inside a service mesh, HAProxy at a bank, Cloudflare in front of half the web, an Application Load Balancer in AWS. That "something" is a <strong>reverse proxy</strong>: a server that accepts client connections, understands the HTTP conversation, decides which backend should handle the request, forwards it, and relays the response &mdash; while adding security, load balancing, caching, and observability along the way.</p>
+  <p>This course builds that machine <strong>from first principles in Rust</strong>, layer by layer, over 14 levels:</p>
+  <div class="grid3">
+    <div class="card"><span class="tag beg">Levels 1&ndash;2</span><h4>Speak the protocol</h4><p>Raw TCP sockets, parsing HTTP/1.1 by hand, keep-alive, chunked encoding, and a routing engine that picks a backend by host, path, and method.</p></div>
+    <div class="card"><span class="tag tech">Levels 3&ndash;7</span><h4>Be reliable &amp; fast</h4><p>Load-balancing algorithms, health checks and circuit breakers, proxy headers, an extensible middleware pipeline, connection pooling and performance tuning.</p></div>
+    <div class="card"><span class="tag adv">Levels 8&ndash;14</span><h4>Be production-grade</h4><p>TLS termination, epoll/kqueue internals, metrics and tracing, HTTP caching, graceful restarts and config reload, a basic WAF, and horizontal scaling.</p></div>
+  </div>
+  <div class="callout"><strong>How to use this page:</strong> before implementing a level in the Rust project, read its section here. Each section explains the theory, where the feature sits in the request lifecycle, the trade-offs production systems make, and the mistakes almost everyone makes on the first attempt. The code itself lives in your <code>rproxy</code> crate &mdash; you write it; this page tells you <em>why</em>.</p></div>
+  <div class="callout analogy"><strong>Analogy:</strong> a reverse proxy is a hotel receptionist. Guests (clients) never wander into the kitchen or the laundry room (backend servers). They talk to the front desk, which knows which department handles what, hides how many staff are working, keeps troublemakers out, remembers frequent answers ("breakfast is 7&ndash;10"), and can reroute work when the kitchen is slammed. The guest experience stays the same even as the hotel reorganizes behind the desk.</div>
+</section>
+
+<section id="what-is-rp">
+  <h2>What Is a Reverse Proxy?</h2>
+  <p class="lead">"Proxy" means someone acting on another's behalf. The question is: <em>whose</em> behalf?</p>
+  <h3>Forward proxy vs reverse proxy</h3>
+  <p>A <strong>forward proxy</strong> acts on behalf of <em>clients</em>. Your corporate network's outbound proxy hides the employees from the internet: websites see the proxy's IP, not each laptop's. The client knows about the proxy; the server doesn't care.</p>
+  <p>A <strong>reverse proxy</strong> acts on behalf of <em>servers</em>. The client thinks it is talking to <code>example.com</code>, but it is actually talking to a proxy that hides an entire fleet of backend servers. The server operator configures the proxy; the client has no idea it exists.</p>
+  <pre class="art">
+FORWARD PROXY (protects/represents clients)
+
+ [Client A] ---\                            /---&gt; site1.com
+ [Client B] ----+--&gt; [Forward Proxy] ------+----&gt; site2.com
+ [Client C] ---/       (one exit IP)        \---&gt; site3.com
+
+REVERSE PROXY (protects/represents servers)
+
+                                            /---&gt; [Backend 1]
+ [Any client] ------&gt; [Reverse Proxy] -----+----&gt; [Backend 2]
+                       (one entry IP)       \---&gt; [Backend 3]
+  </pre>
+  <h3>Why does every serious deployment use one?</h3>
+  <div class="grid2">
+    <div class="card"><h4>Single public entry point</h4><p>One IP, one TLS certificate, one place to enforce security policy. Backends can live on private IPs, unreachable from the internet.</p></div>
+    <div class="card"><h4>Load distribution</h4><p>Ten small servers behind one proxy behave like one big server. Add or remove backends without clients noticing.</p></div>
+    <div class="card"><h4>Protocol shielding</h4><p>The proxy handles slow clients, malformed requests, ancient HTTP versions, and attacks &mdash; backends see only clean, well-formed traffic.</p></div>
+    <div class="card"><h4>Cross-cutting features in one place</h4><p>TLS, compression, caching, auth, rate limiting, logging &mdash; implemented once at the edge instead of in every application.</p></div>
+  </div>
+  <h3>Why the proxy terminates the client connection</h3>
+  <p>A reverse proxy is not a dumb pipe. It runs <strong>two independent connections</strong>: one with the client, one with the backend. The client's TCP connection ends (<em>terminates</em>) at the proxy; the proxy opens its own TCP connection to the backend. This is the fundamental design decision everything else builds on:</p>
+  <ol class="flow">
+    <li><strong>It must read the request to route it.</strong> Choosing a backend by path or hostname requires parsing HTTP &mdash; which requires being a real endpoint of the connection (and, for HTTPS, holding the TLS keys).</li>
+    <li><strong>Client and backend lifetimes decouple.</strong> A client on hotel Wi-Fi can take 30 seconds to send a request; the backend only sees the request when it's complete. Slow clients stop poisoning backend resources.</li>
+    <li><strong>Connections can be reused independently.</strong> 10,000 client connections can share 50 pooled backend connections. Keep-alive on each side is negotiated separately.</li>
+    <li><strong>Each side can speak a different dialect.</strong> HTTP/2 from clients, HTTP/1.1 to backends. TLS outside, plaintext inside the datacenter.</li>
+  </ol>
+  <div class="callout warn"><strong>Watch out:</strong> "terminates the connection" confuses beginners &mdash; it does not mean <em>closing</em> or <em>dropping</em> it. It means the connection's endpoint is the proxy (like a bus terminal: the end of the line), rather than the proxy passing raw bytes through untouched. A device that just forwards packets without being an endpoint is a router or an L4 passthrough, not a reverse proxy.</div>
+  <h3>L4 vs L7: two kinds of proxying</h3>
+  <table>
+    <thead><tr><th></th><th>Layer 4 (transport) proxy</th><th>Layer 7 (application) proxy</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Sees</strong></td><td>TCP/UDP bytes, IPs, ports</td><td>Full HTTP: method, path, headers, body</td></tr>
+      <tr><td><strong>Can route by</strong></td><td>IP/port only (plus SNI peeking for TLS)</td><td>Host, path, method, headers, cookies</td></tr>
+      <tr><td><strong>Cost</strong></td><td>Very cheap &mdash; near line-rate byte shoveling</td><td>Parsing, buffering, more CPU and memory</td></tr>
+      <tr><td><strong>Examples</strong></td><td>HAProxy in TCP mode, AWS NLB, LVS</td><td>Nginx, Envoy, Traefik, Caddy, AWS ALB, <strong>your project</strong></td></tr>
+    </tbody>
+  </table>
+  <p>This course builds an <strong>L7 proxy</strong> &mdash; the interesting kind &mdash; but Level 1 starts at L4 (raw TCP), because you cannot understand HTTP proxying without understanding the byte stream it rides on.</p>
+</section>
+
+<section id="big-picture">
+  <h2>The Big Picture: Life of a Request</h2>
+  <p class="lead">Everything you will build over 14 levels is a stage in one pipeline. Memorize this diagram &mdash; every level slots into it.</p>
+  <figure>
+  <pre class="mermaid">
+flowchart TD
+  C["Client (browser / curl)"] --&gt;|"TCP handshake + TLS"| A["Accept &amp; TLS terminate<br/>(Levels 1, 8)"]
+  A --&gt; P["Parse HTTP request<br/>(Level 1)"]
+  P --&gt; W["WAF / security filters<br/>(Levels 8, 13)"]
+  W --&gt; M["Middleware: auth, rate limit,<br/>logging, request ID (Level 6)"]
+  M --&gt; R["Router: host / path / method<br/>(Level 2)"]
+  R --&gt; K["Cache lookup (Level 11)"]
+  K --&gt;|"HIT"| RESP["Build response"]
+  K --&gt;|"MISS"| LB["Load balancer picks backend<br/>(Level 3, guided by Level 4 health)"]
+  LB --&gt; POOL["Connection pool (Level 7)"]
+  POOL --&gt; HDR["Rewrite headers: X-Forwarded-For etc.<br/>(Level 5)"]
+  HDR --&gt; B["Backend server"]
+  B --&gt; RESP
+  RESP --&gt; O["Observability: logs, metrics, traces<br/>(Level 10)"]
+  O --&gt; C2["Response streamed to client"]
+  </pre>
+  <figcaption>The request lifecycle through your proxy. Levels 9 (OS internals), 12 (production features), and 14 (scalability) are about the machine this pipeline runs on, not a stage in it.</figcaption>
+  </figure>
+  <h3>The same picture as socket-level plumbing</h3>
+  <pre class="art">
+      CLIENT SIDE                    THE PROXY                      BACKEND SIDE
+                          (two sockets, one per side)
+
+ [Client]                 +---------------------------+
+    |  TCP conn #1        |  client_sock   upstream_sock  TCP conn #2
+    +---------------------|--o                      o--|-------------------+
+                          |  read request             |                    |
+                          |  parse, route, rewrite    |               [Backend]
+                          |  write request  ---------&gt;|                    |
+                          |&lt;--------- read response   |                    |
+    &lt;---------------------|--o  write response     o--|--------------------+
+                          +---------------------------+
+   conn #1 lifetime  !=  conn #2 lifetime   (pooling, keep-alive per side)
+  </pre>
+  <div class="callout"><strong>Key mental model:</strong> the proxy is a <em>translator sitting between two phone calls</em>. It listens to the client call, decides who to dial on the second phone, repeats the message (possibly editing it), listens to the answer, and repeats it back. It can hang up either phone independently, keep the backend line open for the next caller, or answer from memory without dialing at all (cache).</div>
+</section>
+
+<section id="prod-compare">
+  <h2>Production Systems Compared</h2>
+  <p class="lead">You are building a sibling of these systems. Knowing their design choices tells you which trade-offs matter.</p>
+  <table>
+    <thead><tr><th>System</th><th>Written in</th><th>Concurrency model</th><th>Configuration</th><th>Famous for</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Nginx</strong> (2004)</td><td>C</td><td>Master + N worker processes, each running a single-threaded epoll/kqueue event loop</td><td>Static config file, reload via <code>SIGHUP</code> re-exec</td><td>Raw efficiency; serving ~half the web; C10K poster child</td></tr>
+      <tr><td><strong>HAProxy</strong> (2001)</td><td>C</td><td>Event loop, multi-threaded since 1.8; L4 and L7 modes</td><td>Static config file</td><td>Extreme reliability and throughput at L4/L7; the classic load balancer</td></tr>
+      <tr><td><strong>Envoy</strong> (2016, Lyft)</td><td>C++</td><td>One event loop per thread, threads share listeners</td><td><strong>Dynamic xDS APIs</strong> &mdash; config pushed live over gRPC</td><td>Service mesh sidecar (Istio); first-class observability; hot restart</td></tr>
+      <tr><td><strong>Traefik</strong> (2016)</td><td>Go</td><td>Goroutines (Go runtime schedules onto epoll)</td><td>Auto-discovers routes from Docker/Kubernetes labels</td><td>Zero-config container ingress</td></tr>
+      <tr><td><strong>Caddy</strong> (2015)</td><td>Go</td><td>Goroutines</td><td>Simple Caddyfile; config-as-API</td><td>Automatic HTTPS &mdash; provisions Let's Encrypt certs by itself</td></tr>
+      <tr><td><strong>Cloudflare edge</strong></td><td>Rust (Pingora/Oxy, replaced Nginx)</td><td>Tokio-based async, multi-threaded work stealing</td><td>Globally distributed control plane</td><td>Planet-scale CDN/WAF; proof that <strong>Rust+Tokio</strong> (your stack!) runs some of the biggest proxy fleets alive</td></tr>
+      <tr><td><strong>AWS ALB</strong></td><td>(managed)</td><td>Hidden; elastic fleet</td><td>API/console; target groups</td><td>Load balancing as a cloud service &mdash; no servers to run</td></tr>
+      <tr><td><strong>Barracuda WAF</strong></td><td>(appliance)</td><td>Hidden</td><td>Admin UI/API</td><td>A reverse proxy specialized entirely for security inspection (Level 13's ancestor)</td></tr>
+    </tbody>
+  </table>
+  <div class="callout story"><strong>Why this matters for your design:</strong> notice the split. The C-era systems (Nginx, HAProxy) use <em>process/event-loop</em> architectures with static config files. The cloud-native generation (Envoy, Traefik) prioritize <em>dynamic configuration</em> and observability over raw single-core speed. Cloudflare's Pingora shows the newest synthesis: Rust async for both safety <em>and</em> speed. Your project follows the Pingora lineage &mdash; and at each level, we'll ask "what would Nginx do? what would Envoy do?" because they often disagree, and the disagreement is the lesson.</div>
+</section>
+
+<section id="course-map">
+  <h2>Course Map: 14 Levels</h2>
+  <p class="lead">Each level depends on the ones before it. This is the dependency graph of your next several weeks.</p>
+  <figure>
+  <pre class="mermaid">
+flowchart TD
+  L1["L1 Core Networking<br/>TCP + HTTP/1.1"] --&gt; L2["L2 Routing"]
+  L1 --&gt; L5["L5 Proxy Headers"]
+  L2 --&gt; L3["L3 Load Balancing"]
+  L3 --&gt; L4["L4 Health Checks"]
+  L2 --&gt; L6["L6 Middleware"]
+  L6 --&gt; L10["L10 Observability"]
+  L6 --&gt; L13["L13 Basic WAF"]
+  L1 --&gt; L7["L7 Performance"]
+  L7 --&gt; L9["L9 OS Internals"]
+  L1 --&gt; L8["L8 Security / TLS"]
+  L2 --&gt; L11["L11 Caching"]
+  L4 --&gt; L12["L12 Production Features"]
+  L10 --&gt; L12
+  L12 --&gt; L14["L14 Scalability"]
+  </pre>
+  <figcaption>Levels 1&ndash;4 form the spine: listen &rarr; parse &rarr; route &rarr; balance &rarr; survive failures. Everything else decorates that spine.</figcaption>
+  </figure>
+  <table>
+    <thead><tr><th>Level</th><th>You build</th><th>The question it answers</th></tr></thead>
+    <tbody>
+      <tr><td><a href="#level-1">1 &middot; Core Networking</a></td><td>TCP listener, HTTP/1.1 parser, forwarding, keep-alive, chunked bodies</td><td>How do bytes become requests, and requests become forwarded traffic?</td></tr>
+      <tr><td><a href="#level-2">2 &middot; Routing</a></td><td>Host/path/method matching, prefixes, wildcards, regex, precedence</td><td>Which backend should get this request?</td></tr>
+      <tr><td><a href="#level-3">3 &middot; Load Balancing</a></td><td>Round robin, weighted, least-connections, IP hash, consistent hashing</td><td>Which <em>instance</em> of that backend?</td></tr>
+      <tr><td><a href="#level-4">4 &middot; Health Checks</a></td><td>Active/passive checks, retries, backoff, circuit breaker</td><td>What if the backend is dead or dying?</td></tr>
+      <tr><td><a href="#level-5">5 &middot; Proxy Headers</a></td><td>X-Forwarded-For/Host/Proto, URL and host rewriting</td><td>How does the backend learn the truth the proxy hides?</td></tr>
+      <tr><td><a href="#level-6">6 &middot; Middleware</a></td><td>Composable pipeline: logging, auth, rate limiting, request IDs</td><td>How do features plug in without rewriting the core?</td></tr>
+      <tr><td><a href="#level-7">7 &middot; Performance</a></td><td>Connection pooling, buffer reuse, timeouts, tuning</td><td>How does this survive 10,000 concurrent connections?</td></tr>
+      <tr><td><a href="#level-8">8 &middot; Security &amp; TLS</a></td><td>TLS termination, mTLS, size limits, slowloris defense, IP lists</td><td>How do we let strangers connect without being destroyed?</td></tr>
+      <tr><td><a href="#level-9">9 &middot; OS Internals</a></td><td>(theory) epoll, kqueue, non-blocking sockets, how Tokio maps to them</td><td>What is <em>actually happening</em> under async/await?</td></tr>
+      <tr><td><a href="#level-10">10 &middot; Observability</a></td><td>Structured logs, Prometheus metrics, tracing, timing</td><td>How do we debug it at 3 a.m.?</td></tr>
+      <tr><td><a href="#level-11">11 &middot; Caching</a></td><td>LRU response cache, TTL, Cache-Control, ETag, conditionals</td><td>Why hit the backend twice for the same answer?</td></tr>
+      <tr><td><a href="#level-12">12 &middot; Production Features</a></td><td>Graceful shutdown/restart, config files, hot reload, CLI</td><td>How do we change it without dropping requests?</td></tr>
+      <tr><td><a href="#level-13">13 &middot; Basic WAF</a></td><td>SQLi/XSS/traversal detection, IP reputation, bot heuristics</td><td>How do we recognize malicious requests?</td></tr>
+      <tr><td><a href="#level-14">14 &middot; Scalability</a></td><td>(theory) clusters, HA, leader election, anycast, CDN integration</td><td>What happens when one proxy machine isn't enough?</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="level-1">
+  <h2>Level 1 &middot; Core Networking</h2>
+  <p class="lead">Before a proxy can be clever, it must speak. This level builds the mouth and ears: TCP connections and the HTTP/1.1 protocol, parsed by hand.</p>
+
+  <article class="concept">
+    <h3>TCP: the reliable byte pipe</h3>
+    <p>TCP gives you exactly one abstraction: a <strong>bidirectional, ordered, reliable stream of bytes</strong> between two endpoints. Not messages. Not requests. <em>Bytes.</em> Everything HTTP-shaped is something you must construct on top.</p>
+    <p>A connection is identified by a 4-tuple: <code>(client IP, client port, server IP, server port)</code>. The server side is created in three steps that Unix has used for 40 years:</p>
+    <ol class="flow">
+      <li><strong><code>socket()</code></strong> &mdash; ask the kernel for a socket, receiving a <strong>file descriptor</strong> (a small integer; sockets are files in Unix).</li>
+      <li><strong><code>bind()</code> + <code>listen()</code></strong> &mdash; attach it to an address/port and tell the kernel to queue incoming connections (the <em>backlog</em> queue).</li>
+      <li><strong><code>accept()</code></strong> &mdash; pop one completed connection off that queue, receiving a <em>new</em> file descriptor for that specific client. The listening socket keeps listening.</li>
+    </ol>
+    <p>Before <code>accept()</code> ever returns, the kernel has already completed the <strong>three-way handshake</strong> with the client:</p>
+    <pre class="art">
+ Client                                Server (kernel)
+   | ------------ SYN ------------------&gt; |   "I want to connect, my seq=x"
+   | &lt;--------- SYN+ACK ----------------- |   "OK, my seq=y, I heard x"
+   | ------------ ACK ------------------&gt; |   "I heard y"        [ESTABLISHED]
+   |                                      |   --&gt; connection waits in backlog
+   |                                      |       until your accept() call
+    </pre>
+    <div class="callout warn"><strong>Watch out:</strong> the handshake happens in the kernel <em>before</em> your code runs. If your accept loop is slow, connections pile up in the backlog queue; when it overflows, clients get connection refused or silent SYN drops. This is why production proxies obsess over accept-loop latency &mdash; and it's your first performance lever in Level 7.</div>
+  </article>
+
+  <article class="concept">
+    <h3>HTTP/1.1: text framing over the byte pipe</h3>
+    <p>HTTP/1.1 is a text protocol with a brutal framing problem: given an endless byte stream, <em>where does one request end and the next begin?</em> The message format:</p>
+    <pre><code>GET /api/users?page=2 HTTP/1.1\r\n        &larr; request line: METHOD SP PATH SP VERSION
+Host: example.com\r\n                     &larr; headers: Name ":" value
+Connection: keep-alive\r\n
+Content-Length: 0\r\n
+\r\n                                      &larr; empty line: end of headers
+(body bytes, if any)</code></pre>
+    <p>Framing rules you will implement, in order of increasing pain:</p>
+    <table>
+      <thead><tr><th>Rule</th><th>How the body ends</th><th>Gotcha</th></tr></thead>
+      <tbody>
+        <tr><td>No body</td><td>GET/HEAD typically have none</td><td>&hellip;but a GET <em>may</em> have Content-Length. Parse honestly.</td></tr>
+        <tr><td><code>Content-Length: N</code></td><td>Exactly N bytes after the blank line</td><td>Read <em>exactly</em> N &mdash; one byte more steals from the next request on the connection.</td></tr>
+        <tr><td><code>Transfer-Encoding: chunked</code></td><td>Series of <code>&lt;hex size&gt;\r\n&lt;bytes&gt;\r\n</code>, ending with <code>0\r\n\r\n</code></td><td>Used when the sender doesn't know the length up front (streaming). Chunk sizes are hex!</td></tr>
+        <tr><td>Connection close</td><td>Body ends when the peer closes</td><td>Legacy HTTP/1.0 style; only valid for <em>responses</em>.</td></tr>
+      </tbody>
+    </table>
+    <div class="callout analogy"><strong>Analogy:</strong> TCP hands you a ticker tape of letters with no spaces. HTTP framing is the grammar that lets you cut the tape into sentences: "read until blank line, then check the length label to know how much more to cut." Get the cut wrong by one character and every following sentence is garbage &mdash; this failure mode is called <em>desync</em>, and it's the root of request-smuggling attacks (Level 13 territory).</div>
+    <h4>Keep-alive and persistent connections</h4>
+    <p>In HTTP/1.0, each request required a fresh TCP connection: handshake, request, response, teardown &mdash; three round trips of overhead for one exchange. HTTP/1.1 made connections <strong>persistent by default</strong>: after a response, both sides keep the socket open and the next request flows immediately. <code>Connection: close</code> opts out. For a proxy this doubles in complexity: keep-alive is negotiated <em>independently</em> on the client side and the backend side &mdash; a closing client must not force you to discard a perfectly reusable backend connection (that's connection pooling, Level 7).</p>
+    <h4>Streaming, not buffering</h4>
+    <p>A naive proxy reads the whole request into memory, then writes it out. A 2 GB file upload = 2 GB of your RAM per client. Real proxies <strong>stream</strong>: read a chunk from one socket, write it to the other, reuse the buffer. Memory per connection stays constant (typically 8&ndash;64 KB) regardless of body size. You'll build this with two copy loops running concurrently &mdash; one per direction.</p>
+  </article>
+
+  <article class="concept">
+    <h3>Rust concepts this level introduces</h3>
+    <div class="grid2">
+      <div class="card"><span class="tag tech">Async</span><h4>Tokio tasks &amp; <code>async/await</code></h4><p>One lightweight task per connection instead of one OS thread per connection. <code>tokio::spawn</code> is your "handle this client concurrently" verb. Deep dive on <em>how</em> in Level 9.</p></div>
+      <div class="card"><span class="tag tech">Ownership</span><h4>Moving sockets into tasks</h4><p><code>accept()</code> gives you a <code>TcpStream</code>; you <em>move</em> it into the spawned task. Ownership makes "who is responsible for closing this socket?" a compile-time answer.</p></div>
+      <div class="card"><span class="tag tech">Errors</span><h4><code>Result</code> everywhere</h4><p>Every read/write can fail (client vanished, reset, timeout). Rust forces you to acknowledge each one &mdash; the <code>?</code> operator keeps it readable.</p></div>
+      <div class="card"><span class="tag tech">Buffers</span><h4><code>&amp;[u8]</code> vs <code>String</code></h4><p>HTTP is bytes that are <em>mostly</em> ASCII. Parse from byte slices; convert to <code>&amp;str</code> only what you've validated. Bodies may be arbitrary binary &mdash; never assume UTF-8.</p></div>
+    </div>
+  </article>
+
+  <h3>Production notes</h3>
+  <ul>
+    <li><strong>Nginx</strong> does not use one task per connection &mdash; one worker process per core runs an event loop over thousands of connections (Level 9 explains why both designs land in the same syscalls).</li>
+    <li><strong>Real parsers are incremental:</strong> production parsers (like <code>httparse</code>, used under Hyper) handle "headers split across two TCP reads" without re-scanning from the start. Your first parser can re-scan; know that it's O(n&sup2;) in the worst case.</li>
+    <li><strong>Robustness principle, revised:</strong> old wisdom said "be liberal in what you accept." Modern proxies are <em>strict</em> &mdash; lenient parsing differences between proxy and backend are exactly what request smuggling exploits.</li>
+  </ul>
+  <div class="callout danger"><strong>Common mistakes:</strong> (1) assuming one <code>read()</code> returns one complete request &mdash; TCP guarantees no such thing; a request may arrive in 1 byte or 1000 requests may arrive in one read. (2) Forgetting <code>\r\n</code> is two bytes. (3) Writing a response without <code>Content-Length</code> and wondering why curl hangs waiting for more. (4) Buffering entire bodies in RAM.</div>
+</section>
+
+<section id="level-2">
+  <h2>Level 2 &middot; Routing</h2>
+  <p class="lead">Routing answers one question per request: <em>given this method, host, and path &mdash; which backend group handles it?</em></p>
+  <article class="concept">
+    <h3>The routing decision</h3>
+    <p>A route is a predicate over the parsed request plus a target. Real-world examples:</p>
+    <pre><code>Host: api.example.com                        &rarr; api-servers
+Host: example.com, path starts with /static/ &rarr; static-file servers
+Host: example.com, path = /health            &rarr; answered by proxy itself
+method = POST, path matches ^/upload/.*$     &rarr; upload-servers</code></pre>
+    <p>Match dimensions stack: <strong>host</strong> (virtual hosting &mdash; one IP serving many domains, read from the <code>Host</code> header), <strong>path</strong> (exact, prefix, wildcard, regex), and <strong>method</strong>. The engine evaluates them in a defined <strong>precedence order</strong>, because multiple routes usually match:</p>
+    <ol class="flow">
+      <li><strong>Exact path match</strong> beats everything: <code>/api/users</code>.</li>
+      <li><strong>Longest prefix match</strong> next: <code>/api/users/</code> beats <code>/api/</code> beats <code>/</code>. ("Most specific wins" &mdash; same logic as IP routing tables.)</li>
+      <li><strong>Regex routes</strong> in configuration order (first match wins) &mdash; this is Nginx's model.</li>
+      <li><strong>Catch-all</strong> (<code>/</code>) as the default backstop.</li>
+    </ol>
+    <div class="callout analogy"><strong>Analogy:</strong> a mailroom sorting letters. "Addressed exactly to the CEO" (exact) is checked before "anything for the finance floor" (prefix), before "anything mentioning invoices anywhere on the envelope" (regex), before "everything else goes to the front office" (catch-all).</div>
+  </article>
+  <article class="concept">
+    <h3>How routing engines work internally</h3>
+    <table>
+      <thead><tr><th>Data structure</th><th>Lookup cost</th><th>Used by</th><th>Trade-off</th></tr></thead>
+      <tbody>
+        <tr><td>Linear scan of route list</td><td>O(routes)</td><td>Your v1; fine &lt;100 routes</td><td>Trivially correct, easy precedence; slow at scale</td></tr>
+        <tr><td>Hash map (exact matches)</td><td>O(1)</td><td>Everyone, for exact hosts/paths</td><td>Only exact matches</td></tr>
+        <tr><td><strong>Trie / radix tree</strong> on path segments</td><td>O(path length)</td><td>Nginx locations, Envoy, most Go routers</td><td>Prefix matching is free &mdash; longest match falls out of the walk naturally</td></tr>
+        <tr><td>Compiled regex set</td><td>O(path length) amortized</td><td>Nginx regex locations, Envoy safe-regex</td><td>Compile once at config load, never per request</td></tr>
+      </tbody>
+    </table>
+    <p>The production pattern is a hybrid: hash for exact, radix trie for prefixes, ordered regex list as fallback. Route tables are built <strong>once at config load</strong> into an immutable structure that request tasks read lock-free (in Rust: <code>Arc&lt;RouteTable&gt;</code>, swapped atomically on reload &mdash; foreshadowing Level 12's hot reload).</p>
+  </article>
+  <div class="callout warn"><strong>Common mistakes:</strong> (1) matching on the raw path without normalizing &mdash; <code>/api/../admin</code> must be canonicalized <em>before</em> route matching or attackers route around your rules (this reappears in Level 13 as path-traversal detection). (2) Recompiling regexes per request. (3) Undefined behavior when two routes tie &mdash; precedence must be explicit and documented.</div>
+</section>
+
+<section id="level-3">
+  <h2>Level 3 &middot; Load Balancing</h2>
+  <p class="lead">Routing chose a backend <em>group</em>; load balancing picks the <em>instance</em>. The goal: spread work so no server drowns while others idle.</p>
+  <article class="concept">
+    <h3>The algorithm menu</h3>
+    <table>
+      <thead><tr><th>Algorithm</th><th>How it picks</th><th>Cost</th><th>Best for</th><th>Weakness</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Round Robin</strong></td><td>Next server in rotation (atomic counter mod N)</td><td>O(1)</td><td>Homogeneous servers, uniform requests</td><td>Ignores that requests differ in cost</td></tr>
+        <tr><td><strong>Weighted RR</strong></td><td>Rotation honoring capacity weights (big box gets 3 of every 4)</td><td>O(1) amortized</td><td>Mixed hardware</td><td>Naive versions send bursts; Nginx uses <em>smooth</em> WRR to interleave</td></tr>
+        <tr><td><strong>Random</strong></td><td>Uniform random pick</td><td>O(1)</td><td>Many proxies sharing backends &mdash; no coordination, no shared counter</td><td>Short-term imbalance</td></tr>
+        <tr><td><strong>Least Connections</strong></td><td>Server with fewest in-flight requests</td><td>O(N) scan (or O(log N) heap)</td><td>Long-lived / variable-cost requests</td><td>Needs accurate live counters; "power of two choices" variant fixes herd effects</td></tr>
+        <tr><td><strong>Least Response Time</strong></td><td>Lowest moving-average latency (often &times; connections)</td><td>O(N)</td><td>Latency-sensitive traffic</td><td>Feedback loops: a briefly-fast server gets stampeded</td></tr>
+        <tr><td><strong>IP Hash</strong></td><td><code>hash(client IP) mod N</code></td><td>O(1)</td><td>Cheap session affinity (same client &rarr; same server)</td><td>NAT lumps thousands behind one IP; N changing remaps <em>everyone</em></td></tr>
+        <tr><td><strong>Consistent Hashing</strong></td><td>Hash ring with virtual nodes</td><td>O(log N)</td><td>Cache-friendly affinity, elastic pools</td><td>More complex; imbalance without enough virtual nodes</td></tr>
+      </tbody>
+    </table>
+    <div class="callout"><strong>Random beats smart, surprisingly often:</strong> the "power of two random choices" result &mdash; pick two servers at random, use the less-loaded one &mdash; gets you close to least-connections quality with O(1) cost and no full scan. Envoy ships it as a first-class policy. Interviewers love this one.</div>
+  </article>
+  <article class="concept">
+    <h3>Consistent hashing, the 5-minute version</h3>
+    <p>The problem with <code>mod N</code>: when N changes 4&rarr;5, <em>80%</em> of keys remap. Any cache affinity you had is annihilated at exactly the wrong moment (scaling events). Consistent hashing fixes this:</p>
+    <ol class="flow">
+      <li>Imagine hash outputs arranged on a circle (0 to 2&sup3;&sup2;&minus;1, wrapping).</li>
+      <li>Place each server on the circle at <code>hash(server_id)</code> &mdash; actually at ~100&ndash;200 points each (<strong>virtual nodes</strong>, to smooth out imbalance).</li>
+      <li>For a request, compute <code>hash(key)</code> and walk clockwise to the first server point. That's your pick.</li>
+      <li>Adding/removing a server only remaps the keys in <em>its</em> arc segments: ~1/N of traffic, not 80%.</li>
+    </ol>
+    <pre class="art">
+              hash ring (clockwise)
+                     0/2^32
+               S3 .---------. S1
+                 /           \
+                |   key K --&gt;|--&gt; lands here, walk clockwise,
+               S2\           /S1'    first server point is S1'
+                  '---------'     (S1' = virtual node of S1)
+   remove S2: only keys in S2's arcs move; S1/S3 traffic untouched
+    </pre>
+    <p>Nginx offers it as <code>hash $key consistent</code> (ketama); Envoy as ring-hash and the cheaper Maglev table variant. In Rust, the ring is a sorted <code>Vec&lt;(u32, ServerId)&gt;</code> + binary search &mdash; that's the O(log N).</p>
+  </article>
+  <article class="concept">
+    <h3>Session affinity &amp; the shared-state problem</h3>
+    <p><strong>Affinity ("sticky sessions")</strong> means one client keeps hitting one server &mdash; needed when servers hold local state (in-memory sessions, WebSocket rooms). Options: IP hash (crude), consistent hash on a cookie (better), or a proxy-issued affinity cookie (what ALB does). The modern stance: <em>make backends stateless and stop needing affinity</em> &mdash; but proxies must support it because the world is not modern.</p>
+    <p><strong>Rust concept unlocked here:</strong> the balancer is the first <em>shared mutable state</em> across your connection tasks (RR counter, connection counts). You'll meet <code>Arc&lt;AtomicUsize&gt;</code> (RR), <code>Arc&lt;RwLock&lt;Vec&lt;Backend&gt;&gt;&gt;</code> (server lists that health checks mutate), and learn why a <code>Mutex</code> around the whole pool would serialize your beautiful concurrent proxy into a queue.</p>
+  </article>
+  <div class="callout warn"><strong>Failure scenarios to design for:</strong> all algorithms assume "up" servers &mdash; without Level 4's health checks, RR happily sends every Nth request into a dead machine. Least-connections has a morbid failure mode: a <em>fast-failing</em> server finishes "requests" instantly, always has zero connections, and therefore attracts <em>all</em> traffic (the "black hole" effect). Health checking isn't optional.</div>
+</section>
+
+<section id="level-4">
+  <h2>Level 4 &middot; Health Checks &amp; Circuit Breakers</h2>
+  <p class="lead">Servers fail constantly &mdash; deploys, OOM kills, network partitions. A proxy that keeps sending traffic to a corpse turns one server's failure into every user's outage.</p>
+  <article class="concept">
+    <h3>Two ways to learn a backend is sick</h3>
+    <div class="grid2">
+      <div class="card"><span class="tag tech">Active</span><h4>Active health checks</h4><p><strong>The proxy probes on a timer:</strong> every N seconds, send <code>GET /health</code> to each backend; expect 200 within a timeout. Fail K consecutive probes &rarr; mark <em>down</em>; pass M probes &rarr; mark <em>up</em> again.</p><p><strong>Pro:</strong> detects failure even with zero traffic. <strong>Con:</strong> probe traffic scales with fleet size; a passing <code>/health</code> doesn't prove real requests work.</p></div>
+      <div class="card"><span class="tag tech">Passive</span><h4>Passive (outlier detection)</h4><p><strong>Watch real traffic:</strong> count errors and timeouts per backend; too many in a window &rarr; eject it temporarily. Envoy calls this <em>outlier detection</em>.</p><p><strong>Pro:</strong> free, and measures what actually matters. <strong>Con:</strong> real users are your canaries; needs traffic to detect anything.</p></div>
+    </div>
+    <p>Production systems run <strong>both</strong>: active checks as the baseline heartbeat, passive ejection to catch what probes miss. The counters that health checks flip are the same <code>Arc&lt;RwLock&lt;...&gt;&gt;</code> backend list your Level 3 balancer reads &mdash; your first real writer-vs-many-readers concurrency problem.</p>
+  </article>
+  <article class="concept">
+    <h3>Retries, backoff, and the retry storm</h3>
+    <p>A request fails &mdash; try another backend, right? Yes, but with three guards, or retries <em>cause</em> outages:</p>
+    <ol class="flow">
+      <li><strong>Only retry what's safe.</strong> Connection refused before sending the request: always retryable. Timeout after sending a <code>POST /charge-card</code>: retrying might double-charge. Rule of thumb: retry idempotent methods (GET, HEAD, PUT, DELETE), or any request that provably never reached a backend.</li>
+      <li><strong>Cap the budget.</strong> Max 2&ndash;3 attempts, and cap <em>fleet-wide</em> retries as a percentage of traffic (Envoy's retry budgets) &mdash; otherwise a 50%-degraded fleet gets doubled traffic from retries, and dies completely.</li>
+      <li><strong>Exponential backoff + jitter</strong> for anything on a timer (reconnects, probe intervals after failure): wait 1s, 2s, 4s, 8s&hellip; with randomization. Without jitter, every client that failed together retries together &mdash; the <em>thundering herd</em>.</li>
+    </ol>
+    <div class="formula">delay = min(cap, base &times; 2&#8319;) &times; random(0.5&hellip;1.5)&emsp;&mdash; exponential backoff with jitter</div>
+  </article>
+  <article class="concept">
+    <h3>The circuit breaker</h3>
+    <p>Borrowed from electrical wiring: when a circuit is clearly broken, stop sending current through it. A per-backend state machine:</p>
+    <figure>
+    <pre class="mermaid">
+stateDiagram-v2
+    [*] --&gt; Closed
+    Closed --&gt; Open : failures exceed threshold
+    Open --&gt; HalfOpen : cool-down timer expires
+    HalfOpen --&gt; Closed : trial request succeeds
+    HalfOpen --&gt; Open : trial request fails
+    Closed : Closed = normal, requests flow, count failures
+    Open : Open = fail fast instantly, send nothing
+    HalfOpen : HalfOpen = allow one trial request through
+    </pre>
+    <figcaption>The circuit breaker state machine. "Fail fast" in Open state is the point: a rejected request costs microseconds; a timing-out request costs 30 seconds of a client's life and one of your connection slots.</figcaption>
+    </figure>
+    <p>Why it matters: failing <em>slowly</em> is the killer. If a dead backend has a 30s connect timeout and you keep trying it, every unlucky request eats 30 seconds and holds buffers, sockets, and a task the whole time &mdash; failure propagates <em>backwards</em> into your proxy as resource exhaustion. The breaker converts slow failure into instant failure, which systems survive.</p>
+  </article>
+  <div class="callout warn"><strong>Common mistakes:</strong> (1) health-check flapping &mdash; use different thresholds for down (fail 3) vs up (pass 2), never 1/1. (2) Marking the <em>last</em> backend down and having nothing to serve &mdash; decide the policy: serve errors, or "fail open" and try a down server as last resort (Nginx does the latter). (3) Retrying non-idempotent requests. (4) All proxies probing all backends at the same instant &mdash; stagger probe start times.</div>
+</section>
+
+<section id="level-5">
+  <h2>Level 5 &middot; Proxy Headers &amp; Rewriting</h2>
+  <p class="lead">Terminating connections has a side effect: the backend no longer sees the client &mdash; it sees <em>you</em>. Proxy headers are how you tell the backend the truth it can no longer observe.</p>
+  <article class="concept">
+    <h3>The identity problem</h3>
+    <p>To the backend, every TCP connection now comes from the proxy's IP. Without help: logs show one "user," rate limiting throttles the proxy itself, geo-features locate everyone in your datacenter, and <code>https</code>-only redirects loop forever (backend sees plain HTTP from the proxy). The fix is a set of conventional request headers the proxy <em>adds</em>:</p>
+    <table>
+      <thead><tr><th>Header</th><th>Carries</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td><code>X-Forwarded-For</code></td><td>Client IP chain: <code>client, proxy1, proxy2</code></td><td>Each proxy <em>appends</em> the address it accepted from. Leftmost = original client&hellip; allegedly (see below).</td></tr>
+        <tr><td><code>X-Real-IP</code></td><td>Just the immediate client IP</td><td>Nginx convention; simpler, no chain.</td></tr>
+        <tr><td><code>X-Forwarded-Proto</code></td><td><code>https</code> or <code>http</code> as the client used</td><td>Critical after TLS termination &mdash; backend sees plaintext but must generate <code>https://</code> URLs.</td></tr>
+        <tr><td><code>X-Forwarded-Host</code></td><td>Original <code>Host</code> the client sent</td><td>Needed if the proxy rewrites <code>Host</code> for the backend.</td></tr>
+        <tr><td><code>Forwarded</code> (RFC 7239)</td><td>All of the above, standardized: <code>for=1.2.3.4;proto=https;host=example.com</code></td><td>The official version nobody quite migrated to. Support reading it; the X- headers rule in practice.</td></tr>
+      </tbody>
+    </table>
+    <div class="callout danger"><strong>The security rule that everyone gets wrong once:</strong> clients can <em>send</em> a forged <code>X-Forwarded-For</code> themselves. If your proxy blindly appends, the chain starts with a lie (<code>attacker-chosen-IP, real-IP</code>) &mdash; and backends that naively "take the leftmost value" for rate limiting or IP allowlists are spoofable. Correct policy at the trust boundary (the first proxy): <strong>strip or overwrite</strong> inbound X-Forwarded-* from untrusted clients, then append the socket-observed peer address. Backends should trust only the rightmost N entries, where N = number of proxies you control.</div>
+  </article>
+  <article class="concept">
+    <h3>Rewriting: URL, Host, and header surgery</h3>
+    <p>The proxy often presents a different universe to the backend than the client sees:</p>
+    <ul>
+      <li><strong>Path rewriting:</strong> client requests <code>/api/v2/users</code>; the API service expects <code>/users</code> &mdash; strip the routing prefix before forwarding. (Watch for double-slash and empty-path edge cases: <code>/api/v2</code> &rarr; <code>/</code>, not <code>``</code>.)</li>
+      <li><strong>Host rewriting:</strong> forward with <code>Host: internal-api.local</code> when the backend virtual-hosts by a different name than the public one. Preserve the original in <code>X-Forwarded-Host</code>.</li>
+      <li><strong>Hop-by-hop header removal:</strong> HTTP defines headers that describe <em>one connection</em>, not the message: <code>Connection</code>, <code>Keep-Alive</code>, <code>Transfer-Encoding</code>, <code>Upgrade</code>, <code>Proxy-Authorization</code>, <code>TE</code>, <code>Trailer</code>. A correct proxy <strong>must strip them</strong> and generate its own for the backend leg &mdash; forwarding a client's <code>Connection: close</code> verbatim would close your pooled backend connection; mishandling <code>Transfer-Encoding</code> is the literal mechanism of request smuggling.</li>
+    </ul>
+    <p><strong>Rust concepts:</strong> header manipulation is an ownership playground &mdash; efficiently editing a parsed request without cloning every header teaches <code>Vec&lt;(HeaderName, Value)&gt;</code> surgery, <code>Cow&lt;'_, str&gt;</code> for maybe-modified values, and why zero-copy parsing (borrowing from the read buffer) fights with mutation (needing owned data). Most real proxies compromise: borrow while inspecting, allocate when rewriting.</p>
+  </article>
+</section>
+
+<section id="level-6">
+  <h2>Level 6 &middot; Middleware</h2>
+  <p class="lead">Auth, logging, rate limiting, compression&hellip; none of these belong in your core forwarding loop. Middleware is the architecture that lets features stack like Lego instead of tangling like spaghetti.</p>
+  <article class="concept">
+    <h3>The onion model</h3>
+    <p>A middleware wraps request handling: it sees the request <em>on the way in</em> (before inner layers) and the response <em>on the way out</em> (after them). Layers compose into an onion around the core proxy handler:</p>
+    <pre class="art">
+ request &rarr; [ logging [ request-ID [ auth [ rate-limit [ PROXY CORE ] ] ] ] ] &rarr; response
+              |          |            |        |             |
+              in: start  in: gen ID   in: 401? in: 429?      forward to backend
+              out: log   out: header  out: -   out: -        &larr; response bubbles out
+    </pre>
+    <p>Two contracts every middleware honors: it can <strong>short-circuit</strong> (auth failure returns 401 immediately &mdash; inner layers and the backend never run), and it must <strong>pass through</strong> otherwise, possibly annotating the request (request ID) or the response (server header). Order matters and is config-defined: rate-limit <em>before</em> auth if you want to throttle password-guessing; after, if limits are per-user.</p>
+    <div class="callout analogy"><strong>Analogy:</strong> airport security layers. Ticket check &rarr; passport control &rarr; baggage scan &rarr; gate. Each station can reject you (short-circuit), stamp you (annotate), or wave you through. The airline (backend) only ever meets passengers who passed every station &mdash; and the stations don't know about each other, which is exactly the point.</div>
+  </article>
+  <article class="concept">
+    <h3>Designing the trait (the Rust heart of this level)</h3>
+    <p>This level is where Rust's type system earns its keep. The design space, roughly the same one Tower (the ecosystem's service abstraction) navigates:</p>
+    <ul>
+      <li><strong>A <code>Middleware</code> trait</strong> with an async <code>handle(request, next) &rarr; Response</code> where <code>next</code> invokes the rest of the chain &mdash; the onion made explicit.</li>
+      <li><strong>Dynamic dispatch</strong> (<code>Vec&lt;Box&lt;dyn Middleware&gt;&gt;</code>): config-driven ordering, one vtable hop per layer. This is your v1 &mdash; flexible and fast enough.</li>
+      <li><strong>Static composition</strong> (nested generics, how Tower's <code>ServiceBuilder</code> works): zero-cost, monomorphized&hellip; and the compile errors are legendary. Understand it; don't start there.</li>
+      <li><strong>Async traits</strong>: async fns in traits need care (they desugar to returning futures; trait objects need boxing &mdash; <code>async-trait</code> crate or manual <code>Pin&lt;Box&lt;dyn Future&gt;&gt;</code>). This level teaches <em>why</em> that boxing exists.</li>
+    </ul>
+    <h4>Rate limiting: the flagship middleware</h4>
+    <p>The industry algorithm is <strong>token bucket</strong>: a bucket holds up to <code>burst</code> tokens, refilled at <code>rate</code> tokens/sec; each request takes one token or gets 429. It allows short bursts while capping the sustained rate &mdash; unlike a fixed 10-per-second window, which allows 20 back-to-back at a window boundary (the classic fixed-window flaw). Per-client buckets live in a concurrent map keyed by client IP (from Level 5's <em>trusted</em> XFF logic &mdash; the levels interlock).</p>
+  </article>
+  <div class="callout"><strong>Production comparison:</strong> Nginx has fixed <em>phases</em> (rewrite &rarr; access &rarr; content &rarr; log) that modules hook into; Envoy has an explicit ordered <em>filter chain</em>, closest to what you're building; Traefik/Caddy do config-composed middleware chains like your <code>Vec&lt;Box&lt;dyn&gt;&gt;</code>. Every mature proxy converged on the same idea: an ordered pipeline of composable interceptors around a forwarding core.</div>
+</section>
+
+<section id="level-7">
+  <h2>Level 7 &middot; Performance</h2>
+  <p class="lead">Correct is table stakes. This level is about the difference between "works with 10 curls" and "works with 10,000 concurrent connections without falling over."</p>
+  <article class="concept">
+    <h3>Connection pooling: the biggest single win</h3>
+    <p>Without pooling, every proxied request pays a fresh TCP handshake to the backend (+TLS handshake if the backend leg is encrypted &mdash; far worse). With pooling, finished backend connections go into a per-backend idle pool and the next request reuses one:</p>
+    <pre class="art">
+  no pool:   [req] --SYN,SYNACK,ACK--&gt; backend   every request pays ~1 RTT
+                                                  (+2 RTT TLS) before byte one
+  pooled:    [req] --&gt; idle conn from pool --&gt; backend   0 RTT setup
+             done  --&gt; conn returns to pool (if reusable)
+    </pre>
+    <p>The rules that make pools correct, not just fast: a connection returns to the pool only if the response was <em>fully read</em> and neither side sent <code>Connection: close</code>; pools need a max size (don't hold 10,000 idle sockets), an idle timeout (backends kill silent connections &mdash; stale pooled conns cause mysterious resets), and a health rule (a conn that just errored doesn't go back). In Rust this is a classic <code>Arc&lt;Mutex&lt;Vec&lt;Idle&gt;&gt;&gt;</code>-per-backend with an RAII guard that returns the connection on drop.</p>
+  </article>
+  <article class="concept">
+    <h3>Timeouts: every await gets a deadline</h3>
+    <p>An await without a timeout is a resource leak with a delay. The full set, each protecting a different phase:</p>
+    <table>
+      <thead><tr><th>Timeout</th><th>Protects against</th><th>Typical value</th></tr></thead>
+      <tbody>
+        <tr><td>Client header read</td><td>Slowloris: clients trickling a byte a minute to hold sockets open (also Level 8)</td><td>5&ndash;30 s</td></tr>
+        <tr><td>Backend connect</td><td>Dead/blackholed backends eating 2-minute kernel TCP timeouts</td><td>1&ndash;5 s</td></tr>
+        <tr><td>Backend response (first byte / total)</td><td>Hung application code</td><td>seconds&ndash;minutes, route-specific</td></tr>
+        <tr><td>Client/backend idle (keep-alive)</td><td>Idle sockets accumulating forever</td><td>15&ndash;120 s</td></tr>
+      </tbody>
+    </table>
+    <p>In Tokio: <code>tokio::time::timeout(dur, future)</code> wraps any await. The subtle part is <em>what you do after</em> &mdash; a timed-out backend connection must be dropped, not pooled (its state is unknown).</p>
+  </article>
+  <article class="concept">
+    <h3>Memory: buffers, allocation, and copies</h3>
+    <ul>
+      <li><strong>Buffer reuse:</strong> allocating fresh 8 KB read buffers per request hammers the allocator. Reuse per-connection buffers across keep-alive requests; the <code>bytes</code> crate's <code>Bytes</code>/<code>BytesMut</code> give cheap reference-counted slicing of one buffer (zero-copy views of header values into the read buffer).</li>
+      <li><strong>Streaming copy loops</strong> (from Level 1) keep per-connection memory flat. Your memory budget is roughly <code>connections &times; (2 buffers + task stack)</code> &mdash; at 10k connections with 2&times;16 KB buffers, ~320 MB of buffers alone. Buffer size is a real dial.</li>
+      <li><strong>True zero-copy:</strong> kernels can splice socket-to-socket without data touching userspace (<code>splice()</code>/<code>sendfile()</code>). L7 proxies mostly <em>can't</em> use it for headers (they must inspect), but can for large streamed bodies after the headers are parsed. Know it exists; measure before reaching for it.</li>
+      <li><strong>Lock contention:</strong> shared state (pool mutexes, metrics counters) becomes the bottleneck as cores multiply. Weapons: shard the state (per-core pools), atomics over mutexes for counters, <code>RwLock</code> for read-mostly config, never hold a lock across an <code>.await</code> (deadlock-adjacent and stalls the executor).</li>
+    </ul>
+    <div class="callout"><strong>Throughput vs latency &mdash; they fight:</strong> batching, bigger buffers, and Nagle's algorithm raise throughput but add latency; <code>TCP_NODELAY</code> (which proxies enable) and small buffers cut latency but cost syscalls. Nginx is event-driven precisely because at 10k connections, thread-per-connection dies on memory and context-switch overhead &mdash; the C10K problem. Tokio gives you the same event-driven substrate with task-shaped ergonomics; Level 9 shows the machinery.</div>
+  </article>
+  <div class="callout warn"><strong>Measure, don't guess:</strong> benchmark with <code>wrk</code> or <code>oha</code> before and after every optimization. The profile will surprise you &mdash; it's usually syscall count or allocator pressure, not the code you thought. <code>cargo flamegraph</code> is your friend. Also: raise the file-descriptor limit (<code>ulimit -n</code>) before any 10k-connection test, or you'll benchmark your OS's error path.</div>
+</section>
+
+<section id="level-8">
+  <h2>Level 8 &middot; Security &amp; TLS</h2>
+  <p class="lead">The proxy is the one machine you deliberately expose to every stranger on the internet. This level makes that survivable: encrypted transport and armored defaults.</p>
+  <article class="concept">
+    <h3>TLS termination</h3>
+    <p><strong>Termination</strong> means the proxy holds the certificates and private keys, performs the TLS handshake with clients, and decrypts traffic &mdash; backends receive plaintext HTTP (or re-encrypted traffic, below). Why terminate at the proxy? One place to manage certs and rotate keys, hardware/CPU concentrated where it's needed, and the proxy <em>must</em> decrypt anyway to route by path or inspect for the WAF.</p>
+    <pre class="art">
+   client ==== TLS (encrypted) ====&gt; [proxy: decrypt] ---- plaintext ----&gt; backend
+                                          |
+                              certificates + private keys
+                                     live here only
+
+   variants:  re-encrypt:  proxy ==== new TLS ====&gt; backend   (zero-trust networks)
+              passthrough: proxy routes by SNI only, never decrypts (L4 mode)
+    </pre>
+    <p>The handshake itself (TLS 1.3, one round trip): client sends supported ciphers + <strong>SNI</strong> (Server Name Indication &mdash; the hostname, in cleartext, which is how one proxy IP serves certs for many domains); server replies with its certificate and key-exchange material; both derive symmetric session keys via ECDHE. The asymmetric crypto happens once per handshake; the bulk traffic uses cheap symmetric AES-GCM/ChaCha20. <strong>Session resumption</strong> lets returning clients skip most of it &mdash; a big deal at scale.</p>
+    <p><strong>In Rust:</strong> <code>rustls</code> (a memory-safe TLS stack, no OpenSSL C code) + <code>tokio-rustls</code>, which wraps your <code>TcpStream</code> into a <code>TlsStream</code>. Beautifully, everything you built in Levels 1&ndash;7 works unchanged on top &mdash; both implement <code>AsyncRead + AsyncWrite</code>, so your proxy core becomes generic over the stream type. This is trait-based design paying off.</p>
+    <h4>Mutual TLS (mTLS)</h4>
+    <p>Normal TLS authenticates the <em>server</em> to the client. mTLS adds the reverse: the client must present a certificate the proxy validates against a trusted CA. Humans-with-browsers rarely use it; service-to-service traffic (Envoy sidecars in a mesh, internal APIs, partner integrations) uses it heavily &mdash; it's authentication without passwords or tokens, at the transport layer.</p>
+  </article>
+  <article class="concept">
+    <h3>Armoring the front door</h3>
+    <div class="grid2">
+      <div class="card"><span class="tag adv">Attack</span><h4>Slowloris</h4><p>Hundreds of connections each sending one header byte per minute &mdash; never finishing, never idle, holding your sockets forever. <strong>Defense:</strong> header-read deadline (whole request line + headers within N seconds), cap on connections per source IP, and a global connection ceiling with LRU eviction of the stalest.</p></div>
+      <div class="card"><span class="tag adv">Attack</span><h4>Resource exhaustion</h4><p>A 10 GB request body, a 1 MB header line, 10,000 headers. <strong>Defense:</strong> hard limits on request-line length (~8 KB), header count and total size (~16&ndash;64 KB), and body size (per-route: an upload route allows more than an API route). Reject with 431/413, don't buffer then decide.</p></div>
+      <div class="card"><span class="tag tech">Control</span><h4>IP allow/deny lists</h4><p>Deny lists block known-bad sources (fed by Level 13's reputation logic); allow lists gate admin paths to office/VPN ranges. Implementation detail that matters: match against CIDR ranges, not exact IPs, and check the <em>socket</em> peer address, never client-supplied headers.</p></div>
+      <div class="card"><span class="tag tech">Posture</span><h4>Secure defaults</h4><p>TLS 1.2 minimum (1.3 preferred), strong cipher allowlist, timeouts on by default, size limits on by default, server-version header suppressed. The theme: the config a lazy user gets must be the safe one &mdash; Caddy won mindshare largely on this principle (HTTPS automatic, defaults hardened).</p></div>
+    </div>
+  </article>
+  <div class="callout danger"><strong>Common mistakes:</strong> (1) reading the whole body <em>then</em> checking the size limit &mdash; the damage is done; enforce while streaming. (2) Private keys readable by the world (<code>chmod 600</code>, and never in git). (3) Forgetting that limits apply to <em>responses</em> too when backends are semi-trusted. (4) Building your own crypto or hand-rolling cert parsing &mdash; use rustls; this is the one level where "from scratch" stops at the library boundary, deliberately.</div>
+</section>
+
+<section id="level-9">
+  <h2>Level 9 &middot; OS Internals: What Async Actually Is</h2>
+  <p class="lead">You've written <code>stream.read(&amp;mut buf).await</code> a hundred times by now. This level opens the floor and shows the machinery: non-blocking sockets, epoll/kqueue, and the Tokio runtime as a well-organized event loop.</p>
+  <article class="concept">
+    <h3>The problem: read() blocks</h3>
+    <p>A normal <code>read()</code> on a socket with no data <strong>parks the calling thread</strong> until bytes arrive. Thread-per-connection at 10k connections means 10k threads: gigabytes of stacks, and the scheduler melts (the C10K problem, historically). The fix is to change the question:</p>
+    <div class="callout"><strong>Blocking asks:</strong> "give me data on THIS socket, I'll wait." <strong>Event-driven asks:</strong> "here are 10,000 sockets &mdash; wake me when ANY has data." One thread now serves them all, sleeping until there is actual work.</div>
+    <p>Two ingredients: (1) set sockets <code>O_NONBLOCK</code>, so <code>read()</code> with no data returns <code>EWOULDBLOCK</code> immediately instead of parking; (2) a kernel <strong>readiness API</strong> to sleep until something is ready. The evolution of that API is the whole story:</p>
+    <table>
+      <thead><tr><th>API</th><th>Model</th><th>Cost per wait</th><th>Fatal flaw / why it won</th></tr></thead>
+      <tbody>
+        <tr><td><code>select()</code> (1983)</td><td>Pass a bitmask of FDs each call</td><td>O(n) scan, ~1024 FD cap</td><td>Kernel re-scans every FD every call; the cap is compiled in</td></tr>
+        <tr><td><code>poll()</code> (1986)</td><td>Pass an array of FDs each call</td><td>O(n) scan, no cap</td><td>Still re-passes and re-scans everything each time</td></tr>
+        <tr><td><strong><code>epoll</code></strong> (Linux, 2002)</td><td>Register FDs <em>once</em> in a kernel object; <code>epoll_wait()</code> returns only ready ones</td><td><strong>O(ready)</strong></td><td>Kernel keeps the interest list; waiting costs nothing per idle FD. This is why 10k idle connections are cheap</td></tr>
+        <tr><td><strong><code>kqueue</code></strong> (BSD/macOS, 2000)</td><td>Same idea, arguably cleaner API (kevent for files, signals, timers too)</td><td>O(ready)</td><td>What Tokio uses <em>on your Mac</em></td></tr>
+        <tr><td>IOCP (Windows) / io_uring (modern Linux)</td><td><em>Completion</em>-based: "start this read; tell me when it's DONE" (vs "tell me when I <em>may</em> read")</td><td>O(done), fewer syscalls</td><td>io_uring batches submissions/completions in shared-memory rings &mdash; the current performance frontier</td></tr>
+      </tbody>
+    </table>
+  </article>
+  <article class="concept">
+    <h3>From epoll to async/await: the Tokio stack</h3>
+    <p>An <code>async fn</code> compiles to a <strong>state machine</strong> (an anonymous type implementing <code>Future</code>). Each <code>.await</code> is a possible pause point where the machine returns <code>Poll::Pending</code> and parks. Nothing runs in the background &mdash; a future is inert until <em>polled</em>. The layers that do the polling:</p>
+    <ol class="flow">
+      <li><strong>Your task</strong> calls <code>stream.read(buf).await</code>. Tokio's <code>TcpStream</code> tries the non-blocking <code>read()</code> syscall right now. Data available? Return it &mdash; no waiting, no magic.</li>
+      <li><strong><code>EWOULDBLOCK</code>?</strong> The future registers interest &mdash; "wake task #417 when FD 12 is readable" &mdash; with the runtime's <strong>reactor</strong> (mio, wrapping epoll/kqueue), stores a <code>Waker</code>, and returns <code>Pending</code>. The task is now parked: zero CPU, ~KBs of memory (its state machine), no thread held.</li>
+      <li><strong>The executor</strong> (Tokio's scheduler) runs other ready tasks on its worker threads (one per core, with <strong>work stealing</strong>: idle workers steal queued tasks from busy ones).</li>
+      <li><strong>Kernel sees bytes arrive</strong> on FD 12. The reactor's <code>epoll_wait</code>/<code>kevent</code> call returns; the reactor looks up FD 12 &rarr; calls <code>waker.wake()</code> &rarr; task #417 goes back on a run queue.</li>
+      <li><strong>The executor re-polls</strong> task #417; the state machine resumes exactly at the await point; this time <code>read()</code> returns data; execution continues to the next await. Repeat forever.</li>
+    </ol>
+    <pre class="art">
+   your async fn  ==compiles to==&gt;  state machine (Future)
+        |                                  |
+   .await point                    Poll::Pending + register Waker
+        |                                  |
+   [ EXECUTOR: worker threads, run queues, work stealing ]
+        |                                  ^
+   parks task                        wake(task)
+        |                                  |
+   [ REACTOR (mio): one epoll/kqueue instance, FD -&gt; Waker map ]
+        |                                  ^
+   epoll_ctl(ADD, fd)              epoll_wait() returns: fd 12 readable
+        +----------------- KERNEL ---------+
+    </pre>
+    <div class="callout analogy"><strong>Analogy:</strong> a restaurant with one waiter (per core) and pagers. Blocking I/O = the waiter stands at your table until you decide your order. Async = the waiter hands you a pager and serves others; the kitchen bell (epoll) tells them which pager to buzz. The waiter never stands idle at a silent table &mdash; and 10,000 tables need only as many waiters as there are simultaneously <em>talking</em> tables.</div>
+    <div class="callout warn"><strong>The cardinal sin: blocking the executor.</strong> A synchronous <code>std::fs</code> read, a CPU-heavy regex, a <code>Mutex</code> held across an await &mdash; any of these freezes a worker thread, and every task queued on it stalls (your p99 latency spikes mysteriously). Rules: use <code>tokio::fs</code>/<code>spawn_blocking</code> for sync work, keep lock hold times tiny and never across <code>.await</code>, and remember async helps <em>I/O-bound</em> work only &mdash; CPU-bound work needs threads, not futures.</div>
+  </article>
+  <p><strong>Nginx, revisited:</strong> now you can read its design fluently. One master process (config, signals) forks N single-threaded workers; each worker runs epoll_wait in a loop, with all connection state in explicit C structs instead of compiler-generated state machines. <code>SO_REUSEPORT</code> lets all workers accept on the same port with kernel-level load spreading. Tokio and Nginx are the same architecture &mdash; epoll event loop &mdash; wearing different clothes: Nginx hand-writes the state machines; Rust's compiler writes them for you at zero runtime cost. That's the entire "fearless async" pitch in one sentence.</p>
+</section>
+
+<section id="level-10">
+  <h2>Level 10 &middot; Observability</h2>
+  <p class="lead">At 3 a.m., "the site is slow" is the ticket. Observability is the difference between knowing <em>which backend, which route, which percentile</em> in 30 seconds &mdash; and restarting things at random.</p>
+  <article class="concept">
+    <h3>The three pillars, proxy edition</h3>
+    <div class="grid3">
+      <div class="card"><span class="tag tech">Logs</span><h4>Structured events</h4><p>One JSON line per request (the <em>access log</em>): timestamp, method, path, status, duration, bytes, backend chosen, client IP, request ID. Structured (JSON/logfmt) beats prose because machines aggregate it: <code>jq 'select(.status&gt;=500)'</code> vs regex archaeology. Plus a separate <em>error log</em> for proxy-internal events at leveled severity.</p></div>
+      <div class="card"><span class="tag tech">Metrics</span><h4>Aggregated numbers</h4><p>Counters (requests_total by status/route), gauges (active connections, healthy backends), <strong>histograms</strong> (request duration &mdash; percentiles, not averages!). Cheap enough to record on every request, queryable over months. Exposed on <code>GET /metrics</code> in Prometheus text format for scraping.</p></div>
+      <div class="card"><span class="tag tech">Traces</span><h4>The request's journey</h4><p>Spans with timing per stage (parse &rarr; route &rarr; backend), correlated across services by propagated context headers (W3C <code>traceparent</code>). The proxy's superpower: it's positioned to <em>start</em> the trace and stamp the request ID everything downstream logs.</p></div>
+    </div>
+    <div class="formula">p50 = typical user &emsp; p99 = 1-in-100 users, and your biggest customers hit it hourly &emsp; average = a lie that hides both</div>
+    <p><strong>Why histograms:</strong> an average of 40 ms can hide 1% of requests taking 4 seconds. Prometheus histograms bucket observations (&le;1ms, &le;10ms, &le;100ms&hellip;) so you can compute percentiles across the fleet. Latency is a distribution; treat it as one.</p>
+  </article>
+  <article class="concept">
+    <h3>Implementation notes for your proxy</h3>
+    <ul>
+      <li><strong>Request ID first:</strong> generate a UUID (or accept a trusted inbound one) in the earliest middleware, attach it to every log line for that request, forward it as <code>X-Request-ID</code>, return it in the response. When a user reports an error, this one string finds every relevant log line across every system. Highest value-to-effort ratio in the level.</li>
+      <li><strong>The <code>tracing</code> crate</strong> is Rust's standard: spans (enter/exit with timing) + events (points in time), with structured fields; subscribers format to JSON. It's designed for async &mdash; spans follow tasks across await points, which naive thread-local logging gets wrong.</li>
+      <li><strong>Metrics are shared state done cheap:</strong> atomics (<code>AtomicU64</code> counters) and pre-allocated histogram buckets &mdash; never a mutex on the hot path, never an allocation per request. Your Level 7 instincts apply to your own instrumentation.</li>
+      <li><strong>Timing capture:</strong> record <code>Instant::now()</code> at accept, after parse, after backend connect, at first response byte, at completion &mdash; the deltas (queue time, backend time, transfer time) tell you <em>where</em> slowness lives, which is the entire 3 a.m. question.</li>
+    </ul>
+  </article>
+  <div class="callout"><strong>Production comparison:</strong> Nginx ships a text access log and a bare status module (detailed metrics are the paid tier); Envoy went the other way &mdash; hundreds of Prometheus metrics, native tracing, and that choice is a big reason service meshes standardized on it. HAProxy's runtime stats socket lets you inspect and even reconfigure live. The industry lesson: proxies are the best vantage point in the whole system &mdash; they see every request, every backend, every failure &mdash; so instrument yours like it's the flight recorder, because it is.</div>
+</section>
+
+<section id="level-11">
+  <h2>Level 11 &middot; Caching</h2>
+  <p class="lead">The fastest backend request is the one you never make. A response cache turns your proxy into a shield that absorbs repeated traffic before it touches a backend.</p>
+  <article class="concept">
+    <h3>HTTP's caching contract</h3>
+    <p>HTTP has caching built into the protocol &mdash; your job is to honor it, not invent it. The response headers are instructions from the origin to caches:</p>
+    <table>
+      <thead><tr><th>Header</th><th>Meaning for your cache</th></tr></thead>
+      <tbody>
+        <tr><td><code>Cache-Control: max-age=300</code></td><td>Fresh for 300 s; serve from cache without asking anyone.</td></tr>
+        <tr><td><code>Cache-Control: no-cache</code></td><td>Cache it, but <em>revalidate</em> with the origin before every use (confusingly named &mdash; it does not mean "don't cache").</td></tr>
+        <tr><td><code>Cache-Control: no-store</code></td><td>Never write this to cache at all. (This one means what no-cache sounds like.)</td></tr>
+        <tr><td><code>Cache-Control: private</code> / <code>s-maxage</code></td><td><code>private</code>: browser may cache, shared caches (you!) must not. <code>s-maxage</code>: TTL specifically for shared caches, overrides max-age.</td></tr>
+        <tr><td><code>ETag: "abc123"</code> / <code>Last-Modified</code></td><td>Version identifiers enabling cheap revalidation (below).</td></tr>
+        <tr><td><code>Vary: Accept-Encoding</code></td><td>The response depends on that request header &rarr; it must be part of your cache key, or you'll serve gzip to clients that can't read it.</td></tr>
+      </tbody>
+    </table>
+    <p><strong>Revalidation</strong> is the elegant trick: a stale cached entry isn't discarded &mdash; the proxy asks the origin <code>If-None-Match: "abc123"</code>; if unchanged, the origin answers <code>304 Not Modified</code> with <em>no body</em>, and the proxy re-stamps the cached copy fresh. One tiny round trip instead of re-transferring the payload.</p>
+    <h4>What is safe to cache?</h4>
+    <p>Default: <code>GET</code> (and HEAD) with 200/301/404 status, <em>without</em> <code>Authorization</code> or <code>Set-Cookie</code>, respecting no-store/private. Never cache POST/PUT/DELETE. The cache key: <code>method + host + path + query + each Vary header value</code>. Getting the key wrong is how caches leak one user's data to another &mdash; the worst bug class in this level.</p>
+  </article>
+  <article class="concept">
+    <h3>LRU with TTL: the storage engine</h3>
+    <p>Memory is finite; the cache needs an eviction policy. <strong>LRU</strong> (least-recently-used) is the standard: on insert when full, evict the entry unused the longest. The classic O(1) implementation is a hash map whose values link into a doubly-linked recency list &mdash; lookup via map, bump-to-front via list, evict from back. <strong>TTL</strong> stacks on top: entries also expire by time regardless of popularity (check expiry lazily on lookup, rather than running a sweeper).</p>
+    <p><strong>In Rust</strong>, the linked-list version is famously miserable to write safely (aliasing + mutation = the borrow checker objects &mdash; it's <em>right</em>, LRU aliasing bugs are real CVEs in C). Sane options: index-based arena (Vec slots + integer links), the <code>lru</code> crate, or a sharded map with approximate LRU &mdash; which is what concurrent production caches actually do, because one big <code>Mutex&lt;LruCache&gt;</code> serializes every request through a single lock (Level 7 lesson, again).</p>
+    <div class="callout warn"><strong>Cache stampede (dog-piling):</strong> a popular entry expires; 1,000 concurrent requests all miss and all hit the backend at once &mdash; the cache <em>caused</em> a spike. Defenses: <strong>request coalescing</strong> (first miss fetches; the other 999 wait on it &mdash; "singleflight"), serving stale during refresh (<code>stale-while-revalidate</code>), and TTL jitter so popular keys don't expire simultaneously. Coalescing in Tokio is a lovely exercise: a map of in-flight keys to a shared watch/broadcast channel.</div>
+  </article>
+  <div class="callout analogy"><strong>Analogy:</strong> a coffee shop regulars' board. "Marco always orders a flat white" is pinned (cached) so the barista starts pouring on sight (cache hit). Notes older than a week get re-confirmed with a quick "same as usual?" (revalidation, 304 = thumbs-up). The board holds 20 notes; the least-glanced-at gets erased for new ones (LRU). And "no-store" is the customer who says "never write my order down" &mdash; you make it fresh, every time.</div>
+</section>
+
+<section id="level-12">
+  <h2>Level 12 &middot; Production Features</h2>
+  <p class="lead">The gap between a program and infrastructure: infrastructure changes configuration, upgrades itself, and shuts down &mdash; all without dropping a single in-flight request.</p>
+  <article class="concept">
+    <h3>Graceful shutdown</h3>
+    <p><code>kill -9</code> mid-request means a user's upload dies at 99%. Graceful shutdown is a choreography:</p>
+    <ol class="flow">
+      <li><strong>Catch the signal.</strong> <code>SIGTERM</code> (polite: "please stop") and <code>SIGINT</code> (Ctrl-C). <code>SIGKILL</code> is uncatchable by design &mdash; your process just ceases. In Tokio: <code>tokio::signal</code>, awaited in a select alongside the accept loop.</li>
+      <li><strong>Stop accepting.</strong> Drop/close the listener. New connections get refused (or, in a cluster, go to your peers &mdash; Level 14).</li>
+      <li><strong>Drain.</strong> Let in-flight requests finish; on keep-alive connections, answer the current request with <code>Connection: close</code> and let it end naturally.</li>
+      <li><strong>Deadline.</strong> Wait up to a <em>drain timeout</em> (10&ndash;60 s); whatever is still running gets cut &mdash; a hung client mustn't hold your deploy hostage. Tokio tools: a watch channel broadcasting "shutting down" + task counters, or <code>TaskTracker</code>/<code>JoinSet</code> awaited under <code>tokio::time::timeout</code>.</li>
+    </ol>
+    <h4>Graceful restart: the harder trick</h4>
+    <p>Upgrading the binary with <em>zero</em> refused connections means old and new processes must overlap on the same port. The classic techniques:</p>
+    <ul>
+      <li><strong>FD passing (Nginx):</strong> the old master forks/execs the new binary, passing the listening socket file descriptors through the exec (or over a Unix domain socket with <code>SCM_RIGHTS</code>). New workers accept on the inherited socket; old workers drain and exit. The listen queue never closes, so no connection is ever refused.</li>
+      <li><strong><code>SO_REUSEPORT</code>:</strong> both old and new processes bind the same port simultaneously (the kernel spreads accepts between them); the old one then stops accepting and drains. Simpler; a brief window where both serve.</li>
+      <li><strong>Envoy's hot restart:</strong> a shared-memory handshake between generations &mdash; and notably, in Kubernetes environments people increasingly skip in-process restarts entirely and let the <em>orchestrator</em> roll pods behind a Service. Sometimes the production answer is "this is now the platform's job."</li>
+    </ul>
+  </article>
+  <article class="concept">
+    <h3>Configuration: file, validation, hot reload</h3>
+    <p>Hard-coded addresses die here. A real proxy reads a config file (<strong>TOML</strong> is the Rust-native choice; YAML is what Envoy/Traefik users expect) declaring listeners, routes, upstreams, health checks, limits &mdash; plus CLI arguments (<code>clap</code> crate) for overrides like <code>--config path</code> and <code>--validate</code> (parse-and-exit, like <code>nginx -t</code>; deploy pipelines depend on this).</p>
+    <p><strong>Hot reload</strong> re-reads config without restarting: on <code>SIGHUP</code>, parse and validate the new file &mdash; <em>reject it wholesale if invalid, keeping the old config live</em> &mdash; then atomically swap the active configuration. The Rust pattern is the payoff of Level 2's foreshadowing:</p>
+    <pre><code>active: ArcSwap&lt;Config&gt;          // or RwLock&lt;Arc&lt;Config&gt;&gt;
+request path:  let cfg = active.load();   // cheap clone of Arc, lock-free
+reload path:   active.store(Arc::new(new_cfg));  // swap; old Arc drops
+               // when the last in-flight request using it finishes</code></pre>
+    <p>In-flight requests keep the <code>Arc</code> they started with (a consistent snapshot); new requests see the new config; the old one frees itself when the last holder drops. No locks on the hot path, no torn reads, no restart. This is Rust's ownership model solving a genuinely hard systems problem <em>by construction</em>.</p>
+    <div class="callout"><strong>Worker processes &mdash; do you need them?</strong> Nginx's master/worker split exists partly because C crashes: a segfaulting worker is replaced by the master while others keep serving. In Rust, memory-safety bugs largely can't crash you that way (panics are catchable per-task), so single-process multi-threaded Tokio is the norm (Pingora made this exact argument, plus better connection-pool sharing). Understand the pattern; you likely don't need it.</div>
+  </article>
+</section>
+
+<section id="level-13">
+  <h2>Level 13 &middot; Basic WAF</h2>
+  <p class="lead">A Web Application Firewall is a reverse proxy that grew an immune system: it inspects requests for <em>attack patterns</em>, not just protocol validity. You already built the platform &mdash; the WAF is middleware with opinions.</p>
+  <article class="concept">
+    <h3>What you're detecting</h3>
+    <div class="grid2">
+      <div class="card"><span class="tag adv">Injection</span><h4>SQL injection</h4><p>Input that escapes a query's data context into its code context: <code>' OR 1=1--</code>, <code>UNION SELECT</code>, comment tricks (<code>/**/</code>), stacked queries. Signatures: quotes + SQL keywords + comment sequences in params. Attackers evade with encoding and case games &mdash; hence normalization (below).</p></div>
+      <div class="card"><span class="tag adv">Injection</span><h4>Cross-site scripting (XSS)</h4><p>Input that becomes executable script in someone's browser: <code>&lt;script&gt;</code>, event handlers (<code>onerror=</code>), <code>javascript:</code> URLs. Reflected XSS is visible in the request &mdash; which is why a proxy can catch a useful fraction of it.</p></div>
+      <div class="card"><span class="tag adv">Traversal</span><h4>Path traversal</h4><p><code>../../../etc/passwd</code> &mdash; escaping the web root via <code>..</code> sequences, including encoded (<code>%2e%2e%2f</code>), double-encoded (<code>%252e</code>), and mixed forms. Defense = canonicalize the path fully, <em>then</em> check it (your Level 2 normalization, weaponized).</p></div>
+      <div class="card"><span class="tag adv">Volumetric</span><h4>Bots &amp; abuse</h4><p>Credential stuffing, scraping, scanners. Heuristics: impossible or absent User-Agents, request rates beyond human capability, header fingerprints that don't match the claimed browser, known scanner signatures (sqlmap, nikto). Real products add JS challenges and ML fingerprinting &mdash; your heuristics are their first layer.</p></div>
+    </div>
+    <p>Plus two coarse filters that do outsized work: <strong>IP reputation</strong> (score sources by their own recent behavior: 403s, WAF hits, error rates &rarr; temp-ban repeat offenders; commercial feeds share this across customers) and <strong>geo blocking</strong> (IP&rarr;country lookup against policy; your implementation can mock the GeoIP database with a small table &mdash; the interesting part is the middleware plumbing, not the data file).</p>
+  </article>
+  <article class="concept">
+    <h3>The engine: normalize, then match, then score</h3>
+    <ol class="flow">
+      <li><strong>Normalize first &mdash; this is 80% of WAF quality.</strong> URL-decode (twice, flagging double-encoding), lowercase, collapse whitespace, decode HTML entities, canonicalize the path. Evasion is mostly encoding games; naive regex on raw bytes catches only lazy attackers.</li>
+      <li><strong>Match rules</strong> against each inspected field (path, query params, headers, body samples): compiled regex sets (<code>RegexSet</code> matches all patterns in one pass) plus cheap substring pre-filters (Aho-Corasick) so most-traffic-is-innocent stays fast.</li>
+      <li><strong>Score, don't hair-trigger.</strong> ModSecurity's CRS model: each rule adds points (that lone quote: 2; quote + UNION + comment: 15); block only above a threshold. Anomaly scoring is the difference between a WAF and a false-positive generator that ops teams disable within a week.</li>
+      <li><strong>Act &amp; observe:</strong> block (403), rate-limit, tarpit, or <em>log-only</em> &mdash; every WAF ships in detection mode first, watching real traffic for false positives before enforcement is switched on.</li>
+    </ol>
+    <div class="callout danger"><strong>Honesty checkpoint:</strong> signature WAFs are a speed bump, not a wall &mdash; determined attackers bypass regex rules, and vendors know it (that's why Cloudflare/Barracuda layer ML, reputation networks, and managed rule updates on top). The real fixes for injection live in the application: parameterized queries, output encoding. A WAF buys time during 0-days, blocks the automated 99%, and gives visibility. Build it understanding what it can and cannot promise.</div>
+  </article>
+  <table>
+    <thead><tr><th>Product</th><th>Approach</th><th>Trade-off it chose</th></tr></thead>
+    <tbody>
+      <tr><td><strong>ModSecurity + OWASP CRS</strong></td><td>Open-source rule engine + community ruleset, anomaly scoring</td><td>Maximum transparency/tunability; you own the false-positive tuning burden</td></tr>
+      <tr><td><strong>Cloudflare WAF</strong></td><td>Managed rules + ML + reputation from ~20% of the web's traffic</td><td>Network effect nobody can match; you send them your traffic</td></tr>
+      <tr><td><strong>Barracuda WAF</strong></td><td>Appliance/VM with vendor-managed signatures, DLP, virtual patching</td><td>Turnkey for enterprises; opaque rules, per-appliance scaling</td></tr>
+      <tr><td><strong>Your Level 13</strong></td><td>Normalization + scored regex rules + reputation, as middleware</td><td>You understand every byte of it &mdash; which is the point</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="level-14">
+  <h2>Level 14 &middot; Scalability &amp; High Availability</h2>
+  <p class="lead">One proxy instance, however fast, is a single point of failure with a ceiling. The final level: what changes when "the proxy" becomes "the proxy <em>tier</em>."</p>
+  <article class="concept">
+    <h3>Getting traffic to N proxies</h3>
+    <p>Who balances the load balancers? The real-world answers, usually layered:</p>
+    <ul>
+      <li><strong>DNS:</strong> multiple A/AAAA records, clients pick one (round-robin-ish); health-checked DNS (Route 53) pulls dead IPs. Cheap, but TTL caching makes failover slow and clients disobey TTLs.</li>
+      <li><strong>Virtual IP failover (VRRP/keepalived):</strong> an active proxy holds a floating IP; a standby claims it via gratuitous ARP on failure. Sub-second failover, the classic two-box HAProxy setup &mdash; but active/passive wastes half the hardware and only scales to 2.</li>
+      <li><strong>Anycast:</strong> announce the <em>same</em> IP from many sites via BGP; internet routing delivers each client to the nearest. This is how Cloudflare/Google put one IP everywhere on Earth. Requires owning IP space and BGP; the lesson is the concept.</li>
+      <li><strong>L4 tier over L7 tier:</strong> a thin, nearly-stateless L4 balancer (LVS, Maglev, AWS NLB) spreads flows across your L7 proxies via consistent hashing on the 4-tuple &mdash; each layer does what it's cheapest at. This is the architecture inside every major cloud.</li>
+    </ul>
+    <pre class="art">
+   internet --&gt; [ anycast / DNS ] --&gt; [ L4 tier: consistent-hash flows ]
+                                           |         |         |
+                                        [proxy]   [proxy]   [proxy]     &larr; your rproxy, xN
+                                           \         |         /
+                                            [ backend fleet ]
+    </pre>
+  </article>
+  <article class="concept">
+    <h3>The state problem (and how to dodge it)</h3>
+    <p>N proxies must agree on things you built as single-instance state. The design hierarchy, best first:</p>
+    <ol class="flow">
+      <li><strong>Don't share.</strong> Routing/config: identical files pushed to all instances (or streamed from a control plane, &agrave; la Envoy xDS &mdash; note the pattern: <em>data plane</em> proxies stay simple; a separate <em>control plane</em> handles distributed truth). Health state: let each proxy learn independently &mdash; slight disagreement is harmless.</li>
+      <li><strong>Share approximately.</strong> Rate limits: per-instance limits &times; N is often fine; when it isn't, an async-replicated count (Redis) gives a slightly-loose global limit. Exact distributed counting is expensive; approximate is usually the right trade.</li>
+      <li><strong>Share for real (rarely).</strong> Truly global coordination &mdash; leader election for "exactly one instance renews certificates," distributed config stores &mdash; means consensus: etcd/ZooKeeper leases (a leader holds a TTL'd lease and renews; lose it and another takes over) built on Raft/Paxos. Use an existing store; implementing Raft is its own course.</li>
+      <li><strong>Sessions:</strong> the cluster answer to Level 3's affinity &mdash; externalize session state (Redis) or put it in cookies (JWT) so <em>any</em> proxy and <em>any</em> backend can serve <em>any</em> user. Statelessness is what makes horizontal scaling linear.</li>
+    </ol>
+    <div class="callout"><strong>CDN integration &mdash; know your place in the chain:</strong> in production your proxy usually sits <em>behind</em> a CDN (Cloudflare, CloudFront): the CDN handles global TLS, caching at 300 edge sites, and DDoS absorption; your tier does routing, auth, and app-specific logic. Consequences you're now equipped to reason about: the "client IP" is a CDN node (Level 5's XFF trust rules, now with a published list of trusted CDN ranges), your cache (Level 11) becomes the second layer of two, and origin pull means the CDN is just another keep-alive client of yours (Level 7's pools serve it beautifully).</div>
+  </article>
+  <p><strong>Where this leaves you:</strong> every level of this course reappears at cluster scale wearing a bigger hat &mdash; consistent hashing balances proxies themselves, health checks become fleet membership, config reload becomes a control plane, graceful restart becomes rolling deploys. Distributed systems aren't a different subject; they're the same subject, multiplied. You now have the vocabulary to read the Envoy architecture docs, the Maglev paper, or the Pingora blog posts as a peer rather than a tourist.</p>
+</section>
+
+<section id="rust-map">
+  <h2>Rust Concepts Map</h2>
+  <p class="lead">The course teaches Rust the honest way: each feature appears exactly when an engineering problem demands it. This table is the syllabus-within-the-syllabus.</p>
+  <table>
+    <thead><tr><th>Rust concept</th><th>First needed at</th><th>The problem it solves there</th></tr></thead>
+    <tbody>
+      <tr><td><code>Result</code>, <code>Option</code>, <code>?</code></td><td>Level 1</td><td>Every socket operation can fail; the type system forces you to decide what "fail" means, per call site.</td></tr>
+      <tr><td>Ownership &amp; move semantics</td><td>Level 1</td><td>Moving the <code>TcpStream</code> into its task makes "who closes this socket" unambiguous at compile time.</td></tr>
+      <tr><td><code>async/await</code>, <code>tokio::spawn</code></td><td>Level 1</td><td>Thousands of concurrent connections without thousands of threads.</td></tr>
+      <tr><td>Borrowing, <code>&amp;[u8]</code> slices</td><td>Level 1</td><td>Parsing HTTP without copying: header values are views into the read buffer.</td></tr>
+      <tr><td>Enums + pattern matching</td><td>Levels 1&ndash;2</td><td>Parser states, body-framing modes, route kinds &mdash; make invalid states unrepresentable.</td></tr>
+      <tr><td><code>Arc</code></td><td>Levels 2&ndash;3</td><td>Route tables and backend lists shared across all connection tasks, reference-counted.</td></tr>
+      <tr><td>Atomics (<code>AtomicUsize</code>)</td><td>Level 3</td><td>Round-robin counters and connection counts without a lock.</td></tr>
+      <tr><td><code>RwLock</code> vs <code>Mutex</code></td><td>Levels 3&ndash;4</td><td>Backend lists: many readers (requests), rare writers (health checks). Learn why not to hold either across <code>.await</code>.</td></tr>
+      <tr><td>Channels (mpsc, watch, broadcast)</td><td>Levels 4, 12</td><td>Health-check results flowing to the balancer; shutdown signals fanning out to every task.</td></tr>
+      <tr><td><code>tokio::select!</code></td><td>Levels 4, 12</td><td>"Wait for data OR timeout OR shutdown, whichever first" &mdash; the async multiplexing primitive.</td></tr>
+      <tr><td>Lifetimes (explicit)</td><td>Level 5</td><td>Zero-copy parsed requests borrowing from buffers &mdash; and learning when to stop borrowing and allocate (<code>Cow</code>).</td></tr>
+      <tr><td>Traits, trait objects, <code>Box&lt;dyn&gt;</code></td><td>Level 6</td><td>The middleware abstraction; dynamic dispatch vs monomorphized generics as an explicit engineering choice.</td></tr>
+      <tr><td>Generics + <code>AsyncRead/AsyncWrite</code> bounds</td><td>Level 8</td><td>One proxy core that runs identically over plain TCP and TLS streams.</td></tr>
+      <tr><td><code>Pin</code>, <code>Future</code>, <code>Waker</code> (mechanics)</td><td>Level 9</td><td>Understanding what the compiler generates from your async fns &mdash; the difference between using Tokio and knowing it.</td></tr>
+      <tr><td>RAII / <code>Drop</code></td><td>Levels 7, 11</td><td>Pool guards that return connections on drop; cache entries freeing on last <code>Arc</code> release. Cleanup you can't forget.</td></tr>
+      <tr><td><code>ArcSwap</code> / atomic config swap</td><td>Level 12</td><td>Lock-free hot reload: in-flight requests keep a consistent snapshot, new requests get new config.</td></tr>
+      <tr><td>Testing &amp; benchmarking (<code>#[tokio::test]</code>, criterion)</td><td>throughout</td><td>Integration tests spin up real listeners on ephemeral ports; benchmarks make Level 7 claims falsifiable.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="cheatsheet">
+  <h2>Cheat Sheet</h2>
+  <h3>HTTP quick reference</h3>
+  <div class="grid2">
+    <div class="card"><h4>Request / response shape</h4>
+      <pre><code>METHOD SP path SP HTTP/1.1 CRLF     HTTP/1.1 SP 200 SP OK CRLF
+Header: value CRLF                  Header: value CRLF
+CRLF                                CRLF
+[body]                              [body]</code></pre>
+      <p class="muted">CRLF = <code>\r\n</code> (2 bytes). Header names case-insensitive; a proxy must treat <code>Host</code>/<code>host</code>/<code>HOST</code> identically.</p>
+    </div>
+    <div class="card"><h4>Status codes a proxy generates itself</h4>
+      <p><code>400</code> unparseable request &middot; <code>404</code> no route &middot; <code>408</code> client read timeout &middot; <code>413</code> body too large &middot; <code>429</code> rate limited &middot; <code>431</code> headers too large &middot; <code>499</code> client closed early (Nginx custom) &middot; <code>502</code> backend refused/bad response &middot; <code>503</code> no healthy backend / overloaded &middot; <code>504</code> backend timeout</p>
+    </div>
+  </div>
+  <h3>The hop-by-hop headers (strip on forward, always)</h3>
+  <p><code>Connection</code> &middot; <code>Keep-Alive</code> &middot; <code>Proxy-Authenticate</code> &middot; <code>Proxy-Authorization</code> &middot; <code>TE</code> &middot; <code>Trailer</code> &middot; <code>Transfer-Encoding</code> &middot; <code>Upgrade</code> &mdash; plus anything named in the <code>Connection</code> header's value.</p>
+  <h3>Level-by-level design defaults</h3>
+  <table>
+    <thead><tr><th>Decision</th><th>Sane default</th><th>Because</th></tr></thead>
+    <tbody>
+      <tr><td>Read buffer size</td><td>8&ndash;16 KB per direction</td><td>Fits nearly all header blocks; memory = buffers &times; connections</td></tr>
+      <tr><td>Max header block</td><td>16&ndash;64 KB, 100 headers</td><td>Bigger is almost always an attack</td></tr>
+      <tr><td>Backend connect timeout</td><td>1&ndash;5 s</td><td>Kernel default (&asymp;2 min) is an eternity of held resources</td></tr>
+      <tr><td>LB algorithm</td><td>Round robin &rarr; P2C least-conn when requests vary</td><td>Simple first; upgrade on evidence</td></tr>
+      <tr><td>Health thresholds</td><td>down after 3 fails, up after 2 passes</td><td>Asymmetry prevents flapping</td></tr>
+      <tr><td>Retries</td><td>&le;2, idempotent/unsent only, jittered backoff</td><td>Retry storms kill degraded fleets</td></tr>
+      <tr><td>Rate limiting</td><td>Token bucket per trusted client IP</td><td>Allows bursts, caps sustained rate</td></tr>
+      <tr><td>TLS</td><td>rustls, TLS 1.2 min, 1.3 preferred</td><td>Memory-safe stack, modern ciphers only</td></tr>
+      <tr><td>Cache key</td><td>method + host + path + query + Vary values</td><td>Wrong keys leak data between users</td></tr>
+      <tr><td>Drain timeout</td><td>10&ndash;60 s</td><td>Slow clients can't hold deploys hostage</td></tr>
+    </tbody>
+  </table>
+  <h3>Tooling one-liners</h3>
+  <pre><code>curl -v http://127.0.0.1:8080/            # see exact request/response + timing
+curl --raw -H 'Accept-Encoding:' ...       # disable curl's niceties, see raw bytes
+printf 'GET / HTTP/1.1\r\nHost: x\r\n\r\n' | nc 127.0.0.1 8080   # hand-crafted HTTP
+python3 -m http.server 9001                # instant test backend
+wrk -t4 -c400 -d15s http://127.0.0.1:8080/ # load test (or: oha, hey)
+lsof -iTCP -sTCP:LISTEN -P                 # who is listening on what (macOS)
+netstat -an | grep 8080                    # connection states (TIME_WAIT etc.)
+sudo tcpdump -i lo0 -A 'port 8080'         # watch the actual bytes (macOS loopback)
+ulimit -n 65536                            # raise FD limit before load tests
+cargo flamegraph / cargo bench             # find the real bottleneck</code></pre>
+</section>
+
+<section id="glossary">
+  <h2>Glossary</h2>
+  <div class="grid2">
+    <div class="card"><h4>Anycast</h4><p>One IP announced from many locations via BGP; routing delivers each client to the nearest. How global CDNs put "one" address everywhere.</p></div>
+    <div class="card"><h4>Backlog</h4><p>Kernel queue of completed-handshake connections waiting for your <code>accept()</code>. Overflow = refused clients despite a "running" server.</p></div>
+    <div class="card"><h4>Backpressure</h4><p>Slowing intake when downstream can't keep up &mdash; e.g., pausing backend reads when a slow client's send buffer is full, instead of buffering unboundedly.</p></div>
+    <div class="card"><h4>Circuit breaker</h4><p>Per-backend state machine (closed/open/half-open) that converts slow failure into instant failure while a backend is sick.</p></div>
+    <div class="card"><h4>Control plane / data plane</h4><p>Data plane moves requests (your proxy); control plane decides config/routing (xDS server, K8s). Keeping them separate is modern proxy architecture in one sentence.</p></div>
+    <div class="card"><h4>Consistent hashing</h4><p>Hash-ring assignment where adding/removing a node remaps only ~1/N of keys, not everything.</p></div>
+    <div class="card"><h4>Drain</h4><p>Finishing in-flight requests while accepting no new ones; the heart of graceful shutdown and rolling deploys.</p></div>
+    <div class="card"><h4>Edge-triggered vs level-triggered</h4><p>epoll modes: notify on <em>change</em> ("became readable") vs <em>state</em> ("is readable"). ET is fewer wakeups but you must read until EWOULDBLOCK or lose events.</p></div>
+    <div class="card"><h4>File descriptor (FD)</h4><p>Small integer handle to a kernel resource; sockets are FDs. The per-process FD limit is the classic invisible ceiling on connection count.</p></div>
+    <div class="card"><h4>Hop-by-hop header</h4><p>Header describing one TCP connection, not the end-to-end message (<code>Connection</code>, <code>Transfer-Encoding</code>&hellip;). Proxies must strip and regenerate them.</p></div>
+    <div class="card"><h4>Idempotent</h4><p>Safe to repeat: same effect once or five times (GET, PUT, DELETE by contract; not POST). The property that decides retryability.</p></div>
+    <div class="card"><h4>Keep-alive / persistent connection</h4><p>Reusing one TCP connection for sequential HTTP requests, skipping repeated handshakes. Default in HTTP/1.1.</p></div>
+    <div class="card"><h4>L4 / L7</h4><p>OSI shorthand: transport-layer (TCP bytes) vs application-layer (HTTP-aware) proxying.</p></div>
+    <div class="card"><h4>mTLS</h4><p>TLS where <em>both</em> sides present certificates. Service-to-service authentication without shared secrets.</p></div>
+    <div class="card"><h4>Origin (server)</h4><p>The true source of content, behind all proxies/CDNs. "Origin pull" = a cache fetching from it on miss.</p></div>
+    <div class="card"><h4>Request smuggling</h4><p>Attack exploiting parser disagreement (proxy vs backend) about where a request ends &mdash; e.g., conflicting Content-Length and Transfer-Encoding &mdash; to sneak a hidden second request past security checks.</p></div>
+    <div class="card"><h4>Reverse proxy</h4><p>Server-side intermediary that terminates client connections and forwards requests to backends the client never sees. The subject of this entire page.</p></div>
+    <div class="card"><h4>SNI</h4><p>Server Name Indication: the hostname sent in the TLS ClientHello (cleartext), letting one IP serve certificates for many domains &mdash; and letting L4 proxies route TLS without decrypting.</p></div>
+    <div class="card"><h4>Slowloris</h4><p>DoS via many deliberately slow, never-finishing requests that exhaust connection slots. Beaten by header deadlines and per-IP caps.</p></div>
+    <div class="card"><h4>Sticky session / affinity</h4><p>Pinning a client to one backend because it holds their state. Convenient, and the enemy of clean horizontal scaling.</p></div>
+    <div class="card"><h4>Thundering herd / stampede</h4><p>Many waiters unleashed at once &mdash; synchronized retries, or 1,000 requests hitting a backend when one hot cache entry expires. Beaten with jitter and request coalescing.</p></div>
+    <div class="card"><h4>TLS termination</h4><p>The proxy holding the certs, doing the handshake, and decrypting &mdash; the boundary where HTTPS becomes inspectable HTTP.</p></div>
+    <div class="card"><h4>Upstream / downstream</h4><p>Nginx-speak: upstream = the backends behind you; downstream = toward the client. (Envoy uses "upstream cluster" the same way.)</p></div>
+    <div class="card"><h4>Zero-copy</h4><p>Moving data between sockets/files without copying through userspace buffers (<code>splice</code>, <code>sendfile</code>). L7 proxies use it selectively for bodies after headers are parsed.</p></div>
+  </div>
+</section>
+
+<section id="interview">
+  <h2>Interview Questions</h2>
+  <p class="lead">If you can answer these cold, you didn't just build a proxy &mdash; you understood it. Answers are collapsed; struggle first.</p>
+  <details><summary>Explain the difference between a forward proxy and a reverse proxy.</summary><p>Both intermediate between clients and servers; the difference is allegiance and visibility. A forward proxy acts for <em>clients</em> (configured client-side, hides/polices who is browsing; servers see the proxy's IP). A reverse proxy acts for <em>servers</em> (configured server-side, hides the fleet; clients think it <em>is</em> the site). Forward = "my exit door to the internet"; reverse = "their entry door to the application."</p></details>
+  <details><summary>Why does a reverse proxy terminate the client's TCP connection instead of just forwarding packets?</summary><p>To do anything at L7 it must <em>be</em> an HTTP endpoint: routing by path/host requires parsing the request; TLS decryption requires completing the handshake; header rewriting, caching, and WAF inspection all require message-level access. Termination also decouples the two sides &mdash; slow clients don't hold backend resources, connections pool and keep-alive independently, and each leg can use different protocol versions. A device that only forwards packets is a router/L4 balancer and can do none of the above.</p></details>
+  <details><summary>How do you know where an HTTP/1.1 request ends on a TCP stream?</summary><p>Headers end at the first empty line (<code>\r\n\r\n</code>). The body then ends per framing rules: <code>Content-Length: N</code> &rarr; exactly N bytes; <code>Transfer-Encoding: chunked</code> &rarr; hex-sized chunks until a zero-length chunk; otherwise no body (for requests). If both CL and TE are present, TE wins per RFC and a careful proxy rejects or normalizes the message &mdash; parser disagreement over exactly this is the mechanism of request smuggling.</p></details>
+  <details><summary>Compare round robin, least connections, and consistent hashing. When is each wrong?</summary><p>RR: O(1), even distribution of <em>counts</em> &mdash; wrong when request costs vary wildly (one server gets all the heavy ones by luck). Least-connections: adapts to real load &mdash; wrong when a backend fails fast (zero connections attracts <em>all</em> traffic: the black-hole effect) and needs accurate live counters. Consistent hashing: stable key&rarr;server affinity that survives pool changes (~1/N remap) &mdash; wrong when the key space is skewed (one hot key overloads one server regardless) or when you needed load-awareness, which pure hashing ignores.</p></details>
+  <details><summary>What is a circuit breaker and why is "fail fast" better than "keep trying"?</summary><p>A per-backend state machine: Closed (normal, counting failures) &rarr; Open (threshold exceeded: reject instantly, send nothing) &rarr; Half-Open (after cooldown, one trial request decides). It exists because slow failure propagates: requests to a dead backend hold sockets, buffers, and tasks for the full timeout (maybe 30 s each), so the <em>proxy</em> runs out of resources and healthy traffic suffers. Failing in microseconds keeps the failure contained to the broken dependency, and Half-Open probes recovery without a stampede.</p></details>
+  <details><summary>A backend sees the proxy's IP for every request. How does it learn the real client IP, and what's the security catch?</summary><p><code>X-Forwarded-For</code>: each proxy appends the peer address it accepted from, so the chain reads client, proxy1, proxy2. The catch: the client can send a forged XFF header <em>first</em>, so the leftmost value is attacker-controlled. The edge proxy must strip or overwrite untrusted inbound XFF, and consumers should trust only the rightmost N hops (N = proxies you control). Never use client-supplied XFF for allowlists or rate limiting.</p></details>
+  <details><summary>What actually happens, down to the syscalls, when your Rust code does <code>stream.read(&amp;mut buf).await</code>?</summary><p>The future attempts a non-blocking <code>read()</code> immediately. Data ready &rarr; returns now. Otherwise the syscall returns EWOULDBLOCK; the future registers the FD with Tokio's reactor (mio &rarr; epoll on Linux / kqueue on macOS), stores the task's Waker, and returns Poll::Pending &mdash; the task is parked, its worker thread runs other tasks. When the kernel has bytes, epoll_wait/kevent returns the FD; the reactor calls the Waker; the scheduler re-queues the task; the executor re-polls it; the state machine resumes at the await and the read succeeds. Async is not magic threads &mdash; it's readiness notification plus compiler-generated state machines.</p></details>
+  <details><summary>Why is average latency a misleading metric, and what do you use instead?</summary><p>Latency is a skewed distribution; the mean is dominated by the fast majority and hides the slow tail. A 40 ms average coexists with 1% of requests taking 4 s &mdash; and heavy users hit that 1% constantly. Use percentiles from histograms: p50 (typical), p95/p99 (tail). Amazon-scale operators optimize p99+ because tail latency compounds across service fan-out: a page touching 10 services experiences <em>someone's</em> p99 on ~10% of loads.</p></details>
+  <details><summary>Design cache keys for a shared HTTP cache. What goes wrong with a naive key?</summary><p>Key = method + host + path + query + the value of every request header named in the response's <code>Vary</code>. Naive "path only" keys fail two ways: (1) correctness &mdash; gzip responses served to clients that didn't send <code>Accept-Encoding: gzip</code>; (2) security &mdash; caching a response that varied on <code>Cookie</code>/<code>Authorization</code> under a shared key serves user A's private data to user B. Also honor <code>private</code>/<code>no-store</code>, and don't cache <code>Set-Cookie</code> responses.</p></details>
+  <details><summary>How does zero-downtime config reload work without locks on the request path?</summary><p>Immutable config snapshots behind an atomic pointer (<code>ArcSwap</code>/RCU pattern). Each request loads the current <code>Arc&lt;Config&gt;</code> once &mdash; a cheap refcount bump &mdash; and uses that consistent snapshot for its whole lifetime. Reload parses and validates the new file off to the side (rejecting it wholesale if invalid), then atomically stores a new Arc. New requests see the new config; in-flight requests finish on the old one, which frees when its last holder drops. No locks, no torn state, no restart.</p></details>
+  <details><summary>Your proxy must survive a deploy at 10k RPS with zero dropped requests. Walk through it.</summary><p>Per instance: catch SIGTERM &rarr; stop accepting (close/hand off the listener) &rarr; mark self unhealthy so the upstream LB/L4 tier drains new traffic away &rarr; finish in-flight requests, answering keep-alive connections with <code>Connection: close</code> &rarr; hard deadline (e.g. 30 s) for stragglers &rarr; exit. Fleet-wide: roll one instance at a time behind the L4 tier/DNS, health-gated, so capacity never dips below demand. For in-place binary upgrades: pass listener FDs to the new process (or overlap via SO_REUSEPORT) so the listen queue never closes.</p></details>
+  <details><summary>Why can't a WAF fully protect a vulnerable application?</summary><p>A WAF matches <em>request patterns</em>; it can't know the application's semantics. Signatures are evadable (encoding, fragmentation, novel payloads), inspection is bounded (can't fully parse every format at line rate), and some flaws (logic bugs, IDOR, auth issues) produce perfectly innocent-looking requests. Injection is truly fixed at the app layer &mdash; parameterized queries, output encoding. The WAF's honest value: blocks commodity/automated attacks, virtual-patches during 0-day windows, adds visibility and rate control. Defense in depth, not a substitute.</p></details>
+</section>
+
+<section id="faq">
+  <h2>FAQ</h2>
+  <div class="qa"><p class="q">Why build this in Rust instead of Go or C?</p><p class="a">C is the incumbent (Nginx/HAProxy) but every buffer is a potential CVE; Go is productive but GC pauses and less-explicit control show at the tail. Rust gives C-class performance with compile-time memory/thread safety &mdash; and the industry agrees: Cloudflare replaced Nginx with Rust (Pingora/River), AWS and Microsoft ship Rust in networking infrastructure. Bonus: the borrow checker is a systems-programming tutor &mdash; every fight with it is a real aliasing bug you didn't ship.</p></div>
+  <div class="qa"><p class="q">Why not just use Hyper/Axum from day one?</p><p class="a">Because the course goal is understanding, and Hyper's excellence hides exactly the parts you're here to learn (framing, keep-alive, pooling). Level 1 builds HTTP handling by hand; once you've earned the knowledge, swapping in <code>httparse</code> or Hyper is a legitimate engineering choice you'll make with open eyes &mdash; that's the "explain first, then use abstractions" rule from Build.md.</p></div>
+  <div class="qa"><p class="q">Reverse proxy, load balancer, API gateway, CDN &mdash; what's the actual difference?</p><p class="a">One machine, different job titles. A load balancer is a reverse proxy emphasizing distribution (Levels 3&ndash;4). An API gateway is one emphasizing per-API policy: auth, quotas, transformation (Levels 5&ndash;6). A CDN is thousands of caching reverse proxies scattered geographically (Levels 11+14). You're building the genus; those are species.</p></div>
+  <div class="qa"><p class="q">Where do HTTP/2 and HTTP/3 fit?</p><p class="a">Conceptually everything transfers: routing, balancing, headers, caching are unchanged. Mechanically, HTTP/2 replaces text framing with binary frames and multiplexes streams over one connection (head-of-line blocking moves to TCP); HTTP/3/QUIC moves transport to UDP with per-stream delivery and built-in TLS. Production proxies typically speak H2/H3 to clients and HTTP/1.1 to backends. This course masters H1 first because you can read it with netcat &mdash; the learning loop is 10&times; tighter.</p></div>
+  <div class="qa"><p class="q">How production-ready will the final result be?</p><p class="a">Real enough to front actual apps on your infrastructure: TLS, health-checked balancing, metrics, graceful deploys, tests and benchmarks. Not Nginx: you'll lack years of protocol edge cases, exotic modules, and battle-tested H2/H3 stacks. The honest claim is "production-inspired and genuinely usable" &mdash; and, more valuably, you'll <em>understand</em> the tools you do deploy at a level most engineers never reach.</p></div>
+  <div class="qa"><p class="q">macOS vs Linux &mdash; does developing on the Mac change anything?</p><p class="a">Tokio abstracts it: your code is identical. Underneath, macOS uses kqueue where Linux uses epoll (Level 9 covers both), tooling differs slightly (<code>lsof</code> over <code>ss</code>, <code>tcpdump -i lo0</code>), and Linux-only tricks (io_uring, some socket options) won't apply locally. Benchmark numbers differ across kernels &mdash; but every concept and all your Rust transfers 1:1.</p></div>
+  <div class="qa"><p class="q">What order should I actually study/build in?</p><p class="a">Follow the levels in order &mdash; they're sequenced so each has exactly one new hard thing. Within a level: read its section here, sketch the design yourself, implement, test with curl/nc, run the module quiz, and only then advance. Levels 9 and 14 are theory-heavy checkpoints; everything else lands as code in <code>rproxy</code>.</p></div>
+</section>
+
+<section id="reading">
+  <h2>Recommended Reading</h2>
+  <h3>Specifications (the ground truth)</h3>
+  <ul>
+    <li><strong>RFC 9110 &mdash; HTTP Semantics</strong> and <strong>RFC 9112 &mdash; HTTP/1.1</strong>: the current canonical spec (obsoleting 7230&ndash;7235). Read &sect;7 of 9112 on message parsing before writing your parser.</li>
+    <li><strong>RFC 7239</strong> &mdash; the standardized <code>Forwarded</code> header; <strong>RFC 9111</strong> &mdash; HTTP caching (Level 11's rulebook); <strong>RFC 8446</strong> &mdash; TLS 1.3.</li>
+  </ul>
+  <h3>Production systems (read the engineers, not just the docs)</h3>
+  <ul>
+    <li><em>The Architecture of Open Source Applications</em> &mdash; the Nginx chapter: the event-driven worker design explained by its own developers.</li>
+    <li>Envoy's architecture docs (envoyproxy.io) &mdash; threading model, xDS, outlier detection; the best-documented modern proxy.</li>
+    <li>Cloudflare blog: the Pingora announcement and open-sourcing posts &mdash; why they left Nginx and how Rust+Tokio structure a planet-scale proxy (your project's closest professional relative).</li>
+    <li>Google's <em>Maglev</em> paper &mdash; the L4/consistent-hashing layer under everything (Level 14).</li>
+    <li>The HAProxy configuration manual's opening chapters &mdash; a masterclass in load-balancing and timeout taxonomy hiding inside reference docs.</li>
+  </ul>
+  <h3>Rust &amp; async</h3>
+  <ul>
+    <li><em>Async Book</em> (rust-lang.github.io/async-book) &mdash; futures, Pin, wakers from first principles; pairs exactly with Level 9.</li>
+    <li>Tokio tutorial (tokio.rs) &mdash; especially the "mini-redis" walkthrough and the shared-state chapter.</li>
+    <li>Alice Ryhl's blog posts on Tokio (blocking, shutdown patterns) &mdash; canonical answers to the exact problems Levels 7 and 12 raise.</li>
+    <li><em>Rust for Rustaceans</em> (Gjengset) &mdash; the intermediate-Rust book for when traits/lifetimes get real; his "Crust of Rust" videos too.</li>
+  </ul>
+  <h3>Classics</h3>
+  <ul>
+    <li>Dan Kegel's <em>The C10K Problem</em> &mdash; the historical document that framed everything Level 9 solves.</li>
+    <li><em>The Tail at Scale</em> (Dean &amp; Barroso) &mdash; why p99 rules your life (Level 10).</li>
+    <li>Beej's Guide to Network Programming &mdash; sockets from zero, the friendly way.</li>
+  </ul>
+</section>
+
+</main>
+</div>
+
+<footer>
+  <p>Build Your Own Reverse Proxy &mdash; Knowledge Base &bull; Built 2026-07-26</p>
+  <p class="muted">Companion to the <code>rproxy</code> Rust project in <code>~/MySpace/Reverse_Proxy</code>. Production-system details (Nginx, Envoy, HAProxy, Cloudflare Pingora) are described as of early 2026 &mdash; verify against current docs when precision matters.</p>
+</footer>
+</body>
+</html>

@@ -1,0 +1,24 @@
+# Rust / Cargo
+target/
+**/*.rs.bk
+*.pdb
+
+# Environment & secrets
+.env
+*.pem
+*.key
+*.crt
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Logs & profiling artifacts
+*.log
+flamegraph.svg
+perf.data*
