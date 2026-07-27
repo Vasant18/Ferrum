@@ -84,14 +84,34 @@ fn parse_version(s: &str) -> io::Result<Version> {
     }
 }
 
-/// Split raw head bytes into lines and parse `Name: value` pairs.
-/// Shared by request and response parsing.
-fn parse_header_lines(lines: std::str::Lines<'_>) -> io::Result<Vec<(String, String)>> {
-    let mut headers = Vec::new();
-    for line in lines {
+/// Split a message head into its lines, terminating at the first blank
+/// line, requiring strict CRLF line endings.
+///
+/// We do NOT use `str::lines()`: it treats a bare `\n` (without a preceding
+/// `\r`) as a line break and silently swallows a stray `\r`. That leniency
+/// is a request-smuggling vector — if we accept `Foo: bar\nEvil: x` as two
+/// headers but the backend (or a downstream proxy) disagrees about where
+/// the line breaks, an attacker slips a header past one of us. RFC 9112
+/// §2.2 forbids bare CR/LF in field lines; we enforce that here by
+/// splitting only on `\r\n` and rejecting any residual `\r` or `\n`.
+fn split_head_lines(text: &str) -> io::Result<Vec<&str>> {
+    let mut out = Vec::new();
+    for line in text.split("\r\n") {
         if line.is_empty() {
-            break;
+            break; // the blank line ends the head
         }
+        if line.bytes().any(|b| b == b'\n' || b == b'\r') {
+            return Err(invalid("bare CR or LF in message head"));
+        }
+        out.push(line);
+    }
+    Ok(out)
+}
+
+/// Parse `Name: value` pairs from already-validated header lines.
+fn parse_header_lines(lines: &[&str]) -> io::Result<Vec<(String, String)>> {
+    let mut headers = Vec::with_capacity(lines.len());
+    for &line in lines {
         // Header field: name ":" OWS value OWS. A missing colon is a
         // malformed message; forwarding it would make us complicit in
         // whatever parser-confusion it is trying to cause.
@@ -114,8 +134,8 @@ pub fn parse_request_head(raw: &[u8]) -> io::Result<RequestHead> {
     // The head is required to be ASCII-compatible; reject anything that
     // isn't valid UTF-8 rather than guessing.
     let text = std::str::from_utf8(raw).map_err(|_| invalid("head is not valid UTF-8"))?;
-    let mut lines = text.lines();
-    let request_line = lines.next().ok_or_else(|| invalid("empty request head"))?;
+    let lines = split_head_lines(text)?;
+    let request_line = *lines.first().ok_or_else(|| invalid("empty request head"))?;
 
     // Request line: METHOD SP request-target SP HTTP-version
     let mut parts = request_line.split(' ');
@@ -128,15 +148,15 @@ pub fn parse_request_head(raw: &[u8]) -> io::Result<RequestHead> {
         method: method.to_string(),
         target: target.to_string(),
         version: parse_version(version)?,
-        headers: parse_header_lines(lines)?,
+        headers: parse_header_lines(&lines[1..])?,
     })
 }
 
 /// Parse a complete response head.
 pub fn parse_response_head(raw: &[u8]) -> io::Result<ResponseHead> {
     let text = std::str::from_utf8(raw).map_err(|_| invalid("head is not valid UTF-8"))?;
-    let mut lines = text.lines();
-    let status_line = lines.next().ok_or_else(|| invalid("empty response head"))?;
+    let lines = split_head_lines(text)?;
+    let status_line = *lines.first().ok_or_else(|| invalid("empty response head"))?;
 
     // Status line: HTTP-version SP status-code SP [reason-phrase]
     let mut parts = status_line.splitn(3, ' ');
@@ -152,7 +172,7 @@ pub fn parse_response_head(raw: &[u8]) -> io::Result<ResponseHead> {
         version,
         status,
         reason,
-        headers: parse_header_lines(lines)?,
+        headers: parse_header_lines(&lines[1..])?,
     })
 }
 
@@ -165,17 +185,57 @@ pub fn header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str
         .map(|(_, v)| v.as_str())
 }
 
-/// Decide how a *request* body is framed, per RFC 9112 §6.
-pub fn request_body_framing(head: &RequestHead) -> io::Result<BodyFraming> {
-    let te = header(&head.headers, "transfer-encoding");
-    let cl = header(&head.headers, "content-length");
+/// Count how many times a header appears, case-insensitively. Framing
+/// headers (Content-Length, Transfer-Encoding) appearing more than once is
+/// a smuggling signal, so we count rather than take-first.
+pub fn count_header(headers: &[(String, String)], name: &str) -> usize {
+    headers.iter().filter(|(n, _)| n.eq_ignore_ascii_case(name)).count()
+}
 
-    // A message with both Transfer-Encoding and Content-Length is the
-    // canonical request-smuggling vector (proxy honors one, backend the
-    // other). RFC 9112 says treat as an error at the edge; we reject.
-    if te.is_some() && cl.is_some() {
+/// Remove every occurrence of a header, case-insensitively. Used to take
+/// exclusive control of framing headers before we re-declare them.
+pub fn remove_header(headers: &mut Vec<(String, String)>, name: &str) {
+    headers.retain(|(n, _)| !n.eq_ignore_ascii_case(name));
+}
+
+/// Parse a Content-Length value strictly: ASCII digits only. This rejects
+/// the sneaky forms `parse::<u64>` might tolerate loosely or that confuse
+/// other parsers — a leading `+`, embedded commas (`5, 5`), whitespace, or
+/// hex — any of which is a framing-desync attempt.
+fn parse_content_length(s: &str) -> io::Result<u64> {
+    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(invalid(format!("invalid Content-Length: {s:?}")));
+    }
+    s.parse()
+        .map_err(|_| invalid(format!("Content-Length out of range: {s:?}")))
+}
+
+/// Reject the header-multiplicity smuggling vectors shared by requests and
+/// responses: more than one Content-Length or Transfer-Encoding, or both
+/// present at once. Each of these lets a proxy and a backend disagree about
+/// where the body ends.
+fn check_framing_headers(headers: &[(String, String)]) -> io::Result<()> {
+    let cl = count_header(headers, "content-length");
+    let te = count_header(headers, "transfer-encoding");
+    if cl > 1 {
+        return Err(invalid("multiple Content-Length headers"));
+    }
+    if te > 1 {
+        return Err(invalid("multiple Transfer-Encoding headers"));
+    }
+    if cl > 0 && te > 0 {
+        // The canonical smuggling combo (proxy honors one, backend the
+        // other). RFC 9112 §6.1 says treat as an error at the edge.
         return Err(invalid("both Transfer-Encoding and Content-Length present"));
     }
+    Ok(())
+}
+
+/// Decide how a *request* body is framed, per RFC 9112 §6.
+pub fn request_body_framing(head: &RequestHead) -> io::Result<BodyFraming> {
+    check_framing_headers(&head.headers)?;
+    let te = header(&head.headers, "transfer-encoding");
+    let cl = header(&head.headers, "content-length");
 
     if let Some(te) = te {
         // "chunked" must be the final (and for us, only) coding.
@@ -186,9 +246,7 @@ pub fn request_body_framing(head: &RequestHead) -> io::Result<BodyFraming> {
     }
 
     if let Some(cl) = cl {
-        let n: u64 = cl
-            .parse()
-            .map_err(|_| invalid(format!("invalid Content-Length: {cl:?}")))?;
+        let n = parse_content_length(cl)?;
         return Ok(if n == 0 { BodyFraming::None } else { BodyFraming::Length(n) });
     }
 
@@ -209,6 +267,7 @@ pub fn response_body_framing(req_method: &str, head: &ResponseHead) -> io::Resul
         return Ok(BodyFraming::None);
     }
 
+    check_framing_headers(&head.headers)?;
     let te = header(&head.headers, "transfer-encoding");
     let cl = header(&head.headers, "content-length");
 
@@ -220,9 +279,7 @@ pub fn response_body_framing(req_method: &str, head: &ResponseHead) -> io::Resul
     }
 
     if let Some(cl) = cl {
-        let n: u64 = cl
-            .parse()
-            .map_err(|_| invalid(format!("invalid Content-Length: {cl:?}")))?;
+        let n = parse_content_length(cl)?;
         return Ok(if n == 0 { BodyFraming::None } else { BodyFraming::Length(n) });
     }
 
@@ -307,6 +364,48 @@ mod tests {
     fn rejects_space_before_colon() {
         let raw = b"GET / HTTP/1.1\r\nHost : evil\r\n\r\n";
         assert!(parse_request_head(raw).is_err());
+    }
+
+    #[test]
+    fn rejects_bare_lf_between_headers() {
+        // "Host: x\nSmuggled: y" — a bare LF splitting headers that
+        // str::lines() would have accepted as two fields.
+        let raw = b"GET / HTTP/1.1\r\nHost: x\nSmuggled: y\r\n\r\n";
+        assert!(parse_request_head(raw).is_err());
+    }
+
+    #[test]
+    fn rejects_bare_cr_in_header() {
+        let raw = b"GET / HTTP/1.1\r\nHost: x\rSmuggled: y\r\n\r\n";
+        assert!(parse_request_head(raw).is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_content_length() {
+        let raw = b"POST / HTTP/1.1\r\nContent-Length: 5\r\nContent-Length: 6\r\n\r\n";
+        let head = parse_request_head(raw).unwrap();
+        assert!(request_body_framing(&head).is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_transfer_encoding() {
+        let raw = b"POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n";
+        let head = parse_request_head(raw).unwrap();
+        assert!(request_body_framing(&head).is_err());
+    }
+
+    #[test]
+    fn rejects_non_numeric_content_length() {
+        // Note: leading/trailing OWS is legitimately trimmed by the header
+        // parser, so "5 " is valid. These have internal or non-digit chars.
+        for bad in ["5, 5", "+5", "0x5", "5 5", "five", ""] {
+            let raw = format!("POST / HTTP/1.1\r\nContent-Length: {bad}\r\n\r\n");
+            let head = parse_request_head(raw.as_bytes()).unwrap();
+            assert!(
+                request_body_framing(&head).is_err(),
+                "should reject Content-Length {bad:?}"
+            );
+        }
     }
 
     #[test]

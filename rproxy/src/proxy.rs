@@ -343,6 +343,13 @@ async fn serve_one(
 
     // ---- 3. Forward the request: rewritten head, then streamed body ----
     strip_hop_by_hop(&mut req.headers);
+    // Take exclusive control of the body-framing header. strip_hop_by_hop
+    // removes the "TE" header but NOT "Transfer-Encoding"; if we re-added a
+    // chunked TE below without removing the original, the backend would see
+    // two Transfer-Encoding lines — a smuggling desync. Content-Length is
+    // left untouched: the parser already guaranteed at most one, and for
+    // Length framing it carries the backend's only body delimiter.
+    http::remove_header(&mut req.headers, "transfer-encoding");
     // We speak HTTP/1.1 to the backend and manage its connection per
     // exchange (Connection: close until Level 7 adds pooling).
     req.version = Version::Http11;
@@ -367,6 +374,10 @@ async fn serve_one(
 
     // ---- 5. Relay the response: rewritten head, then streamed body ----
     strip_hop_by_hop(&mut resp.headers);
+    // Same framing-header ownership as the request leg: drop any existing
+    // Transfer-Encoding so re-declaring chunked below can't produce a
+    // duplicate TE toward the client.
+    http::remove_header(&mut resp.headers, "transfer-encoding");
     // The version on the client leg describes *our* conversation with the
     // client, not the backend's dialect — an HTTP/1.0 backend must not
     // downgrade what we advertise.

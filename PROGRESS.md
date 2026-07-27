@@ -8,7 +8,7 @@ Course defined in [Build.md](Build.md). Theory reference: [Reverse-Proxy-Knowled
 
 | Level | Topic | Status | Notes |
 |-------|-------|--------|-------|
-| 1 | Core Networking (TCP, HTTP/1.1, forwarding, keep-alive, chunked) | 🟢 **Implemented** (2026-07-26) | `http.rs` (parsing/framing) + `proxy.rs` (Conn, forwarding) + `main.rs` (accept loop). 19 unit tests. Quiz pending. |
+| 1 | Core Networking (TCP, HTTP/1.1, forwarding, keep-alive, chunked) | 🟢 **Implemented + hardened** (2026-07-26/27) | `http.rs` (parsing/framing) + `proxy.rs` (Conn, forwarding) + `main.rs` (accept loop). 24 unit tests. Request-smuggling gaps closed. Quiz pending. |
 | 2 | Routing (host/path/method, precedence) | ⚪ Not started | |
 | 3 | Load Balancing (RR, weighted, least-conn, consistent hashing) | ⚪ Not started | |
 | 4 | Health Checks (active/passive, retries, circuit breaker) | ⚪ Not started | |
@@ -34,6 +34,10 @@ Course defined in [Build.md](Build.md). Theory reference: [Reverse-Proxy-Knowled
 - [x] Extras: hop-by-hop header stripping, CL+TE rejection (anti-smuggling), head size cap,
       slowloris head-read timeout, backend connect timeout, 400/408/502/504 error responses,
       TCP_NODELAY, HTTP/1.0-backend (until-close) response handling
+- [x] Security hardening (2026-07-27): reject bare CR/LF in message heads (strict CRLF
+      splitting, no `str::lines()`); reject duplicate Content-Length / Transfer-Encoding;
+      strict all-ASCII-digit Content-Length parsing; strip incoming Transfer-Encoding
+      before re-declaring canonical framing on both legs (no duplicate TE to backend/client)
 - [ ] **Level 1 quiz — Vishwa to answer before Level 2** (questions in session notes / ask Claude)
 
 **Verified end-to-end:** `cargo test` (19 tests), GET/POST via curl against python backends,
@@ -46,3 +50,4 @@ dead backend → 502, garbage request → 400, keep-alive connection reuse confi
 
 - **2026-07-26** — Course kickoff. Knowledge base built (all 14 levels). `rproxy` crate created. Module 1.1 taught & assigned. Repo pushed to github.com/Vasant18/Ferrum.
 - **2026-07-26 (later)** — Mode switch: Vishwa asked for direct implementation. Level 1 implemented in full (http.rs, proxy.rs, main.rs), tested end-to-end, pushed.
+- **2026-07-27** — Closed two request-smuggling gaps flagged by security review (bare-LF parsing, duplicate/ambiguous framing headers). 24 tests pass; live-verified all three vectors return 400. Level 1 complete pending quiz.
