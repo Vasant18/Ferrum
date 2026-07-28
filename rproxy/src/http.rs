@@ -185,6 +185,31 @@ pub fn header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str
         .map(|(_, v)| v.as_str())
 }
 
+/// The path portion of a request target, with any query string removed.
+/// Routing matches on the path only: `/api/users?page=2` -> `/api/users`.
+pub fn target_path(target: &str) -> &str {
+    match target.split_once('?') {
+        Some((path, _query)) => path,
+        None => target,
+    }
+}
+
+/// A Host header value with any `:port` suffix stripped, for host routing.
+/// `example.com:8080` -> `example.com`. IPv6 literals (`[::1]:8080`) keep
+/// their brackets and only shed the trailing port.
+pub fn host_without_port(host: &str) -> &str {
+    if let Some(rest) = host.strip_prefix('[') {
+        // IPv6 literal: everything up to and including the closing ']'.
+        if let Some(end) = rest.find(']') {
+            return &host[..end + 2];
+        }
+    }
+    match host.rsplit_once(':') {
+        Some((h, _port)) => h,
+        None => host,
+    }
+}
+
 /// Count how many times a header appears, case-insensitively. Framing
 /// headers (Content-Length, Transfer-Encoding) appearing more than once is
 /// a smuggling signal, so we count rather than take-first.
@@ -454,6 +479,21 @@ mod tests {
             response_body_framing("GET", &head).unwrap(),
             BodyFraming::UntilClose
         );
+    }
+
+    #[test]
+    fn extracts_target_path() {
+        assert_eq!(target_path("/api/users?page=2"), "/api/users");
+        assert_eq!(target_path("/health"), "/health");
+        assert_eq!(target_path("/?x=1"), "/");
+    }
+
+    #[test]
+    fn strips_host_port() {
+        assert_eq!(host_without_port("example.com:8080"), "example.com");
+        assert_eq!(host_without_port("example.com"), "example.com");
+        assert_eq!(host_without_port("[::1]:8080"), "[::1]");
+        assert_eq!(host_without_port("[::1]"), "[::1]");
     }
 
     #[test]

@@ -14,6 +14,7 @@ use tokio::net::TcpStream;
 use crate::http::{
     self, BodyFraming, ResponseHead, Version, MAX_HEAD_BYTES,
 };
+use crate::router::RouteTable;
 
 /// Read buffer size per direction. Bodies stream through this window, so
 /// per-connection memory stays flat no matter how large the payload is.
@@ -252,15 +253,15 @@ fn strip_hop_by_hop(headers: &mut Vec<(String, String)>) {
 }
 
 /// Serve one client connection: a sequence of request/response exchanges
-/// on the same socket (keep-alive), each forwarded to `backend_addr`.
-pub async fn handle_client(client: TcpStream, backend_addr: &str, peer: std::net::SocketAddr) {
+/// on the same socket (keep-alive), each routed to a backend by `routes`.
+pub async fn handle_client(client: TcpStream, routes: &RouteTable, peer: std::net::SocketAddr) {
     // Small writes (our serialized heads) should not sit in Nagle's buffer
     // waiting for a coalescing timer; proxies universally disable it.
     let _ = client.set_nodelay(true);
     let mut client = Conn::new(client);
 
     loop {
-        match serve_one(&mut client, backend_addr, peer).await {
+        match serve_one(&mut client, routes, peer).await {
             Ok(true) => continue,          // keep-alive: next request, same socket
             Ok(false) => return,           // clean close
             Err(e) => {
@@ -277,7 +278,7 @@ pub async fn handle_client(client: TcpStream, backend_addr: &str, peer: std::net
 /// should be kept open for another request.
 async fn serve_one(
     client: &mut Conn<TcpStream>,
-    backend_addr: &str,
+    routes: &RouteTable,
     peer: std::net::SocketAddr,
 ) -> io::Result<bool> {
     // ---- 1. Read + parse the request head (with slowloris deadline) ----
@@ -314,12 +315,37 @@ async fn serve_one(
 
     let client_keep_alive = http::wants_keep_alive(req.version, &req.headers);
     let method = req.method.clone();
-    println!("[{peer}] {} {} {}", req.method, req.target, req.version.as_str());
 
-    // ---- 2. Connect to the backend ----
+    // ---- 2. Route: pick a backend from method + host + path ----
+    let host = http::header(&req.headers, "host").map(http::host_without_port);
+    let path = http::target_path(&req.target);
+    let backend_addr = match routes.find(&method, host, path) {
+        Some(b) => b.to_string(),
+        None => {
+            // No route matched. This is a routing decision, not a client
+            // error — the request was well-formed, we just don't serve it.
+            println!(
+                "[{peer}] {} {} {} -> 404 (no route)",
+                req.method,
+                req.target,
+                req.version.as_str()
+            );
+            // respond_error sends Connection: close, so we honestly close.
+            respond_error(client, 404, "Not Found").await?;
+            return Ok(false);
+        }
+    };
+    println!(
+        "[{peer}] {} {} {} -> {backend_addr}",
+        req.method,
+        req.target,
+        req.version.as_str()
+    );
+
+    // ---- 3. Connect to the backend ----
     let backend = match tokio::time::timeout(
         BACKEND_CONNECT_TIMEOUT,
-        TcpStream::connect(backend_addr),
+        TcpStream::connect(&backend_addr),
     )
     .await
     {
@@ -341,7 +367,7 @@ async fn serve_one(
     let _ = backend.set_nodelay(true);
     let mut backend = Conn::new(backend);
 
-    // ---- 3. Forward the request: rewritten head, then streamed body ----
+    // ---- 4. Forward the request: rewritten head, then streamed body ----
     strip_hop_by_hop(&mut req.headers);
     // Take exclusive control of the body-framing header. strip_hop_by_hop
     // removes the "TE" header but NOT "Transfer-Encoding"; if we re-added a
@@ -363,7 +389,7 @@ async fn serve_one(
     client.copy_body_to(&mut backend.stream_mut(), req_framing).await?;
     backend.flush().await?;
 
-    // ---- 4. Read the backend's response head ----
+    // ---- 5. Read the backend's response head ----
     let resp_bytes = backend.read_head().await?.ok_or_else(|| {
         io::Error::new(io::ErrorKind::UnexpectedEof, "backend closed before responding")
     })?;
@@ -372,7 +398,7 @@ async fn serve_one(
 
     println!("[{peer}]   -> {} {}", resp.status, resp.reason);
 
-    // ---- 5. Relay the response: rewritten head, then streamed body ----
+    // ---- 6. Relay the response: rewritten head, then streamed body ----
     strip_hop_by_hop(&mut resp.headers);
     // Same framing-header ownership as the request leg: drop any existing
     // Transfer-Encoding so re-declaring chunked below can't produce a

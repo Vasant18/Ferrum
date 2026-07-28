@@ -9,7 +9,7 @@ Course defined in [Build.md](Build.md). Theory reference: [Reverse-Proxy-Knowled
 | Level | Topic | Status | Notes |
 |-------|-------|--------|-------|
 | 1 | Core Networking (TCP, HTTP/1.1, forwarding, keep-alive, chunked) | 🟢 **Implemented + hardened** (2026-07-26/27) | `http.rs` (parsing/framing) + `proxy.rs` (Conn, forwarding) + `main.rs` (accept loop). 24 unit tests. Request-smuggling gaps closed. Quiz pending. |
-| 2 | Routing (host/path/method, precedence) | ⚪ Not started | |
+| 2 | Routing (host/path/method, precedence) | 🟢 **Implemented** (2026-07-28) | `router.rs`: RouteTable + PathMatcher (exact/prefix/wildcard/regex/any) + host/method filters + specificity-ranked `find()`; CLI route specs; shared as `Arc<RouteTable>`. 404 on no match. 36 unit tests. Quiz pending. |
 | 3 | Load Balancing (RR, weighted, least-conn, consistent hashing) | ⚪ Not started | |
 | 4 | Health Checks (active/passive, retries, circuit breaker) | ⚪ Not started | |
 | 5 | Proxy Headers & Rewriting (XFF, host/URL rewrite) | ⚪ Not started | |
@@ -44,10 +44,29 @@ Course defined in [Build.md](Build.md). Theory reference: [Reverse-Proxy-Knowled
 100 KB binary body round-trip byte-identical, chunked request via netcat, 20 concurrent requests,
 dead backend → 502, garbage request → 400, keep-alive connection reuse confirmed by curl.
 
-**Run it:** `cargo run -- 127.0.0.1:8080 127.0.0.1:9000` (defaults shown; needs any HTTP backend on :9000).
+**Run it:** `cargo run -- 127.0.0.1:8080 127.0.0.1:9000` (shorthand: bare host:port = catch-all).
+
+## Level 2 — what was built
+
+- [x] `router.rs`: `RouteTable`, `Route`, `PathMatcher` (Exact / Prefix / Wildcard / Regex / Any)
+- [x] Match dimensions: host (port-stripped, case-insensitive), method, path
+- [x] Precedence by computed specificity (exact > wildcard > longest-prefix > regex > any;
+      host- and method-scoped routes rank above bare ones) — order-independent, not declaration-order
+- [x] CLI route specs `[METHOD ][host]path_expr=BACKEND`; `/**` prefix, `/*` wildcard, `~regex`
+- [x] `http::target_path` (strip query) + `http::host_without_port` (incl. IPv6) helpers
+- [x] Router shared as `Arc<RouteTable>`, cloned per connection, lock-free reads
+- [x] 404 Not Found on no matching route (well-formed request, just unserved)
+- [ ] **Level 2 quiz — Vishwa to answer before Level 3**
+
+**Verified end-to-end (2026-07-28):** `cargo test` (36 tests), two live backends with 5-route table —
+prefix/catch-all/method/host/regex all routed correctly; exact-beats-prefix precedence; 404 on no
+route; keep-alive serving two requests on one connection to different backends.
+
+**Run with routes:** `cargo run -- 127.0.0.1:8080 /api/**=127.0.0.1:9001 /=127.0.0.1:9000`
 
 ## Session log
 
 - **2026-07-26** — Course kickoff. Knowledge base built (all 14 levels). `rproxy` crate created. Module 1.1 taught & assigned. Repo pushed to github.com/Vasant18/Ferrum.
 - **2026-07-26 (later)** — Mode switch: Vishwa asked for direct implementation. Level 1 implemented in full (http.rs, proxy.rs, main.rs), tested end-to-end, pushed.
 - **2026-07-27** — Closed two request-smuggling gaps flagged by security review (bare-LF parsing, duplicate/ambiguous framing headers). 24 tests pass; live-verified all three vectors return 400. Level 1 complete pending quiz.
+- **2026-07-28** — Level 2 (Routing) implemented: `router.rs` with host/path/method matching and specificity-based precedence; wired through proxy + main as `Arc<RouteTable>`; added `regex` dep. 36 tests pass; live-verified against two backends; pushed.
