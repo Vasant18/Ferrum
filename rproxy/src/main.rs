@@ -15,6 +15,7 @@
 //! Backwards-compatible shorthand: `rproxy LISTEN BACKEND` (a bare host:port
 //! second argument) is treated as the catch-all route `/=BACKEND`.
 
+mod balancer;
 mod http;
 mod proxy;
 mod router;

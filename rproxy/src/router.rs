@@ -11,9 +11,13 @@
 //! score derived from how specific each dimension is, rather than by the
 //! order routes were declared, so the result never depends on config order.
 
+use std::collections::HashMap;
 use std::io;
+use std::sync::Arc;
 
 use regex::Regex;
+
+use crate::balancer::{self, Upstream};
 
 /// How a route matches the request path. Ordered here from most to least
 /// specific — the discriminant doubles as a tie-break rank.
@@ -75,7 +79,13 @@ impl PathMatcher {
     }
 }
 
-/// A single routing rule: match conditions plus the backend to forward to.
+/// A single routing rule: match conditions plus the pool to forward to.
+///
+/// Level 2 stored a single backend address here. Level 3 replaces that with an
+/// `Arc<Upstream>` — a whole pool. A single backend is now genuinely just a
+/// one-member pool, so there is exactly one downstream path and `Route` no
+/// longer carries a `String` at all. The `Arc` is shared: several routes may
+/// point at the same declared upstream, and cloning it is a refcount bump.
 pub struct Route {
     /// If set, the request `Host` (port stripped) must equal this,
     /// case-insensitively. `None` matches any host.
@@ -83,15 +93,21 @@ pub struct Route {
     /// If set, the request method must equal this. `None` matches any.
     pub method: Option<String>,
     pub path: PathMatcher,
-    /// Backend address, e.g. "127.0.0.1:9000".
-    pub backend: String,
+    /// The pool this route forwards to.
+    pub upstream: Arc<Upstream>,
 }
 
 impl Route {
     /// A route matching every request, forwarding to one backend. This is
-    /// the Level 1 behavior expressed as a single catch-all rule.
+    /// the Level 1 behavior expressed as a single catch-all rule; the backend
+    /// address becomes a one-member round-robin pool.
     pub fn catch_all(backend: &str) -> Self {
-        Route { host: None, method: None, path: PathMatcher::Any, backend: backend.to_string() }
+        Route {
+            host: None,
+            method: None,
+            path: PathMatcher::Any,
+            upstream: Arc::new(Upstream::single(backend)),
+        }
     }
 
     fn matches(&self, method: &str, host: Option<&str>, path: &str) -> bool {
@@ -134,15 +150,17 @@ impl RouteTable {
         RouteTable { routes }
     }
 
-    /// Find the backend for a request. Among all matching routes, return the
-    /// most specific; ties are broken by declaration order (first wins),
-    /// which matches Nginx's behavior for equally-specific regex locations.
-    pub fn find(&self, method: &str, host: Option<&str>, path: &str) -> Option<&str> {
+    /// Find the pool for a request. Among all matching routes, return the most
+    /// specific; ties are broken by declaration order (first wins), which
+    /// matches Nginx's behavior for equally-specific regex locations. Returns
+    /// the `Arc<Upstream>` by reference so the caller can clone it (a refcount
+    /// bump) and hold it for the whole exchange while the lease borrows it.
+    pub fn find(&self, method: &str, host: Option<&str>, path: &str) -> Option<&Arc<Upstream>> {
         self.routes
             .iter()
             .filter(|r| r.matches(method, host, path))
             .max_by_key(|r| r.specificity())
-            .map(|r| r.backend.as_str())
+            .map(|r| &r.upstream)
     }
 
     /// Human-readable dump for the startup banner.
@@ -152,7 +170,7 @@ impl RouteTable {
             .map(|r| {
                 let host = r.host.as_deref().unwrap_or("*");
                 let method = r.method.as_deref().unwrap_or("*");
-                format!("{method} {host} {} -> {}", r.path.describe(), r.backend)
+                format!("{method} {host} {} -> {}", r.path.describe(), r.upstream.describe())
             })
             .collect()
     }
