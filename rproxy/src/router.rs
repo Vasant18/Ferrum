@@ -176,30 +176,27 @@ impl RouteTable {
     }
 }
 
-/// Parse one CLI route spec of the form:
-///   `[METHOD ][host]path_expr=BACKEND`
-/// where `path_expr` is one of:
-///   `/exact`            exact path
-///   `/prefix/*`         wildcard (one trailing segment)
-///   `/prefix/**`        prefix (any suffix)
-///   `~^/regex$`         regex (leading `~`)
-///   `/`                 catch-all (Any) when it's just root-prefix
-///
-/// Examples:
-///   `/=127.0.0.1:9000`                       everything -> :9000
-///   `api.example.com/=127.0.0.1:9001`        host-scoped
-///   `/static/**=127.0.0.1:9002`              prefix
-///   `/files/*=127.0.0.1:9003`                wildcard segment
-///   `POST /upload=127.0.0.1:9004`            method + exact path
-///   `~^/v[0-9]+/=127.0.0.1:9005`             regex
-pub fn parse_route(spec: &str) -> io::Result<Route> {
+/// The match half of a route spec, parsed but not yet bound to a pool:
+/// `(host, method, path, target)` where `target` is the raw string after `=`.
+struct RouteMatchers {
+    host: Option<String>,
+    method: Option<String>,
+    path: PathMatcher,
+    target: String,
+}
+
+/// Parse the `[METHOD ][host]path_expr=TARGET` shape into its match conditions
+/// plus the still-unresolved target string. Shared by [`parse_route`] and
+/// [`resolve_route`]; splitting it out keeps target *resolution* (name vs.
+/// `host:port`) separate from *matching*, which never changed in Level 3.
+fn parse_matchers(spec: &str) -> io::Result<RouteMatchers> {
     let err = |m: &str| io::Error::new(io::ErrorKind::InvalidInput, format!("{m}: {spec:?}"));
 
-    let (matchers, backend) = spec
+    let (matchers, target) = spec
         .rsplit_once('=')
-        .ok_or_else(|| err("route spec missing '=BACKEND'"))?;
-    if backend.is_empty() {
-        return Err(err("empty backend"));
+        .ok_or_else(|| err("route spec missing '=TARGET'"))?;
+    if target.is_empty() {
+        return Err(err("empty target"));
     }
 
     // Optional leading "METHOD " (uppercase word before the path part).
@@ -214,14 +211,17 @@ pub fn parse_route(spec: &str) -> io::Result<Route> {
     // not supported alongside regex in this simple parser.
     if let Some(pattern) = rest.strip_prefix('~') {
         let re = Regex::new(pattern).map_err(|e| err(&format!("invalid regex ({e})")))?;
-        return Ok(Route { host: None, method, path: PathMatcher::Regex(re), backend: backend.to_string() });
+        return Ok(RouteMatchers {
+            host: None,
+            method,
+            path: PathMatcher::Regex(re),
+            target: target.to_string(),
+        });
     }
 
     // Split an optional host prefix from the path. The path starts at the
     // first '/'; anything before it is the host.
-    let slash = rest
-        .find('/')
-        .ok_or_else(|| err("path must contain '/'"))?;
+    let slash = rest.find('/').ok_or_else(|| err("path must contain '/'"))?;
     let host = if slash == 0 { None } else { Some(rest[..slash].to_ascii_lowercase()) };
     let path_expr = &rest[slash..];
 
@@ -236,98 +236,185 @@ pub fn parse_route(spec: &str) -> io::Result<Route> {
         PathMatcher::Exact(path_expr.to_string())
     };
 
-    Ok(Route { host, method, path, backend: backend.to_string() })
+    Ok(RouteMatchers { host, method, path, target: target.to_string() })
+}
+
+/// Parse one CLI route spec `[METHOD ][host]path_expr=TARGET` and bind its
+/// target to a pool. `path_expr` is one of:
+///   `/exact`            exact path
+///   `/prefix/*`         wildcard (one trailing segment)
+///   `/prefix/**`        prefix (any suffix)
+///   `~^/regex$`         regex (leading `~`)
+///   `/`                 catch-all (Any)
+///
+/// Examples:
+///   `/=127.0.0.1:9000`                everything -> a one-server pool
+///   `/api/**=api`                     prefix -> declared `--upstream api`
+///   `POST /upload=127.0.0.1:9004`     method + exact path -> one-server pool
+///   `~^/v[0-9]+/=127.0.0.1:9005`      regex -> one-server pool
+///
+/// Given the map of declared `--upstream` pools, target resolution follows
+/// three rules, in order:
+///
+///   1. The target names a declared upstream -> share that `Arc<Upstream>`.
+///   2. Otherwise it parses as `host:port` -> auto-wrap as a single-server
+///      round-robin pool (this is what preserves Level 1/2 behavior).
+///   3. Otherwise -> error `unknown upstream "x"` (it is neither a known name
+///      nor a valid address, so it is certainly a typo).
+///
+/// Several routes naming the same upstream share one `Arc`, so a pool's live
+/// counters are common across every route that targets it.
+pub fn resolve_route(spec: &str, upstreams: &HashMap<String, Arc<Upstream>>) -> io::Result<Route> {
+    let m = parse_matchers(spec)?;
+
+    let upstream = if let Some(up) = upstreams.get(&m.target) {
+        Arc::clone(up) // rule 1: declared name
+    } else if balancer::is_host_port(&m.target) {
+        Arc::new(Upstream::single(&m.target)) // rule 2: bare host:port
+    } else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("unknown upstream {:?} (not a declared --upstream name nor a host:port)", m.target),
+        ));
+    };
+
+    Ok(Route { host: m.host, method: m.method, path: m.path, upstream })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Build a table from specs, pre-declaring each spec's target as a named
+    /// single-server pool. That lets the opaque sentinel backends below
+    /// (`B_EXACT`, `B_ANY`, ...) resolve by name (rule 1) without having to be
+    /// valid `host:port` strings — these tests care about *which* target a
+    /// request routes to, not about the pool internals.
     fn table(specs: &[&str]) -> RouteTable {
-        RouteTable::new(specs.iter().map(|s| parse_route(s).unwrap()).collect())
+        let mut ups: HashMap<String, Arc<Upstream>> = HashMap::new();
+        for s in specs {
+            if let Some((_, target)) = s.rsplit_once('=') {
+                ups.entry(target.to_string())
+                    .or_insert_with(|| Arc::new(Upstream::single(target)));
+            }
+        }
+        RouteTable::new(specs.iter().map(|s| resolve_route(s, &ups).unwrap()).collect())
+    }
+
+    /// The Level 2 assertions compared `find()` to a backend string. `find()`
+    /// now returns the whole pool; this thin wrapper recovers the old
+    /// `Option<&str>` by reading the pool's name (which, for a single-server
+    /// pool, is its target), so every `Some("B_...")` assertion stays verbatim.
+    fn route_to<'a>(t: &'a RouteTable, method: &str, host: Option<&str>, path: &str) -> Option<&'a str> {
+        t.find(method, host, path).map(|u| u.name())
     }
 
     #[test]
     fn exact_beats_prefix_beats_catchall() {
         let t = table(&["/=B_ANY", "/api/**=B_PREFIX", "/api/health=B_EXACT"]);
-        assert_eq!(t.find("GET", None, "/api/health"), Some("B_EXACT"));
-        assert_eq!(t.find("GET", None, "/api/users"), Some("B_PREFIX"));
-        assert_eq!(t.find("GET", None, "/other"), Some("B_ANY"));
+        assert_eq!(route_to(&t, "GET", None, "/api/health"), Some("B_EXACT"));
+        assert_eq!(route_to(&t, "GET", None, "/api/users"), Some("B_PREFIX"));
+        assert_eq!(route_to(&t, "GET", None, "/other"), Some("B_ANY"));
     }
 
     #[test]
     fn longest_prefix_wins() {
         let t = table(&["/api/**=B_SHORT", "/api/v2/**=B_LONG"]);
-        assert_eq!(t.find("GET", None, "/api/v2/users"), Some("B_LONG"));
-        assert_eq!(t.find("GET", None, "/api/v1/users"), Some("B_SHORT"));
+        assert_eq!(route_to(&t, "GET", None, "/api/v2/users"), Some("B_LONG"));
+        assert_eq!(route_to(&t, "GET", None, "/api/v1/users"), Some("B_SHORT"));
     }
 
     #[test]
     fn host_routing() {
         let t = table(&["api.example.com/=B_API", "/=B_DEFAULT"]);
-        assert_eq!(t.find("GET", Some("api.example.com"), "/x"), Some("B_API"));
+        assert_eq!(route_to(&t, "GET", Some("api.example.com"), "/x"), Some("B_API"));
         // Case-insensitive host match.
-        assert_eq!(t.find("GET", Some("API.EXAMPLE.COM"), "/x"), Some("B_API"));
-        assert_eq!(t.find("GET", Some("other.com"), "/x"), Some("B_DEFAULT"));
-        assert_eq!(t.find("GET", None, "/x"), Some("B_DEFAULT"));
+        assert_eq!(route_to(&t, "GET", Some("API.EXAMPLE.COM"), "/x"), Some("B_API"));
+        assert_eq!(route_to(&t, "GET", Some("other.com"), "/x"), Some("B_DEFAULT"));
+        assert_eq!(route_to(&t, "GET", None, "/x"), Some("B_DEFAULT"));
     }
 
     #[test]
     fn method_routing() {
         let t = table(&["POST /upload=B_UP", "/upload=B_GET"]);
-        assert_eq!(t.find("POST", None, "/upload"), Some("B_UP"));
+        assert_eq!(route_to(&t, "POST", None, "/upload"), Some("B_UP"));
         // GET falls through to the method-less exact route.
-        assert_eq!(t.find("GET", None, "/upload"), Some("B_GET"));
+        assert_eq!(route_to(&t, "GET", None, "/upload"), Some("B_GET"));
     }
 
     #[test]
     fn wildcard_single_segment() {
         let t = table(&["/files/*=B_FILE"]);
-        assert_eq!(t.find("GET", None, "/files/report.pdf"), Some("B_FILE"));
+        assert_eq!(route_to(&t, "GET", None, "/files/report.pdf"), Some("B_FILE"));
         // Wildcard is one segment: a nested path does not match.
-        assert_eq!(t.find("GET", None, "/files/2026/report.pdf"), None);
+        assert_eq!(route_to(&t, "GET", None, "/files/2026/report.pdf"), None);
         // Empty segment does not match.
-        assert_eq!(t.find("GET", None, "/files/"), None);
+        assert_eq!(route_to(&t, "GET", None, "/files/"), None);
     }
 
     #[test]
     fn regex_routing() {
         let t = table(&["~^/v[0-9]+/=B_VER", "/=B_DEFAULT"]);
-        assert_eq!(t.find("GET", None, "/v2/users"), Some("B_VER"));
-        assert_eq!(t.find("GET", None, "/vX/users"), Some("B_DEFAULT"));
+        assert_eq!(route_to(&t, "GET", None, "/v2/users"), Some("B_VER"));
+        assert_eq!(route_to(&t, "GET", None, "/vX/users"), Some("B_DEFAULT"));
     }
 
     #[test]
     fn no_match_returns_none() {
         let t = table(&["/api/health=B"]);
-        assert_eq!(t.find("GET", None, "/nope"), None);
+        assert_eq!(route_to(&t, "GET", None, "/nope"), None);
     }
 
     #[test]
     fn host_scoped_route_more_specific_than_bare() {
         // Same path, but the host-scoped route should win for that host.
         let t = table(&["/api/**=B_BARE", "svc.local/api/**=B_HOST"]);
-        assert_eq!(t.find("GET", Some("svc.local"), "/api/x"), Some("B_HOST"));
-        assert_eq!(t.find("GET", Some("elsewhere"), "/api/x"), Some("B_BARE"));
+        assert_eq!(route_to(&t, "GET", Some("svc.local"), "/api/x"), Some("B_HOST"));
+        assert_eq!(route_to(&t, "GET", Some("elsewhere"), "/api/x"), Some("B_BARE"));
     }
 
+    // These two exercise the *matcher* half of a spec (path shape, host,
+    // method), independent of how the target resolves to a pool — so they call
+    // `parse_matchers` directly and use opaque `=B` targets.
     #[test]
     fn parse_errors() {
-        assert!(parse_route("/no-backend").is_err()); // missing '='
-        assert!(parse_route("/x=").is_err()); // empty backend
-        assert!(parse_route("~[invalid=B").is_err()); // bad regex
-        assert!(parse_route("noslash=B").is_err()); // no path
+        assert!(parse_matchers("/no-target").is_err()); // missing '='
+        assert!(parse_matchers("/x=").is_err()); // empty target
+        assert!(parse_matchers("~[invalid=B").is_err()); // bad regex
+        assert!(parse_matchers("noslash=B").is_err()); // no path
     }
 
     #[test]
     fn parse_shapes() {
-        assert!(matches!(parse_route("/=B").unwrap().path, PathMatcher::Any));
-        assert!(matches!(parse_route("/a=B").unwrap().path, PathMatcher::Exact(_)));
-        assert!(matches!(parse_route("/a/**=B").unwrap().path, PathMatcher::Prefix(_)));
-        assert!(matches!(parse_route("/a/*=B").unwrap().path, PathMatcher::Wildcard(_)));
-        assert!(matches!(parse_route("~^/x=B").unwrap().path, PathMatcher::Regex(_)));
-        let r = parse_route("POST host.com/a=B").unwrap();
+        assert!(matches!(parse_matchers("/=B").unwrap().path, PathMatcher::Any));
+        assert!(matches!(parse_matchers("/a=B").unwrap().path, PathMatcher::Exact(_)));
+        assert!(matches!(parse_matchers("/a/**=B").unwrap().path, PathMatcher::Prefix(_)));
+        assert!(matches!(parse_matchers("/a/*=B").unwrap().path, PathMatcher::Wildcard(_)));
+        assert!(matches!(parse_matchers("~^/x=B").unwrap().path, PathMatcher::Regex(_)));
+        let r = parse_matchers("POST host.com/a=B").unwrap();
         assert_eq!(r.method.as_deref(), Some("POST"));
         assert_eq!(r.host.as_deref(), Some("host.com"));
+    }
+
+    // Route resolution (test 14): a target binds to a declared upstream by
+    // name (rule 1), a bare host:port auto-wraps into a one-server pool
+    // (rule 2), and anything else is a startup error (rule 3).
+    #[test]
+    fn route_resolution_rules() {
+        let mut ups: HashMap<String, Arc<Upstream>> = HashMap::new();
+        ups.insert("api".to_string(), Arc::new(Upstream::single("127.0.0.1:9001")));
+
+        // Rule 1: named upstream — the route shares that exact pool's Arc
+        // (a refcount bump, not a fresh pool), which is what lets several
+        // routes naming one upstream share its live counters.
+        let named = resolve_route("/svc/**=api", &ups).unwrap();
+        assert!(Arc::ptr_eq(&named.upstream, &ups["api"]));
+
+        // Rule 2: bare host:port auto-wraps.
+        let wrapped = resolve_route("/=127.0.0.1:9000", &ups).unwrap();
+        assert_eq!(wrapped.upstream.name(), "127.0.0.1:9000");
+
+        // Rule 3: neither a known name nor a valid address.
+        assert!(resolve_route("/=not_a_pool", &ups).is_err());
     }
 }

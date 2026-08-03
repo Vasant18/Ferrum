@@ -316,11 +316,11 @@ async fn serve_one(
     let client_keep_alive = http::wants_keep_alive(req.version, &req.headers);
     let method = req.method.clone();
 
-    // ---- 2. Route: pick a backend from method + host + path ----
+    // ---- 2. Route: pick a POOL from method + host + path ----
     let host = http::header(&req.headers, "host").map(http::host_without_port);
     let path = http::target_path(&req.target);
-    let backend_addr = match routes.find(&method, host, path) {
-        Some(b) => b.to_string(),
+    let upstream = match routes.find(&method, host, path) {
+        Some(u) => u,
         None => {
             // No route matched. This is a routing decision, not a client
             // error — the request was well-formed, we just don't serve it.
@@ -335,14 +335,36 @@ async fn serve_one(
             return Ok(false);
         }
     };
+
+    // ---- 2b. Balance: pick a SERVER within the pool ----
+    // The lease holds one in-flight count on the chosen server and releases it
+    // on drop (see balancer::Lease); we keep it alive until the exchange ends.
+    // Affinity algorithms key on the client IP, so pass the peer's address.
+    let mut lease = match upstream.pick(peer.ip()) {
+        Some(l) => l,
+        None => {
+            // Only reachable if a pool has no available server. Startup
+            // validation forbids an empty pool, and Level 3 has no health
+            // filtering yet, so this is purely defensive (Level 4 territory).
+            eprintln!("[{peer}] no available server in upstream {:?}", upstream.name());
+            respond_error(client, 502, "Bad Gateway").await?;
+            return Ok(false);
+        }
+    };
+    let backend_addr = lease.addr().to_string();
+    // Observability: name the pool, algorithm, chosen server, and its current
+    // in-flight depth so balancing is visible under a `curl` loop.
     println!(
-        "[{peer}] {} {} {} -> {backend_addr}",
+        "[{peer}] {} {} {} -> {}[{}] {backend_addr} (inflight={})",
         req.method,
         req.target,
-        req.version.as_str()
+        req.version.as_str(),
+        upstream.name(),
+        upstream.algorithm().tag(),
+        lease.inflight(),
     );
 
-    // ---- 3. Connect to the backend ----
+    // ---- 3. Connect to the chosen backend ----
     let backend = match tokio::time::timeout(
         BACKEND_CONNECT_TIMEOUT,
         TcpStream::connect(&backend_addr),
@@ -353,7 +375,10 @@ async fn serve_one(
         Ok(Err(e)) => {
             // Backend refused/unreachable. We must still drain the request
             // body or the client-side framing desyncs; simpler and safer
-            // for Level 1: answer 502 and close.
+            // for Level 1: answer 502 and close. The lease drops here,
+            // releasing the in-flight count; because we never call
+            // mark_served, no (misleadingly fast) RTT is recorded — a failed
+            // connect must not make least-response-time prefer a dead server.
             eprintln!("[{peer}] backend connect failed: {e}");
             respond_error(client, 502, "Bad Gateway").await?;
             return Ok(false);
@@ -364,6 +389,9 @@ async fn serve_one(
             return Ok(false);
         }
     };
+    // The exchange is now underway; a completed exchange should feed the
+    // server's response-time average, so arm the lease's RTT recording.
+    lease.mark_served();
     let _ = backend.set_nodelay(true);
     let mut backend = Conn::new(backend);
 

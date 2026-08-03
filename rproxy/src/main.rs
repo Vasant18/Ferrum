@@ -20,18 +20,39 @@ mod http;
 mod proxy;
 mod router;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use router::{parse_route, Route, RouteTable};
+use balancer::Upstream;
+use router::{resolve_route, Route, RouteTable};
 use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let mut args = std::env::args().skip(1);
     let listen_addr = args.next().unwrap_or_else(|| "127.0.0.1:8080".to_string());
-    let route_specs: Vec<String> = args.collect();
 
-    let routes = build_routes(&route_specs)?;
+    // Split the remaining args into `--upstream NAME=SPEC` flags and plain
+    // route specs. Upstreams are declared pools a route can target by name;
+    // routes may appear before or after the upstreams they reference because
+    // we collect every declaration first and resolve names only afterwards.
+    let mut upstream_specs: Vec<String> = Vec::new();
+    let mut route_specs: Vec<String> = Vec::new();
+    while let Some(arg) = args.next() {
+        if arg == "--upstream" {
+            let spec = args.next().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "--upstream requires an argument (NAME=SPEC)",
+                )
+            })?;
+            upstream_specs.push(spec);
+        } else {
+            route_specs.push(arg);
+        }
+    }
+
+    let routes = build_routes(&upstream_specs, &route_specs)?;
     let routes = Arc::new(routes);
 
     let listener = TcpListener::bind(&listen_addr).await?;
@@ -62,19 +83,43 @@ async fn main() -> std::io::Result<()> {
     }
 }
 
-/// Turn CLI route specs into a `RouteTable`, applying the two friendly
-/// defaults: no args at all -> catch-all to :9000; a single bare `host:port`
-/// (no `=`) -> catch-all to that backend (the old Level 1 invocation).
-fn build_routes(specs: &[String]) -> std::io::Result<RouteTable> {
-    if specs.is_empty() {
+/// Turn CLI upstream + route specs into a `RouteTable`.
+///
+/// First the `--upstream NAME=SPEC` declarations are parsed into a map of named
+/// pools (duplicate names are a startup error). Then each route spec is
+/// resolved against that map: a target either names a declared upstream, parses
+/// as a bare `host:port` (auto-wrapped as a one-server pool), or is rejected.
+///
+/// Two friendly defaults preserve the Level 1/2 invocations: no route specs at
+/// all -> catch-all to :9000; a single bare `host:port` route arg (no `=`) ->
+/// catch-all to that backend.
+fn build_routes(upstream_specs: &[String], route_specs: &[String]) -> std::io::Result<RouteTable> {
+    let bad = |m: String| std::io::Error::new(std::io::ErrorKind::InvalidInput, m);
+
+    // Build the named-pool map. `--upstream NAME=SPEC`.
+    let mut upstreams: HashMap<String, Arc<Upstream>> = HashMap::new();
+    for decl in upstream_specs {
+        let (name, spec) = decl
+            .split_once('=')
+            .ok_or_else(|| bad(format!("--upstream must be NAME=SPEC, got {decl:?}")))?;
+        if name.is_empty() {
+            return Err(bad(format!("--upstream has empty name: {decl:?}")));
+        }
+        if upstreams.contains_key(name) {
+            return Err(bad(format!("duplicate upstream name {name:?}")));
+        }
+        upstreams.insert(name.to_string(), Arc::new(Upstream::from_spec(name, spec)?));
+    }
+
+    if route_specs.is_empty() {
         return Ok(RouteTable::new(vec![Route::catch_all("127.0.0.1:9000")]));
     }
-    if specs.len() == 1 && !specs[0].contains('=') {
-        return Ok(RouteTable::new(vec![Route::catch_all(&specs[0])]));
+    if route_specs.len() == 1 && !route_specs[0].contains('=') {
+        return Ok(RouteTable::new(vec![Route::catch_all(&route_specs[0])]));
     }
-    let mut routes = Vec::with_capacity(specs.len());
-    for spec in specs {
-        routes.push(parse_route(spec)?);
+    let mut routes = Vec::with_capacity(route_specs.len());
+    for spec in route_specs {
+        routes.push(resolve_route(spec, &upstreams)?);
     }
     Ok(RouteTable::new(routes))
 }
