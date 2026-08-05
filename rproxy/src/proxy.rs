@@ -29,6 +29,25 @@ const HEAD_READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// default (~2 minutes) is an eternity to hold client resources.
 const BACKEND_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Maximum in-request retries after a failed backend *connect*. Three tries
+/// total by default. Kept small on purpose: retries multiply load on an
+/// already-struggling pool, and a client would rather get a fast 502 than wait
+/// through five timeouts.
+const MAX_RETRIES: usize = 2;
+
+/// Whether a request method may be safely replayed on another backend.
+///
+/// Retrying is only correct when re-sending cannot cause a second side effect.
+/// `POST`/`PATCH` may have been processed by the backend before the failure
+/// surfaced, so replaying them risks duplicate writes; the safe methods here
+/// are idempotent by definition in RFC 9110.
+fn is_idempotent(method: &str) -> bool {
+    matches!(
+        method.to_ascii_uppercase().as_str(),
+        "GET" | "HEAD" | "PUT" | "DELETE" | "OPTIONS" | "TRACE"
+    )
+}
+
 /// A buffered reader that owns the "bytes read but not yet consumed"
 /// problem. TCP does not respect message boundaries: one read may contain
 /// half a request head, or a head plus the beginning of the body, or two
@@ -336,59 +355,79 @@ async fn serve_one(
         }
     };
 
-    // ---- 2b. Balance: pick a SERVER within the pool ----
-    // The lease holds one in-flight count on the chosen server and releases it
-    // on drop (see balancer::Lease); we keep it alive until the exchange ends.
-    // Affinity algorithms key on the client IP, so pass the peer's address.
-    let mut lease = match upstream.pick(peer.ip()) {
-        Some(l) => l,
-        None => {
-            // Only reachable if a pool has no available server. Startup
-            // validation forbids an empty pool, and Level 3 has no health
-            // filtering yet, so this is purely defensive (Level 4 territory).
-            eprintln!("[{peer}] no available server in upstream {:?}", upstream.name());
-            respond_error(client, 502, "Bad Gateway").await?;
-            return Ok(false);
-        }
-    };
-    let backend_addr = lease.addr().to_string();
-    // Observability: name the pool, algorithm, chosen server, and its current
-    // in-flight depth so balancing is visible under a `curl` loop.
-    println!(
-        "[{peer}] {} {} {} -> {}[{}] {backend_addr} (inflight={})",
-        req.method,
-        req.target,
-        req.version.as_str(),
-        upstream.name(),
-        upstream.algorithm().tag(),
-        lease.inflight(),
-    );
+    // ---- 2b. Balance + connect, with retry ----
+    // Retry is gated on three conditions, all required:
+    //   1. attempts remain (MAX_RETRIES),
+    //   2. the method is idempotent (safe to replay),
+    //   3. we are still at the connect stage — no request-body bytes have been
+    //      forwarded, so nothing is committed to a backend yet.
+    // Only a failed *connect* retries. A failure after the request was sent
+    // (5xx, mid-response I/O error) is not replayable: it still feeds the
+    // breaker, but the client gets the error.
+    //
+    // The lease holds one in-flight count on the chosen server and feeds the
+    // breaker on drop (see balancer::Lease); we keep the winning lease alive
+    // until the exchange ends, so the loop yields it outward.
+    let retryable = is_idempotent(&method);
+    let mut attempt = 0usize;
+    let (mut lease, backend) = loop {
+        let mut lease = match upstream.pick(peer.ip()) {
+            Some(l) => l,
+            None => {
+                // Every server in the pool is ejected by its breaker (or the
+                // pool is empty, which startup validation forbids).
+                eprintln!(
+                    "[{peer}] no healthy server in upstream {:?}",
+                    upstream.name()
+                );
+                respond_error(client, 502, "Bad Gateway").await?;
+                return Ok(false);
+            }
+        };
+        let addr = lease.addr().to_string();
+        // Observability: name the pool, algorithm, chosen server, and its
+        // current in-flight depth so balancing is visible under a `curl` loop.
+        // On a retry we tag the attempt so the fan-out to a fresh server shows.
+        println!(
+            "[{peer}] {} {} {} -> {}[{}] {addr} (inflight={}){}",
+            req.method,
+            req.target,
+            req.version.as_str(),
+            upstream.name(),
+            upstream.algorithm().tag(),
+            lease.inflight(),
+            if attempt > 0 { format!(" [retry {attempt}/{MAX_RETRIES}]") } else { String::new() },
+        );
 
-    // ---- 3. Connect to the chosen backend ----
-    let backend = match tokio::time::timeout(
-        BACKEND_CONNECT_TIMEOUT,
-        TcpStream::connect(&backend_addr),
-    )
-    .await
-    {
-        Ok(Ok(s)) => s,
-        Ok(Err(e)) => {
-            // Backend refused/unreachable. We must still drain the request
-            // body or the client-side framing desyncs; simpler and safer
-            // for Level 1: answer 502 and close. The lease drops here,
-            // releasing the in-flight count; because we never call
-            // mark_served, no (misleadingly fast) RTT is recorded — a failed
-            // connect must not make least-response-time prefer a dead server.
-            lease.mark_failure();
-            eprintln!("[{peer}] backend connect failed: {e}");
-            respond_error(client, 502, "Bad Gateway").await?;
-            return Ok(false);
-        }
-        Err(_) => {
-            lease.mark_failure();
-            eprintln!("[{peer}] backend connect timed out");
-            respond_error(client, 504, "Gateway Timeout").await?;
-            return Ok(false);
+        match tokio::time::timeout(BACKEND_CONNECT_TIMEOUT, TcpStream::connect(&addr)).await {
+            Ok(Ok(s)) => break (lease, s),
+            Ok(Err(e)) => {
+                // Transport failure: indict this server, then consider retrying
+                // on a different one. mark_failure fires before the next pick,
+                // so a tripped breaker excludes this server immediately. We must
+                // drop the lease before continuing: it borrows the Upstream, so
+                // the next pick() would conflict with the outstanding borrow.
+                lease.mark_failure();
+                eprintln!("[{peer}] backend {addr} connect failed: {e}");
+                drop(lease);
+                if retryable && attempt < MAX_RETRIES {
+                    attempt += 1;
+                    continue;
+                }
+                respond_error(client, 502, "Bad Gateway").await?;
+                return Ok(false);
+            }
+            Err(_) => {
+                lease.mark_failure();
+                eprintln!("[{peer}] backend {addr} connect timed out");
+                drop(lease);
+                if retryable && attempt < MAX_RETRIES {
+                    attempt += 1;
+                    continue;
+                }
+                respond_error(client, 504, "Gateway Timeout").await?;
+                return Ok(false);
+            }
         }
     };
     // The exchange is now underway; a completed exchange should feed the
@@ -603,5 +642,20 @@ mod tests {
         strip_hop_by_hop(&mut headers);
         let names: Vec<&str> = headers.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(names, vec!["Host", "Accept"]);
+    }
+
+    // Retry is only safe for methods with no side effects. A POST may already
+    // have been processed by the backend before the failure, so replaying it
+    // could double-charge a card; GET can always be repeated.
+    #[test]
+    fn idempotent_methods_are_retryable() {
+        for m in ["GET", "HEAD", "PUT", "DELETE", "OPTIONS", "TRACE"] {
+            assert!(is_idempotent(m), "{m} should be retryable");
+        }
+        for m in ["POST", "PATCH", "CONNECT", "WEIRD"] {
+            assert!(!is_idempotent(m), "{m} must NOT be retried");
+        }
+        // Method matching is case-insensitive per RFC 9110 practice here.
+        assert!(is_idempotent("get"));
     }
 }
