@@ -34,7 +34,8 @@
 use std::cell::Cell;
 use std::io;
 use std::net::IpAddr;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
@@ -93,6 +94,240 @@ impl Algorithm {
     }
 }
 
+/// Tunables shared by the breaker and the active prober. One instance per
+/// upstream, behind an `Arc` so every `Server` in the pool reads the same
+/// thresholds without copying them.
+#[derive(Clone, Debug)]
+pub struct HealthConfig {
+    /// Consecutive failures that trip Closed -> Open.
+    pub fail_threshold: usize,
+    /// Consecutive successes in HalfOpen that restore Closed.
+    pub success_threshold: usize,
+    /// First Open cooldown, before any doubling.
+    pub backoff_base: Duration,
+    /// Ceiling on the doubling cooldown.
+    pub backoff_max: Duration,
+    /// Active probe period.
+    pub interval: Duration,
+    /// Per-probe connect+read deadline.
+    pub timeout: Duration,
+    /// Path the active prober requests, e.g. "/health".
+    pub path: String,
+}
+
+impl Default for HealthConfig {
+    fn default() -> HealthConfig {
+        HealthConfig {
+            fail_threshold: 3,
+            success_threshold: 2,
+            backoff_base: Duration::from_secs(1),
+            backoff_max: Duration::from_secs(30),
+            interval: Duration::from_secs(2),
+            timeout: Duration::from_secs(1),
+            path: "/health".to_string(),
+        }
+    }
+}
+
+/// The three breaker states. `Closed` is the healthy, serving state — the name
+/// comes from electrical circuits, where a *closed* circuit conducts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BreakerState {
+    /// Serving traffic. Failures accumulate toward the trip threshold.
+    Closed,
+    /// Tripped. No client traffic; a cooldown must elapse before we retest.
+    Open,
+    /// Cooldown elapsed, one probe outstanding. Clients are still blocked —
+    /// we only *suspect* recovery until `success_threshold` probes agree.
+    HalfOpen,
+}
+
+/// What the prober should do with a server this tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProbeAction {
+    /// Routine liveness probe of a healthy server.
+    Normal,
+    /// The single recovery trial admitted per Open cooldown.
+    HalfOpenTrial,
+}
+
+const STATE_CLOSED: u8 = 0;
+const STATE_OPEN: u8 = 1;
+const STATE_HALF_OPEN: u8 = 2;
+
+/// A per-server circuit breaker: the single source of truth for whether this
+/// backend gets traffic.
+///
+/// Both feeds — passive (real request outcomes) and active (the `health.rs`
+/// prober) — call the same `record_success`/`record_failure`. That sharing is
+/// the point: a server under live traffic trips from client failures without
+/// waiting for a probe, and a server with no traffic still recovers via probes.
+/// Neither feed knows the other exists.
+///
+/// Every method takes `now: Instant` instead of reading the clock itself, so
+/// the whole state machine is testable without sleeping.
+///
+/// All fields are `Relaxed` atomics. As in Level 3, these guide a heuristic
+/// rather than protect data, so we never need an ordering edge. A concurrent
+/// pair of `record_failure` calls can race and lose one increment; the next
+/// failure trips the breaker instead. One request of extra tolerance is a fair
+/// price for keeping the request path lock-free.
+pub struct Breaker {
+    cfg: Arc<HealthConfig>,
+    state: AtomicU8,
+    /// Nanoseconds-since-process-start when the Open cooldown ends. Using a
+    /// scalar baseline (rather than storing an `Instant`) keeps this atomic.
+    open_until_nanos: AtomicU64,
+    /// Current cooldown length in nanos; doubles per trip, capped, reset on
+    /// recovery.
+    backoff_nanos: AtomicU64,
+    consec_fail: AtomicUsize,
+    consec_success: AtomicUsize,
+}
+
+impl Breaker {
+    pub fn new(cfg: Arc<HealthConfig>) -> Breaker {
+        // Realize the shared process-start baseline now, at construction, so it
+        // is guaranteed to precede every `now: Instant` later handed to a
+        // transition method. `stamp` measures nanos from this baseline; if the
+        // `LazyLock` were instead first initialized *inside* a transition (its
+        // only other toucher is the Random PRNG seed), a `now` captured before
+        // that point would saturate to 0 and desynchronize the cooldown
+        // arithmetic. Touching it here costs nothing in the real server — the
+        // first breaker is built at startup — and removes the ordering hazard.
+        let _ = *PROCESS_START;
+        let base = cfg.backoff_base.as_nanos() as u64;
+        Breaker {
+            cfg,
+            state: AtomicU8::new(STATE_CLOSED),
+            open_until_nanos: AtomicU64::new(0),
+            backoff_nanos: AtomicU64::new(base),
+            consec_fail: AtomicUsize::new(0),
+            consec_success: AtomicUsize::new(0),
+        }
+    }
+
+    /// Nanos from the process-start baseline to `t`. Shares `PROCESS_START`
+    /// with the Random algorithm's seeding.
+    fn stamp(t: Instant) -> u64 {
+        t.saturating_duration_since(*PROCESS_START).as_nanos() as u64
+    }
+
+    fn load_state(&self) -> BreakerState {
+        match self.state.load(Ordering::Relaxed) {
+            STATE_OPEN => BreakerState::Open,
+            STATE_HALF_OPEN => BreakerState::HalfOpen,
+            _ => BreakerState::Closed,
+        }
+    }
+
+    pub fn state(&self) -> BreakerState {
+        self.load_state()
+    }
+
+    /// The gate every selection algorithm consults (via `Server::available`).
+    /// True only in `Closed`: recovery must be *confirmed* by probes before
+    /// clients are exposed to a server again.
+    pub fn allows_traffic(&self) -> bool {
+        self.state.load(Ordering::Relaxed) == STATE_CLOSED
+    }
+
+    /// Current Open cooldown. Exposed for log lines and tests.
+    pub fn cooldown(&self) -> Duration {
+        Duration::from_nanos(self.backoff_nanos.load(Ordering::Relaxed))
+    }
+
+    /// Move to Open, arming the cooldown. `double` distinguishes a fresh trip
+    /// (keep the current backoff) from a failed recovery trial (double it).
+    fn trip_open(&self, now: Instant, double: bool) {
+        let mut backoff = self.backoff_nanos.load(Ordering::Relaxed);
+        if double {
+            let max = self.cfg.backoff_max.as_nanos() as u64;
+            backoff = backoff.saturating_mul(2).min(max);
+            self.backoff_nanos.store(backoff, Ordering::Relaxed);
+        }
+        self.open_until_nanos
+            .store(Self::stamp(now).saturating_add(backoff), Ordering::Relaxed);
+        self.state.store(STATE_OPEN, Ordering::Relaxed);
+        self.consec_fail.store(0, Ordering::Relaxed);
+        self.consec_success.store(0, Ordering::Relaxed);
+    }
+
+    /// Report one failed exchange. Returns `Some((from, to))` if the state
+    /// changed, so the caller can log the transition.
+    pub fn record_failure(&self, now: Instant) -> Option<(BreakerState, BreakerState)> {
+        match self.load_state() {
+            BreakerState::Closed => {
+                let n = self.consec_fail.fetch_add(1, Ordering::Relaxed) + 1;
+                if n >= self.cfg.fail_threshold {
+                    // Fresh trip: keep the existing backoff (base, or whatever
+                    // a previous un-recovered episode left).
+                    self.trip_open(now, false);
+                    Some((BreakerState::Closed, BreakerState::Open))
+                } else {
+                    None
+                }
+            }
+            BreakerState::HalfOpen => {
+                // The recovery trial failed: back to Open, waiting longer.
+                self.trip_open(now, true);
+                Some((BreakerState::HalfOpen, BreakerState::Open))
+            }
+            // Already Open: the cooldown governs the next attempt.
+            BreakerState::Open => None,
+        }
+    }
+
+    /// Report one successful exchange.
+    pub fn record_success(&self, _now: Instant) -> Option<(BreakerState, BreakerState)> {
+        match self.load_state() {
+            BreakerState::Closed => {
+                // A good result clears a partial failure run: only *consecutive*
+                // failures should trip the breaker.
+                self.consec_fail.store(0, Ordering::Relaxed);
+                None
+            }
+            BreakerState::HalfOpen => {
+                let n = self.consec_success.fetch_add(1, Ordering::Relaxed) + 1;
+                if n >= self.cfg.success_threshold {
+                    self.state.store(STATE_CLOSED, Ordering::Relaxed);
+                    self.backoff_nanos
+                        .store(self.cfg.backoff_base.as_nanos() as u64, Ordering::Relaxed);
+                    self.consec_fail.store(0, Ordering::Relaxed);
+                    self.consec_success.store(0, Ordering::Relaxed);
+                    Some((BreakerState::HalfOpen, BreakerState::Closed))
+                } else {
+                    None
+                }
+            }
+            // Traffic is blocked in Open, so this shouldn't happen; ignore it
+            // rather than letting a stray success silently un-trip the breaker.
+            BreakerState::Open => None,
+        }
+    }
+
+    /// The prober's gate: may this server be probed right now, and as what?
+    ///
+    /// Returns `None` for a server that is cooling down or already has a trial
+    /// outstanding. Admitting exactly one trial per cooldown is what keeps a
+    /// dead backend from being hammered every tick.
+    pub fn probe_due(&self, now: Instant) -> Option<ProbeAction> {
+        match self.load_state() {
+            BreakerState::Closed => Some(ProbeAction::Normal),
+            BreakerState::Open => {
+                if Self::stamp(now) >= self.open_until_nanos.load(Ordering::Relaxed) {
+                    self.state.store(STATE_HALF_OPEN, Ordering::Relaxed);
+                    self.consec_success.store(0, Ordering::Relaxed);
+                    Some(ProbeAction::HalfOpenTrial)
+                } else {
+                    None
+                }
+            }
+            BreakerState::HalfOpen => None,
+        }
+    }
+}
+
 /// Virtual nodes per real server on the consistent-hash ring. More vnodes =
 /// smoother key distribution but a bigger ring; 160 is the common Ketama value.
 const VNODES_PER_SERVER: usize = 160;
@@ -111,6 +346,8 @@ pub struct Server {
     /// least-response-time, which sorts untried servers first so a fresh
     /// server gets traffic instead of being starved.
     ewma_us: AtomicU64,
+    /// Level 4: the circuit breaker deciding whether this server gets traffic.
+    breaker: Breaker,
 }
 
 /// EWMA smoothing factor. `new = old*(1-alpha) + sample*alpha`, done in integer
@@ -120,19 +357,38 @@ const EWMA_ALPHA_NUM: u64 = 1; // alpha = 1/5
 const EWMA_ALPHA_DEN: u64 = 5;
 
 impl Server {
-    fn new(addr: String) -> Server {
-        Server { addr, inflight: AtomicUsize::new(0), ewma_us: AtomicU64::new(0) }
+    fn new(addr: String, health: Arc<HealthConfig>) -> Server {
+        Server {
+            addr,
+            inflight: AtomicUsize::new(0),
+            ewma_us: AtomicU64::new(0),
+            breaker: Breaker::new(health),
+        }
     }
 
     pub fn addr(&self) -> &str {
         &self.addr
     }
 
-    /// Level 4 seam. Hardcoded `true` today; every `select` branch already
-    /// routes only among servers this returns true for, so Level 4 can make it
-    /// read a health flag with no changes to the selection logic.
+    /// Whether this server may receive traffic. Level 3 hardcoded `true` and
+    /// left this seam; Level 4 fills it in from the breaker. Because every
+    /// selection algorithm already routed only among available servers, no
+    /// selection logic changed to make ejection work.
     pub fn available(&self) -> bool {
-        true
+        self.breaker.allows_traffic()
+    }
+
+    pub fn breaker(&self) -> &Breaker {
+        &self.breaker
+    }
+
+    /// Passive/active feed entry points. Both feeds funnel through here.
+    pub fn record_success(&self, now: Instant) -> Option<(BreakerState, BreakerState)> {
+        self.breaker.record_success(now)
+    }
+
+    pub fn record_failure(&self, now: Instant) -> Option<(BreakerState, BreakerState)> {
+        self.breaker.record_failure(now)
     }
 
     fn inflight(&self) -> usize {
@@ -172,6 +428,8 @@ pub struct Upstream {
     /// Consistent hashing only: `(hash, server_index)` pairs sorted by hash,
     /// `VNODES_PER_SERVER` entries per server. Empty otherwise.
     ring: Vec<(u64, usize)>,
+    /// Level 4 health tunables for this pool, shared with every `Server` in it.
+    health: Arc<HealthConfig>,
 }
 
 impl Upstream {
@@ -194,7 +452,12 @@ impl Upstream {
     /// list. Precomputes the weighted-RR expansion and the consistent-hash
     /// ring so that `pick` stays cheap. Callers that go through the CLI use
     /// [`Upstream::from_spec`]; this is the seam tests and internal helpers use.
-    fn build(name: String, algorithm: Algorithm, servers: Vec<(String, u32)>) -> Upstream {
+    fn build(
+        name: String,
+        algorithm: Algorithm,
+        servers: Vec<(String, u32)>,
+        health: Arc<HealthConfig>,
+    ) -> Upstream {
         let wrr_index = if algorithm.uses_weight() {
             let mut v = Vec::new();
             for (i, (_, weight)) in servers.iter().enumerate() {
@@ -225,8 +488,28 @@ impl Upstream {
             Vec::new()
         };
 
-        let servers = servers.into_iter().map(|(addr, _)| Server::new(addr)).collect();
-        Upstream { name, algorithm, servers, cursor: AtomicUsize::new(0), wrr_index, ring }
+        let servers = servers
+            .into_iter()
+            .map(|(addr, _)| Server::new(addr, Arc::clone(&health)))
+            .collect();
+        Upstream {
+            name,
+            algorithm,
+            servers,
+            cursor: AtomicUsize::new(0),
+            wrr_index,
+            ring,
+            health,
+        }
+    }
+
+    pub fn health(&self) -> &Arc<HealthConfig> {
+        &self.health
+    }
+
+    /// Read-only view of the pool for the prober to walk.
+    pub fn servers_slice(&self) -> &[Server] {
+        &self.servers
     }
 
     /// Choose a server index for this request, or `None` if the pool has no
@@ -552,7 +835,12 @@ impl Upstream {
         if servers.is_empty() {
             return Err(err("empty pool (no servers)"));
         }
-        Ok(Upstream::build(name.to_string(), algorithm, servers))
+        Ok(Upstream::build(
+            name.to_string(),
+            algorithm,
+            servers,
+            Arc::new(HealthConfig::default()),
+        ))
     }
 
     /// A single-server round-robin pool wrapping one backend address. This is
@@ -560,7 +848,12 @@ impl Upstream {
     /// an `Upstream`: a one-member pool is genuinely just a degenerate pool, so
     /// the rest of the code has exactly one path.
     pub fn single(addr: &str) -> Upstream {
-        Upstream::build(addr.to_string(), Algorithm::RoundRobin, vec![(addr.to_string(), 1)])
+        Upstream::build(
+            addr.to_string(),
+            Algorithm::RoundRobin,
+            vec![(addr.to_string(), 1)],
+            Arc::new(HealthConfig::default()),
+        )
     }
 }
 
@@ -577,7 +870,19 @@ mod tests {
     /// don't exercise the spec parser.
     fn pool(algo: Algorithm, servers: &[(&str, u32)]) -> Upstream {
         let servers = servers.iter().map(|(a, w)| (a.to_string(), *w)).collect();
-        Upstream::build("test".to_string(), algo, servers)
+        Upstream::build("test".to_string(), algo, servers, hc())
+    }
+
+    fn hc() -> Arc<HealthConfig> {
+        Arc::new(HealthConfig {
+            fail_threshold: 3,
+            success_threshold: 2,
+            backoff_base: Duration::from_secs(1),
+            backoff_max: Duration::from_secs(30),
+            interval: Duration::from_secs(2),
+            timeout: Duration::from_secs(1),
+            path: "/health".to_string(),
+        })
     }
 
     const ANY: IpAddr = IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1));
@@ -810,5 +1115,149 @@ mod tests {
         let up = Upstream::single("127.0.0.1:9000");
         assert_eq!(up.select(ANY), Some(0));
         assert_eq!(up.servers[0].addr(), "127.0.0.1:9000");
+    }
+
+    // 1. Below the threshold, the breaker stays Closed and keeps serving.
+    #[test]
+    fn breaker_tolerates_failures_below_threshold() {
+        let b = Breaker::new(hc());
+        let t0 = Instant::now();
+        b.record_failure(t0);
+        b.record_failure(t0);
+        assert!(b.allows_traffic());
+        assert_eq!(b.state(), BreakerState::Closed);
+    }
+
+    // 2. Hitting the threshold trips the breaker Open and stops traffic.
+    #[test]
+    fn breaker_trips_open_at_threshold() {
+        let b = Breaker::new(hc());
+        let t0 = Instant::now();
+        for _ in 0..3 {
+            b.record_failure(t0);
+        }
+        assert_eq!(b.state(), BreakerState::Open);
+        assert!(!b.allows_traffic());
+    }
+
+    // 3. Failures must be CONSECUTIVE: a success resets the run.
+    #[test]
+    fn breaker_success_resets_failure_run() {
+        let b = Breaker::new(hc());
+        let t0 = Instant::now();
+        b.record_failure(t0);
+        b.record_failure(t0);
+        b.record_success(t0); // clears the run
+        b.record_failure(t0);
+        b.record_failure(t0);
+        assert_eq!(b.state(), BreakerState::Closed, "2 failures after reset must not trip");
+    }
+
+    // 4. Open blocks probes until the cooldown elapses, then admits exactly one trial.
+    #[test]
+    fn breaker_open_admits_one_half_open_trial_after_cooldown() {
+        let b = Breaker::new(hc());
+        let t0 = Instant::now();
+        for _ in 0..3 {
+            b.record_failure(t0);
+        }
+        // Still cooling down: no probe.
+        assert!(b.probe_due(t0).is_none());
+        assert!(b.probe_due(t0 + Duration::from_millis(999)).is_none());
+        // Cooldown elapsed: one trial admitted, and it moves to HalfOpen.
+        let after = t0 + Duration::from_secs(1);
+        assert!(matches!(b.probe_due(after), Some(ProbeAction::HalfOpenTrial)));
+        assert_eq!(b.state(), BreakerState::HalfOpen);
+        // A trial is already outstanding: no second probe.
+        assert!(b.probe_due(after).is_none());
+        // Clients are still blocked while we only *suspect* recovery.
+        assert!(!b.allows_traffic());
+    }
+
+    // 5. Enough successes in HalfOpen closes the breaker and resets backoff.
+    #[test]
+    fn breaker_recovers_after_success_threshold() {
+        let b = Breaker::new(hc());
+        let t0 = Instant::now();
+        for _ in 0..3 {
+            b.record_failure(t0);
+        }
+        let t1 = t0 + Duration::from_secs(1);
+        b.probe_due(t1); // -> HalfOpen
+        b.record_success(t1);
+        assert_eq!(b.state(), BreakerState::HalfOpen, "one success is not enough");
+        b.record_success(t1);
+        assert_eq!(b.state(), BreakerState::Closed);
+        assert!(b.allows_traffic());
+        assert_eq!(b.cooldown(), Duration::from_secs(1), "backoff reset on recovery");
+    }
+
+    // 6. A failed trial re-opens the breaker and DOUBLES the cooldown.
+    #[test]
+    fn breaker_failed_trial_doubles_backoff() {
+        let b = Breaker::new(hc());
+        let t0 = Instant::now();
+        for _ in 0..3 {
+            b.record_failure(t0);
+        }
+        assert_eq!(b.cooldown(), Duration::from_secs(1));
+        let t1 = t0 + Duration::from_secs(1);
+        b.probe_due(t1); // -> HalfOpen
+        b.record_failure(t1); // trial failed
+        assert_eq!(b.state(), BreakerState::Open);
+        assert_eq!(b.cooldown(), Duration::from_secs(2), "backoff must double");
+    }
+
+    // 7. Backoff doubles across repeated failed trials and caps at backoff_max.
+    #[test]
+    fn breaker_backoff_caps_at_max() {
+        let b = Breaker::new(hc());
+        let mut t = Instant::now();
+        for _ in 0..3 {
+            b.record_failure(t);
+        }
+        // Each failed trial doubles: 1,2,4,8,16,30(cap),30...
+        for _ in 0..8 {
+            t += b.cooldown();
+            b.probe_due(t);
+            b.record_failure(t);
+        }
+        assert_eq!(b.cooldown(), Duration::from_secs(30), "must cap, not grow unbounded");
+    }
+
+    // 8. Recovery resets backoff so a later trip starts from base again.
+    #[test]
+    fn breaker_backoff_resets_after_recovery() {
+        let b = Breaker::new(hc());
+        let mut t = Instant::now();
+        for _ in 0..3 {
+            b.record_failure(t);
+        }
+        t += Duration::from_secs(1);
+        b.probe_due(t);
+        b.record_failure(t); // backoff -> 2s
+        t += Duration::from_secs(2);
+        b.probe_due(t);
+        b.record_success(t);
+        b.record_success(t); // recovered
+        assert_eq!(b.cooldown(), Duration::from_secs(1));
+        // Trip again: cooldown starts from base, not from 2s.
+        for _ in 0..3 {
+            b.record_failure(t);
+        }
+        assert_eq!(b.cooldown(), Duration::from_secs(1));
+    }
+
+    // available() is now breaker-derived, but defaults to serving.
+    #[test]
+    fn server_available_follows_breaker() {
+        let up = pool(Algorithm::RoundRobin, &[("a:1", 1)]);
+        let s = &up.servers_slice()[0];
+        assert!(s.available(), "a fresh server must serve traffic");
+        let t0 = Instant::now();
+        for _ in 0..3 {
+            s.record_failure(t0);
+        }
+        assert!(!s.available(), "a tripped server must be excluded from selection");
     }
 }
