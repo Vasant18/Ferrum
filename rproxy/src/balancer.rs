@@ -308,9 +308,14 @@ impl Breaker {
 
     /// The prober's gate: may this server be probed right now, and as what?
     ///
-    /// Returns `None` for a server that is cooling down or already has a trial
-    /// outstanding. Admitting exactly one trial per cooldown is what keeps a
-    /// dead backend from being hammered every tick.
+    /// Returns `None` only for a server that is still cooling down in `Open`.
+    /// The anti-hammering guarantee lives in the `Open` arm's cooldown check,
+    /// not in refusing to re-probe `HalfOpen`: a server that fails its trial
+    /// returns to `Open` with a doubled backoff (see `record_failure`), so a
+    /// genuinely dead backend is still probed at most once per (growing)
+    /// cooldown — never once per tick. Continuing to probe *while* HalfOpen
+    /// only keeps probing a server that is actively answering, which is exactly
+    /// what we want to confirm recovery quickly.
     pub fn probe_due(&self, now: Instant) -> Option<ProbeAction> {
         match self.load_state() {
             BreakerState::Closed => Some(ProbeAction::Normal),
@@ -323,7 +328,16 @@ impl Breaker {
                     None
                 }
             }
-            BreakerState::HalfOpen => None,
+            // Keep probing while HalfOpen so consecutive successes can reach
+            // `success_threshold`. If we returned `None` here, a recovery that
+            // needs more than one success would wedge forever: the single trial
+            // admitted by the `Open` arm gets `consec_success` to 1, and since
+            // clients are blocked in HalfOpen (`allows_traffic` is false) no
+            // passive success can supply the rest. The prober is the only feed
+            // that can, so it must keep going. A trial that *fails* still trips
+            // us straight back to `Open` (doubled backoff), preserving the
+            // one-probe-per-cooldown ceiling for a server that isn't recovering.
+            BreakerState::HalfOpen => Some(ProbeAction::HalfOpenTrial),
         }
     }
 }
@@ -1245,9 +1259,12 @@ mod tests {
         assert_eq!(b.state(), BreakerState::Closed, "2 failures after reset must not trip");
     }
 
-    // 4. Open blocks probes until the cooldown elapses, then admits exactly one trial.
+    // 4. Open blocks probes until the cooldown elapses, then admits a trial and
+    //    keeps admitting trials while HalfOpen (so recovery can accumulate the
+    //    successes it needs). The anti-hammering ceiling is the Open cooldown, not
+    //    a refusal to re-probe HalfOpen.
     #[test]
-    fn breaker_open_admits_one_half_open_trial_after_cooldown() {
+    fn breaker_open_admits_half_open_trials_after_cooldown() {
         let b = Breaker::new(hc());
         let t0 = Instant::now();
         for _ in 0..3 {
@@ -1256,12 +1273,13 @@ mod tests {
         // Still cooling down: no probe.
         assert!(b.probe_due(t0).is_none());
         assert!(b.probe_due(t0 + Duration::from_millis(999)).is_none());
-        // Cooldown elapsed: one trial admitted, and it moves to HalfOpen.
+        // Cooldown elapsed: a trial is admitted, and it moves to HalfOpen.
         let after = t0 + Duration::from_secs(1);
         assert!(matches!(b.probe_due(after), Some(ProbeAction::HalfOpenTrial)));
         assert_eq!(b.state(), BreakerState::HalfOpen);
-        // A trial is already outstanding: no second probe.
-        assert!(b.probe_due(after).is_none());
+        // While HalfOpen the prober keeps being admitted, so a multi-success
+        // recovery can complete. (Before the fix this returned None and wedged.)
+        assert!(matches!(b.probe_due(after), Some(ProbeAction::HalfOpenTrial)));
         // Clients are still blocked while we only *suspect* recovery.
         assert!(!b.allows_traffic());
     }
@@ -1282,6 +1300,44 @@ mod tests {
         assert_eq!(b.state(), BreakerState::Closed);
         assert!(b.allows_traffic());
         assert_eq!(b.cooldown(), Duration::from_secs(1), "backoff reset on recovery");
+    }
+
+    // 5b. Integration-shaped recovery: drive it the way the prober actually
+    //     does — one `probe_due(now)` then one `record_success(now)` per tick —
+    //     and confirm the breaker reaches Closed with the DEFAULT
+    //     success_threshold of 2. This is the case the unit test above misses:
+    //     it calls `record_success` twice directly, but the live prober can only
+    //     record a success for a server `probe_due` admits, and before the fix
+    //     `probe_due` returned `None` for HalfOpen — so the second success could
+    //     never be produced and recovery wedged forever. This test would have
+    //     caught that.
+    #[test]
+    fn breaker_recovers_via_prober_loop_with_default_threshold() {
+        let b = Breaker::new(Arc::new(HealthConfig::default())); // success_threshold = 2
+        assert_eq!(b.cfg.success_threshold, 2, "guard: this test is about the >1 case");
+        let mut t = Instant::now();
+        for _ in 0..b.cfg.fail_threshold {
+            b.record_failure(t);
+        }
+        assert_eq!(b.state(), BreakerState::Open);
+
+        // Simulate prober ticks until the cooldown elapses and recovery lands.
+        // Each tick: ask `probe_due`; if it admits a probe, feed a success (the
+        // server is healthy again). Bounded so a regression wedges the test into
+        // a failure rather than an infinite loop.
+        let mut closed = false;
+        for _ in 0..10 {
+            t += Duration::from_secs(1);
+            if b.probe_due(t).is_some() {
+                b.record_success(t);
+            }
+            if b.state() == BreakerState::Closed {
+                closed = true;
+                break;
+            }
+        }
+        assert!(closed, "prober-driven recovery must reach Closed with success_threshold=2");
+        assert!(b.allows_traffic());
     }
 
     // 6. A failed trial re-opens the breaker and DOUBLES the cooldown.

@@ -11,7 +11,7 @@ Course defined in [Build.md](Build.md). Theory reference: [Reverse-Proxy-Knowled
 | 1 | Core Networking (TCP, HTTP/1.1, forwarding, keep-alive, chunked) | 🟢 **Implemented + hardened** (2026-07-26/27) | `http.rs` (parsing/framing) + `proxy.rs` (Conn, forwarding) + `main.rs` (accept loop). 24 unit tests. Request-smuggling gaps closed. Quiz pending. |
 | 2 | Routing (host/path/method, precedence) | 🟢 **Implemented** (2026-07-28) | `router.rs`: RouteTable + PathMatcher (exact/prefix/wildcard/regex/any) + host/method filters + specificity-ranked `find()`; CLI route specs; shared as `Arc<RouteTable>`. 404 on no match. 36 unit tests. Quiz pending. |
 | 3 | Load Balancing (RR, weighted, least-conn, consistent hashing) | 🟢 **Implemented** (2026-08-04) | `balancer.rs`: `Upstream` pools + 7 algorithms (rr/wrr/rand/lc/lrt/iphash/chash) + RAII `Lease`; `Route` now targets `Arc<Upstream>`; `--upstream NAME=SPEC` CLI. 52 unit tests. Live-verified all algos. Quiz pending. |
-| 4 | Health Checks (active/passive, retries, circuit breaker) | 🟢 **Implemented** (2026-08-06) | `balancer.rs`: per-server `Breaker` (Closed/Open/HalfOpen) + shared passive/active feeds via `Server::record_*`; `health.rs`: one prober task per upstream (`GET /health`, timeout, `probe_due` gate); `proxy.rs`: connect-retry loop (idempotent + pre-body + cap 2); `;health=PATH` spec suffix + `--hc-*` flags. 71 unit tests. Live-verified ejection/retry/cap; recovery works with `--hc-success 1` (see note). Quiz pending. |
+| 4 | Health Checks (active/passive, retries, circuit breaker) | 🟢 **Implemented** (2026-08-06) | `balancer.rs`: per-server `Breaker` (Closed/Open/HalfOpen) + shared passive/active feeds via `Server::record_*`; `health.rs`: one prober task per upstream (`GET /health`, timeout, `probe_due` gate); `proxy.rs`: connect-retry loop (idempotent + pre-body + cap 2); `;health=PATH` spec suffix + `--hc-*` flags. 72 unit tests. Live-verified ejection, recovery, retry, and cap all with default config. Quiz pending. |
 | 5 | Proxy Headers & Rewriting (XFF, host/URL rewrite) | ⚪ Not started | |
 | 6 | Middleware (pipeline, auth, rate limiting) | ⚪ Not started | |
 | 7 | Performance (pooling, buffers, timeouts) | ⚪ Not started | Backend conns are close-per-request until pooling lands here |
@@ -147,33 +147,37 @@ invocations still work unchanged; all four bad configs reject at startup with ex
       mid-response I/O) is not replayable. Retries are tagged `[retry N/2]` in the log
 - [x] Exponential backoff: cooldown starts at `backoff_base`, doubles on each failed
       HalfOpen trial, caps at `backoff_max`, and resets to base on recovery
+- [x] Recovery: `probe_due` keeps admitting a `HalfOpenTrial` while HalfOpen (not just the
+      first tick), so a server that needs `success_threshold` (default 2) consecutive probe
+      successes can actually reach it. The anti-hammering ceiling stays the Open cooldown —
+      a *failed* trial trips straight back to Open with a doubled backoff, so a truly dead
+      backend is still probed at most once per (growing) cooldown, not once per tick
 - [x] CLI surface: per-upstream `;health=PATH` suffix on the `--upstream` spec (inherits
       global thresholds, overrides only the path); global `--hc-interval`, `--hc-timeout`,
       `--hc-fail`, `--hc-success`, `--hc-backoff-base`, `--hc-backoff-max`. The CLI now
       builds pools via `Upstream::from_spec_with_health` (the old `from_spec` is retained as
       the default-config API, exercised by tests)
-- [x] 71 unit tests (52 from Level 3 kept green; +19 for breaker states, backoff, passive
-      feed, spec health suffix, prober mapping)
+- [x] 72 unit tests (52 from Level 3 kept green; +20 for breaker states, backoff, passive
+      feed, prober-driven recovery, spec health suffix, prober mapping)
 - [ ] **Level 4 quiz — Vishwa to answer before Level 5** (questions below)
 
-**Verified end-to-end (2026-08-06):** `cargo test` (71 tests); release binary driven against
-python backends on :9001–:9003. **Ejection:** killing 9002 under `--hc-interval 1s --hc-fail 2`
-tripped `127.0.0.1:9002 Closed->Open` after 2 failed active probes; the 9-GET loop returned
-only `9001`/`9003` with zero 502s, and failed HalfOpen trials doubled the cooldown live
-(1s→2s→4s→8s→16s). **Retry (the sole coverage — the loop has no unit test):** with
-`rr:127.0.0.1:9001,127.0.0.1:9099` (9099 closed) and `--hc-fail 100` so the dead server stayed
-pickable, all 6 GETs returned `200` with `[retry 1/2]` lines showing the retry landing on 9001;
-a POST loop returned alternating `502 200`, proving non-idempotent requests are not replayed;
-with three dead servers + one alive, the highest marker observed was `[retry 2/2]` (never
-`3/..`) and a GET that drew dead picks for all three attempts correctly gave up with 502. **Recovery
-caveat:** with the default `success_threshold = 2`, an ejected (traffic-starved) server does *not*
-recover — `probe_due` admits only one HalfOpen trial per episode, so `consec_success` never
-reaches 2 and the breaker wedges in HalfOpen. Re-running with `--hc-success 1` recovered cleanly:
-`HalfOpen->Closed`, backoff reset to 1s, and 9002 rejoined rotation. This is a real Task-1/Task-4
-integration gap (the recovery unit test drives `record_success` twice directly, bypassing the
-one-trial-per-episode gate) and is noted for Level 5 rather than fixed here.
+**Verified end-to-end (2026-08-06):** `cargo test` (72 tests); release binary driven against
+python backends on :9001–:9003, all with the **default** config (`--hc-interval 1s --hc-fail 2`,
+no `--hc-success` override). **Ejection:** killing 9002 tripped `127.0.0.1:9002 Closed->Open`
+after 2 failed active probes; the 9-GET loop returned only `9001`/`9003` with zero 502s, and
+failed HalfOpen trials doubled the cooldown live (1s→2s→4s). **Recovery:** restarting 9002
+produced `HalfOpen->Closed` (backoff reset to 1s), and 9002 rejoined rotation — the follow-up
+9-GET loop split evenly 3/3/3 across all three backends. **Retry (the sole coverage — the loop
+has no unit test):** with `rr:127.0.0.1:9001,127.0.0.1:9099` (9099 closed) and `--hc-fail 100`
+so the dead server stayed pickable, all 6 GETs returned `200` with `[retry 1/2]` lines showing
+the retry landing on 9001; a POST loop returned alternating `502 200`, proving non-idempotent
+requests are not replayed; with three dead servers + one alive, the highest marker observed was
+`[retry 2/2]` (never `3/..`) and a GET that drew dead picks for all three attempts correctly gave
+up with 502. (An earlier build wedged in HalfOpen under the default `success_threshold=2` because
+`probe_due` returned `None` for HalfOpen after the first trial; that was fixed by continuing to
+admit trials while HalfOpen, and a prober-loop-shaped regression test now guards it.)
 
-**Run it:** `cargo run --release -- 127.0.0.1:8080 --upstream 'api=rr:127.0.0.1:9001,127.0.0.1:9002;health=/health' --hc-interval 1s --hc-fail 2 --hc-success 1 '/**=api'`
+**Run it:** `cargo run --release -- 127.0.0.1:8080 --upstream 'api=rr:127.0.0.1:9001,127.0.0.1:9002;health=/health' --hc-interval 1s --hc-fail 2 '/**=api'`
 
 ### Level 4 quiz — Vishwa to answer before Level 5
 
@@ -201,4 +205,4 @@ one-trial-per-episode gate) and is noted for Level 5 rather than fixed here.
 - **2026-07-27** — Closed two request-smuggling gaps flagged by security review (bare-LF parsing, duplicate/ambiguous framing headers). 24 tests pass; live-verified all three vectors return 400. Level 1 complete pending quiz.
 - **2026-07-28** — Level 2 (Routing) implemented: `router.rs` with host/path/method matching and specificity-based precedence; wired through proxy + main as `Arc<RouteTable>`; added `regex` dep. 36 tests pass; live-verified against two backends; pushed.
 - **2026-08-03/04** — Level 3 (Load Balancing) implemented across two sessions per the approved design (`docs/superpowers/specs/2026-08-03-level-3-load-balancing-design.md`). New `balancer.rs`: 7 algorithms, `Upstream` pools, RAII `Lease` (inflight released on every path via `Drop`; RTT gated on `mark_served`). `Route` retargeted from `String` backend to `Arc<Upstream>`; `--upstream` CLI + 3-rule resolution + startup validation. 52 tests pass (36 existing kept green). Live-verified all algorithms with 3 python backends; dead-server-still-502 confirms the Level-4 seam. Refinement over the spec: RTT recording gated behind `mark_served()` so a failed connect can't bias LRT toward dead servers.
-- **2026-08-05/06** — Level 4 (Health Checks) implemented across six subagent-driven tasks per the approved design (`.superpowers/sdd/2026-08-05-level-4-health-checks/`). Tasks 1–5: per-server three-state `Breaker` with shared passive/active feeds (filling the Level-3 `available()` seam with no `select` changes), exponential backoff (double/cap/reset), one-prober-task-per-upstream in `health.rs` (`GET /health`), a three-gate connect-retry loop in `proxy.rs` (idempotent + pre-body + cap 2), and the CLI surface (`;health=PATH` + `--hc-*`). Task 6 (this session): tidied a carried-over dead-code warning (`from_spec` now `#[allow(dead_code)]` with a why-comment; release build down from 3 warnings to 2). 71 tests pass. Live-verified against python backends: ejection trips `Closed->Open` and drops the dead server from rotation with no 502s; backoff doubles live (1→2→4→8→16s); the retry loop (which has *no* unit test) hides a dead backend on GET with `[retry 1/2]` and returns 200, does NOT replay a POST (alternating `502 200`), and caps at `[retry 2/2]`. **Found a real bug:** active-only recovery deadlocks with the default `success_threshold=2` — `probe_due` admits one HalfOpen trial per episode so the second success never arrives and the breaker wedges in HalfOpen; recovery works with `--hc-success 1` (`HalfOpen->Closed`, server rejoins). The recovery unit test passes because it calls `record_success` twice directly, bypassing the per-episode gate. Documented for Level 5 rather than fixed in a verification task. Full report: `.superpowers/sdd/2026-08-05-level-4-health-checks/task-6-report.md`.
+- **2026-08-05/06** — Level 4 (Health Checks) implemented across six subagent-driven tasks per the approved design (`.superpowers/sdd/2026-08-05-level-4-health-checks/`). Tasks 1–5: per-server three-state `Breaker` with shared passive/active feeds (filling the Level-3 `available()` seam with no `select` changes), exponential backoff (double/cap/reset), one-prober-task-per-upstream in `health.rs` (`GET /health`), a three-gate connect-retry loop in `proxy.rs` (idempotent + pre-body + cap 2), and the CLI surface (`;health=PATH` + `--hc-*`). Task 6 (this session): tidied a carried-over dead-code warning (`from_spec` now `#[allow(dead_code)]` with a why-comment; release build down from 3 warnings to 2). Live-verified against python backends: ejection trips `Closed->Open` and drops the dead server from rotation with no 502s; backoff doubles live (1→2→4s); the retry loop (which has *no* unit test) hides a dead backend on GET with `[retry 1/2]` and returns 200, does NOT replay a POST (alternating `502 200`), and caps at `[retry 2/2]`. **Found and fixed a real bug:** active-only recovery deadlocked with the default `success_threshold=2` — `probe_due` returned `None` for HalfOpen after the single admitted trial, so `consec_success` froze at 1 and the breaker wedged in HalfOpen (client traffic is blocked there too, so passive successes can't help). Fix (fix round 1): `probe_due` now keeps admitting a `HalfOpenTrial` while HalfOpen, so the prober can accumulate the successes it needs; the one-probe-per-cooldown ceiling still holds because a failed trial trips straight back to Open with a doubled backoff. Added an integration-shaped regression test that drives recovery the way the prober does (alternating `probe_due`/`record_success` per tick) and asserts `Closed` with the default threshold — the case the old direct-call unit test missed. Re-verified live with the default config (no `--hc-success` override): `HalfOpen->Closed` and 9002 rejoined 3/3/3. 72 tests pass. Full report: `.superpowers/sdd/2026-08-05-level-4-health-checks/task-6-report.md`.
