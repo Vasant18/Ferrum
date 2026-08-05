@@ -163,6 +163,19 @@ impl RouteTable {
             .map(|r| &r.upstream)
     }
 
+    /// Every distinct pool referenced by the table, for the health prober to
+    /// watch. De-duplicated by `Arc` identity, so a pool shared by several
+    /// routes is probed once.
+    pub fn upstreams(&self) -> Vec<Arc<Upstream>> {
+        let mut out: Vec<Arc<Upstream>> = Vec::new();
+        for r in &self.routes {
+            if !out.iter().any(|u| Arc::ptr_eq(u, &r.upstream)) {
+                out.push(Arc::clone(&r.upstream));
+            }
+        }
+        out
+    }
+
     /// Human-readable dump for the startup banner.
     pub fn describe(&self) -> Vec<String> {
         self.routes

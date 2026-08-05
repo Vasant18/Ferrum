@@ -33,27 +33,49 @@ async fn main() -> std::io::Result<()> {
     let mut args = std::env::args().skip(1);
     let listen_addr = args.next().unwrap_or_else(|| "127.0.0.1:8080".to_string());
 
-    // Split the remaining args into `--upstream NAME=SPEC` flags and plain
-    // route specs. Upstreams are declared pools a route can target by name;
-    // routes may appear before or after the upstreams they reference because
-    // we collect every declaration first and resolve names only afterwards.
+    // Split the remaining args into `--upstream NAME=SPEC` flags, `--hc-*`
+    // health tunables, and plain route specs. Upstreams are declared pools a
+    // route can target by name; routes may appear before or after the upstreams
+    // they reference because we collect every declaration first and resolve
+    // names only afterwards.
+    //
+    // This is a `match` rather than an `if/else` so unknown *non-flag* args
+    // still fall through to `route_specs` (the `_` arm). That fall-through is
+    // exactly what preserves every pre-Level-4 invocation: a bare `host:port`
+    // shorthand and full `path=BACKEND` route specs are neither `--upstream`
+    // nor `--hc-*`, so they land in `route_specs` untouched.
     let mut upstream_specs: Vec<String> = Vec::new();
     let mut route_specs: Vec<String> = Vec::new();
+    // Global health-check tunables, seeded with the documented defaults. Each
+    // `--hc-*` flag overrides one field; declared upstreams inherit the result.
+    let mut hc = balancer::HealthConfig::default();
     while let Some(arg) = args.next() {
-        if arg == "--upstream" {
-            let spec = args.next().ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "--upstream requires an argument (NAME=SPEC)",
-                )
-            })?;
-            upstream_specs.push(spec);
-        } else {
-            route_specs.push(arg);
+        match arg.as_str() {
+            "--upstream" => upstream_specs.push(next_val(&mut args, "--upstream")?),
+            "--hc-interval" => hc.interval = parse_duration(&next_val(&mut args, "--hc-interval")?)?,
+            "--hc-timeout" => hc.timeout = parse_duration(&next_val(&mut args, "--hc-timeout")?)?,
+            "--hc-backoff-base" => {
+                hc.backoff_base = parse_duration(&next_val(&mut args, "--hc-backoff-base")?)?
+            }
+            "--hc-backoff-max" => {
+                hc.backoff_max = parse_duration(&next_val(&mut args, "--hc-backoff-max")?)?
+            }
+            "--hc-fail" => {
+                hc.fail_threshold = next_val(&mut args, "--hc-fail")?
+                    .parse()
+                    .map_err(|_| bad_arg("--hc-fail expects a number"))?
+            }
+            "--hc-success" => {
+                hc.success_threshold = next_val(&mut args, "--hc-success")?
+                    .parse()
+                    .map_err(|_| bad_arg("--hc-success expects a number"))?
+            }
+            // Anything else is a route spec (bare host:port or path=BACKEND).
+            _ => route_specs.push(arg),
         }
     }
 
-    let routes = build_routes(&upstream_specs, &route_specs)?;
+    let routes = build_routes(&upstream_specs, &route_specs, &hc)?;
     let routes = Arc::new(routes);
 
     let listener = TcpListener::bind(&listen_addr).await?;
@@ -61,6 +83,12 @@ async fn main() -> std::io::Result<()> {
     for line in routes.describe() {
         println!("  route: {line}");
     }
+
+    // Start active health checking. Probers run for the life of the process,
+    // one task per pool, independent of client traffic. This must happen inside
+    // the tokio runtime (we are already in `async fn main`, after binding), as
+    // `spawn_probers` calls `tokio::spawn`, which panics outside a runtime.
+    health::spawn_probers(routes.upstreams());
 
     // The accept loop is deliberately tiny: pop a completed connection off
     // the kernel's backlog, hand it to its own task, repeat. Anything slow
@@ -84,6 +112,44 @@ async fn main() -> std::io::Result<()> {
     }
 }
 
+/// An `InvalidInput` error from a static message. A one-liner shared by the
+/// argument-parsing helpers so their error construction stays uncluttered.
+fn bad_arg(msg: &str) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidInput, msg.to_string())
+}
+
+/// Pull the value that must follow a flag, e.g. the `2s` after `--hc-interval`.
+/// A missing value is a startup error naming the flag, rather than a silent
+/// default, so a typo like a trailing `--hc-interval` fails loudly.
+fn next_val(
+    args: &mut impl Iterator<Item = String>,
+    flag: &str,
+) -> std::io::Result<String> {
+    args.next().ok_or_else(|| bad_arg(&format!("{flag} requires a value")))
+}
+
+/// Parse `"2s"`, `"500ms"`, or a bare number of seconds.
+///
+/// We hand-roll this instead of taking a dependency (e.g. `humantime`) because
+/// the two suffixes the health checker needs — seconds and milliseconds — are
+/// trivial, and Level 4 adds no crates. A bare number is read as seconds so the
+/// terse `--hc-fail`-style ergonomics extend to durations too.
+fn parse_duration(s: &str) -> std::io::Result<std::time::Duration> {
+    let bad = || {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("bad duration {s:?} (expected e.g. 2s or 500ms)"),
+        )
+    };
+    // Check "ms" before "s": "500ms" ends in 's' too, so testing 's' first
+    // would strip only the 's' and try to parse "500m".
+    if let Some(ms) = s.strip_suffix("ms") {
+        return Ok(std::time::Duration::from_millis(ms.parse().map_err(|_| bad())?));
+    }
+    let secs = s.strip_suffix('s').unwrap_or(s);
+    Ok(std::time::Duration::from_secs(secs.parse().map_err(|_| bad())?))
+}
+
 /// Turn CLI upstream + route specs into a `RouteTable`.
 ///
 /// First the `--upstream NAME=SPEC` declarations are parsed into a map of named
@@ -94,10 +160,16 @@ async fn main() -> std::io::Result<()> {
 /// Two friendly defaults preserve the Level 1/2 invocations: no route specs at
 /// all -> catch-all to :9000; a single bare `host:port` route arg (no `=`) ->
 /// catch-all to that backend.
-fn build_routes(upstream_specs: &[String], route_specs: &[String]) -> std::io::Result<RouteTable> {
+fn build_routes(
+    upstream_specs: &[String],
+    route_specs: &[String],
+    hc: &balancer::HealthConfig,
+) -> std::io::Result<RouteTable> {
     let bad = |m: String| std::io::Error::new(std::io::ErrorKind::InvalidInput, m);
 
-    // Build the named-pool map. `--upstream NAME=SPEC`.
+    // Build the named-pool map. `--upstream NAME=SPEC`. Each declared pool
+    // inherits the global health tunables (`hc`); its spec may still override
+    // the probe path via the `;health=PATH` suffix.
     let mut upstreams: HashMap<String, Arc<Upstream>> = HashMap::new();
     for decl in upstream_specs {
         let (name, spec) = decl
@@ -109,7 +181,10 @@ fn build_routes(upstream_specs: &[String], route_specs: &[String]) -> std::io::R
         if upstreams.contains_key(name) {
             return Err(bad(format!("duplicate upstream name {name:?}")));
         }
-        upstreams.insert(name.to_string(), Arc::new(Upstream::from_spec(name, spec)?));
+        upstreams.insert(
+            name.to_string(),
+            Arc::new(Upstream::from_spec_with_health(name, spec, hc)?),
+        );
     }
 
     if route_specs.is_empty() {

@@ -850,12 +850,57 @@ impl Upstream {
     ///   - `127.0.0.1:9001`         -> no tag (default rr)
     ///   - `localhost:9001`         -> no tag (remainder `9001` has no `:`)
     ///   - `bogus:127.0.0.1:9001`   -> looks like a tag, isn't known -> error
+    ///
+    /// A Level 4 addition is the optional `;health=PATH` suffix (see
+    /// [`Upstream::from_spec_with_health`]); this thin wrapper parses a spec
+    /// using the *default* health tunables, which is what every pre-Level-4
+    /// call site wants and what keeps their behavior unchanged.
     pub fn from_spec(name: &str, spec: &str) -> io::Result<Upstream> {
+        Upstream::from_spec_with_health(name, spec, &HealthConfig::default())
+    }
+
+    /// Parse `algo:server[*w][,server...][;health=PATH]`, inheriting `base` for
+    /// every tunable except the path, which the spec may override.
+    ///
+    /// The `;health=` suffix keeps all per-pool configuration in one place, the
+    /// same way Level 3 put the algorithm and servers in this string. The
+    /// global `--hc-*` flags supply `base`; a pool that wants a non-default
+    /// probe path spells it out here, and everything else is inherited — so one
+    /// pool can watch `/healthz` while another watches the default `/health`
+    /// without repeating the shared thresholds on each.
+    pub fn from_spec_with_health(
+        name: &str,
+        spec: &str,
+        base: &HealthConfig,
+    ) -> io::Result<Upstream> {
         let err = |m: &str| {
             io::Error::new(io::ErrorKind::InvalidInput, format!("upstream {name:?}: {m}"))
         };
 
-        let (algorithm, server_list) = match spec.split_once(':') {
+        // Split the optional health suffix off the right before anything else,
+        // so the server-list parser below is untouched by Level 4. Splitting
+        // first also means an empty or misspelled suffix is rejected before we
+        // waste effort validating the server list.
+        let (servers_part, mut health) = match spec.split_once(';') {
+            Some((left, rest)) => {
+                let path = rest
+                    .strip_prefix("health=")
+                    .ok_or_else(|| err(&format!("unknown spec option {rest:?}")))?;
+                if path.is_empty() {
+                    return Err(err("health path cannot be empty"));
+                }
+                (left, HealthConfig { path: path.to_string(), ..base.clone() })
+            }
+            None => (spec, base.clone()),
+        };
+        // A probe path must be absolute; tolerate a user who wrote "healthz"
+        // by prepending the slash rather than rejecting it.
+        if !health.path.starts_with('/') {
+            health.path = format!("/{}", health.path);
+        }
+
+        // ---- everything below is the Level 3 parser, unchanged ----
+        let (algorithm, server_list) = match servers_part.split_once(':') {
             Some((lead, rest))
                 if !lead.is_empty()
                     && lead.chars().all(|c| c.is_ascii_alphabetic())
@@ -868,7 +913,7 @@ impl Upstream {
                 }
             }
             // No recognizable tag: whole spec is the server list, default rr.
-            _ => (Algorithm::RoundRobin, spec),
+            _ => (Algorithm::RoundRobin, servers_part),
         };
 
         let mut servers = Vec::new();
@@ -882,12 +927,7 @@ impl Upstream {
         if servers.is_empty() {
             return Err(err("empty pool (no servers)"));
         }
-        Ok(Upstream::build(
-            name.to_string(),
-            algorithm,
-            servers,
-            Arc::new(HealthConfig::default()),
-        ))
+        Ok(Upstream::build(name.to_string(), algorithm, servers, Arc::new(health)))
     }
 
     /// A single-server round-robin pool wrapping one backend address. This is
@@ -1354,5 +1394,37 @@ mod tests {
         }
         assert!(s.available(), "unjudged requests must not trip the breaker");
         assert_eq!(s.inflight(), 0, "inflight must still be released");
+    }
+
+    // The health path rides along in the upstream spec, after a ';'.
+    #[test]
+    fn spec_parses_health_path() {
+        let up = Upstream::from_spec("x", "lc:127.0.0.1:9001,127.0.0.1:9002;health=/healthz")
+            .unwrap();
+        assert_eq!(up.health().path, "/healthz");
+        assert_eq!(up.algorithm, Algorithm::LeastConnections);
+        assert_eq!(up.servers_slice().len(), 2, "servers must still parse");
+    }
+
+    // Omitting it keeps the default, so existing invocations are unaffected.
+    #[test]
+    fn spec_health_path_defaults() {
+        let up = Upstream::from_spec("x", "127.0.0.1:9001").unwrap();
+        assert_eq!(up.health().path, "/health");
+    }
+
+    // Global tunables flow in and are shared by the pool's servers.
+    #[test]
+    fn spec_inherits_global_health_config() {
+        let base = HealthConfig { fail_threshold: 7, ..HealthConfig::default() };
+        let up = Upstream::from_spec_with_health("x", "127.0.0.1:9001;health=/hz", &base).unwrap();
+        assert_eq!(up.health().fail_threshold, 7, "global tunables inherited");
+        assert_eq!(up.health().path, "/hz", "per-upstream path still overrides");
+    }
+
+    #[test]
+    fn spec_rejects_bad_health_suffix() {
+        assert!(Upstream::from_spec("x", "127.0.0.1:9001;bogus=/x").is_err());
+        assert!(Upstream::from_spec("x", "127.0.0.1:9001;health=").is_err());
     }
 }
