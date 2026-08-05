@@ -855,6 +855,11 @@ impl Upstream {
     /// [`Upstream::from_spec_with_health`]); this thin wrapper parses a spec
     /// using the *default* health tunables, which is what every pre-Level-4
     /// call site wants and what keeps their behavior unchanged.
+    // Production-dead since Level 4: the CLI now routes through
+    // `from_spec_with_health` to thread the `--hc-*` tunables. Retained as the
+    // default-config entry point (the natural API for a caller that wants
+    // stock health settings) and exercised heavily by the spec-parser tests.
+    #[allow(dead_code)]
     pub fn from_spec(name: &str, spec: &str) -> io::Result<Upstream> {
         Upstream::from_spec_with_health(name, spec, &HealthConfig::default())
     }
