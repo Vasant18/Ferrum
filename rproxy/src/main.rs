@@ -16,6 +16,7 @@
 //! second argument) is treated as the catch-all route `/=BACKEND`.
 
 mod balancer;
+mod health;
 mod http;
 mod proxy;
 mod router;

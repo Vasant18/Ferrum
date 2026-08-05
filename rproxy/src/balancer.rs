@@ -507,6 +507,18 @@ impl Upstream {
         &self.health
     }
 
+    /// Test/prober helper: build a pool from plain addresses with an explicit
+    /// health config.
+    pub fn for_test(
+        name: &str,
+        algorithm: Algorithm,
+        addrs: &[&str],
+        health: Arc<HealthConfig>,
+    ) -> Upstream {
+        let servers = addrs.iter().map(|a| (a.to_string(), 1)).collect();
+        Upstream::build(name.to_string(), algorithm, servers, health)
+    }
+
     /// Read-only view of the pool for the prober to walk.
     pub fn servers_slice(&self) -> &[Server] {
         &self.servers
