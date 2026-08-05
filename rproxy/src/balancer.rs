@@ -636,12 +636,17 @@ pub struct Lease<'a> {
     /// (tiny) RTT, or least-response-time would learn to prefer dead servers —
     /// the fastest way to "respond" is to refuse the connection instantly.
     served: bool,
+    /// Level 4 passive health feed. `Some(true)` = healthy exchange,
+    /// `Some(false)` = failure, `None` = we never formed a judgement (e.g. the
+    /// task was cancelled mid-flight). `None` deliberately reports *nothing*:
+    /// guessing an outcome would poison the breaker with noise.
+    outcome: Option<bool>,
 }
 
 impl<'a> Lease<'a> {
     fn new(server: &'a Server) -> Lease<'a> {
         server.inflight.fetch_add(1, Ordering::Relaxed);
-        Lease { server, started: Instant::now(), served: false }
+        Lease { server, started: Instant::now(), served: false, outcome: None }
     }
 
     /// The chosen backend's address. Read straight from the `Server` rather
@@ -661,6 +666,19 @@ impl<'a> Lease<'a> {
     pub fn mark_served(&mut self) {
         self.served = true;
     }
+
+    /// Report a healthy exchange to the breaker (passive health check).
+    /// A 4xx counts as success: the *backend* is fine, the client sent a bad
+    /// request. Only 5xx and transport failures indict the server.
+    pub fn mark_success(&mut self) {
+        self.outcome = Some(true);
+    }
+
+    /// Report a failed exchange to the breaker: connect refused/timed out,
+    /// a read error, or a 5xx response.
+    pub fn mark_failure(&mut self) {
+        self.outcome = Some(false);
+    }
 }
 
 impl Drop for Lease<'_> {
@@ -672,6 +690,23 @@ impl Drop for Lease<'_> {
         // history. See the `served` field for why.
         if self.served {
             self.server.record_rtt(self.started.elapsed());
+        }
+        // Level 4 passive feed. Only report when we actually judged the
+        // exchange; `None` stays silent by design.
+        match self.outcome {
+            Some(true) => {
+                self.server.record_success(Instant::now());
+            }
+            Some(false) => {
+                if let Some((from, to)) = self.server.record_failure(Instant::now()) {
+                    eprintln!(
+                        "health: {} {from:?}->{to:?} (passive, cooldown {:?})",
+                        self.server.addr(),
+                        self.server.breaker().cooldown()
+                    );
+                }
+            }
+            None => {}
         }
     }
 }
@@ -1259,5 +1294,53 @@ mod tests {
             s.record_failure(t0);
         }
         assert!(!s.available(), "a tripped server must be excluded from selection");
+    }
+
+    // The passive feed: a lease marked failed reports into the breaker on drop.
+    #[test]
+    fn lease_failure_feeds_breaker() {
+        let up = pool(Algorithm::RoundRobin, &[("a:1", 1)]);
+        let s = &up.servers_slice()[0];
+        for _ in 0..3 {
+            let mut l = up.pick(ANY).unwrap();
+            l.mark_failure();
+        } // each drop reports one failure
+        assert!(!s.available(), "3 failed requests must trip the breaker");
+    }
+
+    // A marked-success lease clears a partial failure run.
+    #[test]
+    fn lease_success_feeds_breaker() {
+        let up = pool(Algorithm::RoundRobin, &[("a:1", 1)]);
+        let s = &up.servers_slice()[0];
+        {
+            let mut l = up.pick(ANY).unwrap();
+            l.mark_failure();
+        }
+        {
+            let mut l = up.pick(ANY).unwrap();
+            l.mark_failure();
+        }
+        {
+            let mut l = up.pick(ANY).unwrap();
+            l.mark_success(); // resets the run
+        }
+        {
+            let mut l = up.pick(ANY).unwrap();
+            l.mark_failure();
+        }
+        assert!(s.available(), "run was reset, so this must not trip");
+    }
+
+    // An unmarked lease is NEUTRAL: a cancelled task must not be scored.
+    #[test]
+    fn unmarked_lease_does_not_touch_breaker() {
+        let up = pool(Algorithm::RoundRobin, &[("a:1", 1)]);
+        let s = &up.servers_slice()[0];
+        for _ in 0..10 {
+            let _l = up.pick(ANY).unwrap(); // no mark_* call
+        }
+        assert!(s.available(), "unjudged requests must not trip the breaker");
+        assert_eq!(s.inflight(), 0, "inflight must still be released");
     }
 }

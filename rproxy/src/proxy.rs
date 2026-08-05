@@ -379,11 +379,13 @@ async fn serve_one(
             // releasing the in-flight count; because we never call
             // mark_served, no (misleadingly fast) RTT is recorded — a failed
             // connect must not make least-response-time prefer a dead server.
+            lease.mark_failure();
             eprintln!("[{peer}] backend connect failed: {e}");
             respond_error(client, 502, "Bad Gateway").await?;
             return Ok(false);
         }
         Err(_) => {
+            lease.mark_failure();
             eprintln!("[{peer}] backend connect timed out");
             respond_error(client, 504, "Gateway Timeout").await?;
             return Ok(false);
@@ -425,6 +427,14 @@ async fn serve_one(
     let resp_framing = http::response_body_framing(&method, &resp)?;
 
     println!("[{peer}]   -> {} {}", resp.status, resp.reason);
+
+    // Passive health check: 5xx indicts the backend, anything below it does
+    // not (a 404 means the backend is healthy and the path is wrong).
+    if resp.status >= 500 {
+        lease.mark_failure();
+    } else {
+        lease.mark_success();
+    }
 
     // ---- 6. Relay the response: rewritten head, then streamed body ----
     strip_hop_by_hop(&mut resp.headers);
