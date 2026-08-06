@@ -433,6 +433,23 @@ async fn serve_one(
     // The exchange is now underway; a completed exchange should feed the
     // server's response-time average, so arm the lease's RTT recording.
     lease.mark_served();
+    // Pessimistic default: the request is about to go out, and from here to the
+    // point where we hold a valid response head there are six `?` early-returns
+    // (write head, stream body, flush, read head, "closed before responding",
+    // parse head, framing). Each of those is a *real observed I/O failure* on a
+    // request we already committed to this backend, so each must indict it — but
+    // wiring mark_failure() into all six sites is easy to get wrong and easy for
+    // a future edit to skip. Instead we default the outcome to failure right
+    // here and let the mark_success() below upgrade it once a `<500` response
+    // head is actually in hand. Any `?` that fires in between therefore scores a
+    // failure automatically, without touching a single call site. This is safe
+    // because it only runs *after* the request was sent: cancellation before
+    // this point leaves the lease unmarked (correctly neutral), and these `?`
+    // paths are exactly the "response-read error / mid-response I/O error"
+    // failures the health-check spec says to feed the breaker. Note this does
+    // not affect retries: the retry loop lives entirely above mark_served(), so
+    // a failure recorded here can never trigger a replay.
+    lease.mark_failure();
     let _ = backend.set_nodelay(true);
     let mut backend = Conn::new(backend);
 

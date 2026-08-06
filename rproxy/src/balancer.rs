@@ -1421,6 +1421,31 @@ mod tests {
         assert!(!s.available(), "3 failed requests must trip the breaker");
     }
 
+    // Regression (Level 4 whole-branch review): the pessimistic-default feed.
+    // proxy::serve_one arms a lease with mark_served() + mark_failure() right
+    // after connect, and only upgrades to mark_success() once a `<500` response
+    // head is in hand. If the exchange dies on any `?` in between (e.g. a backend
+    // that accepts the TCP connection then closes before responding), the lease
+    // is dropped served+failed and NEVER upgraded. This must still feed a failure
+    // into the breaker and trip it after the threshold — otherwise a backend that
+    // fails every real request while its /health returns 200 is never ejected.
+    // Before the fix the outcome stayed None and the breaker never tripped.
+    #[test]
+    fn served_then_failed_lease_trips_breaker() {
+        let up = pool(Algorithm::RoundRobin, &[("a:1", 1)]);
+        let s = &up.servers_slice()[0];
+        for _ in 0..3 {
+            let mut l = up.pick(ANY).unwrap();
+            l.mark_served(); // exchange underway (arms RTT)
+            l.mark_failure(); // pessimistic default; no later mark_success()
+        } // each drop reports one failure to the breaker
+        assert!(
+            !s.available(),
+            "a served-then-failed exchange must indict the backend and trip after threshold"
+        );
+        assert_eq!(s.breaker().state(), BreakerState::Open);
+    }
+
     // A marked-success lease clears a partial failure run.
     #[test]
     fn lease_success_feeds_breaker() {
