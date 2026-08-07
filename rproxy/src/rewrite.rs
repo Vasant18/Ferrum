@@ -95,9 +95,14 @@ impl RewriteRules {
     ///   4. forwarded-header injection
     ///   5. explicit header rules
     ///
-    /// Order 3-before-4 matters: `X-Forwarded-Host` must report what the
-    /// *client* asked for, which is why it reads `ctx.original_host` rather
-    /// than the (possibly rewritten) `Host` header.
+    /// `X-Forwarded-Host` reports what the *client* asked for because
+    /// `inject_forwarded` reads `ctx.original_host` (captured before any
+    /// rewriting), NOT the `Host` header. So the relative order of the Host
+    /// rewrite (3) and forwarded injection (4) is not actually observable for
+    /// XFH — either order produces the same, honest value. The ordering *would*
+    /// matter if injection ever read the live `Host` header instead of
+    /// `ctx.original_host`; it deliberately does not, which is what keeps XFH
+    /// robust against the Host rewrite.
     ///
     /// Order 5-last matters too: it lets an explicit `set-header` deliberately
     /// override an injected value — e.g. pinning `X-Forwarded-Proto: https`
@@ -114,18 +119,17 @@ impl RewriteRules {
             req.target = self.rewrite_path(&req.target);
         }
 
-        // 3. Host rewrite. The ORIGINAL host was captured into `ctx` by the
-        //    caller before we got here — that is what makes step 4's
-        //    X-Forwarded-Host honest even though we clobber Host here.
-        //    `set_header` is remove-then-push, so exactly one Host survives;
-        //    a duplicate Host is a request-smuggling vector.
+        // 3. Host rewrite. `set_header` is remove-then-push, so exactly one
+        //    Host survives; a duplicate Host is a request-smuggling vector.
         if let Some(h) = &self.host {
             http::set_header(&mut req.headers, "Host", h);
         }
 
-        // 4. Forwarded headers. These read `ctx.original_host` / `ctx.scheme`,
-        //    NOT the (possibly rewritten) Host header, so X-Forwarded-Host
-        //    still reports what the client asked for.
+        // 4. Forwarded headers. X-Forwarded-Host reads `ctx.original_host`
+        //    (captured before any rewriting), NOT the Host header we may have
+        //    just clobbered in step 3 — so it reports what the client asked for
+        //    regardless of the step-3/step-4 order. Reading `ctx.original_host`
+        //    rather than the live Host is the thing that keeps XFH honest.
         if self.forwarded {
             self.inject_forwarded(req, ctx);
         }
@@ -463,15 +467,45 @@ mod tests {
 
     // Header rules run LAST, so an explicit rule can deliberately override an
     // injected forwarded header (e.g. behind an external TLS terminator).
+    //
+    // The probe MUST be a header that injection OVERWRITES UNCONDITIONALLY.
+    // X-Real-IP is exactly that (`inject_forwarded` does a plain `set_header`),
+    // so it can detect a step-ordering regression:
+    //   - rules last (correct):  injection writes the client IP, the rule then
+    //     overrides it -> "10.9.9.9". Passes.
+    //   - rules first (buggy):   the rule writes "10.9.9.9", injection then
+    //     clobbers it back to the client IP -> "203.0.113.7". FAILS.
+    //
+    // Do NOT "simplify" this to a set-if-absent header like X-Forwarded-Proto:
+    // such a header is vacuous here. With XFP both orderings yield the same
+    // result (rules-last: injection writes then rule overrides; rules-first:
+    // rule writes then injection sees it present and skips), so the test would
+    // pass under the buggy order and prove nothing about ordering — only that
+    // set_headers is applied at all. X-Real-IP is what makes the guarantee bite.
     #[test]
-    fn explicit_rule_overrides_injected_forwarded_header() {
+    fn explicit_set_header_runs_after_forwarded_injection() {
         let mut r = req(&[]);
         let rules = RewriteRules {
-            set_headers: vec![("X-Forwarded-Proto".to_string(), "https".to_string())],
+            set_headers: vec![("X-Real-IP".to_string(), "10.9.9.9".to_string())],
             ..Default::default()
         };
         rules.apply_request(&mut r, &ctx(None));
-        assert_eq!(get(&r, "x-forwarded-proto"), Some("https"));
+        assert_eq!(
+            get(&r, "x-real-ip"),
+            Some("10.9.9.9"),
+            "an explicit set-header must win over unconditional forwarded injection"
+        );
+
+        // Keep the XFP case too — it still documents the intended use (pinning a
+        // forwarded value behind a TLS terminator), even though on its own it
+        // cannot detect the ordering bug.
+        let mut r2 = req(&[]);
+        let rules2 = RewriteRules {
+            set_headers: vec![("X-Forwarded-Proto".to_string(), "https".to_string())],
+            ..Default::default()
+        };
+        rules2.apply_request(&mut r2, &ctx(None));
+        assert_eq!(get(&r2, "x-forwarded-proto"), Some("https"));
     }
 
     // 14. Response header rules.
