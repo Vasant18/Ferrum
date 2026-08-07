@@ -18,6 +18,7 @@ use std::sync::Arc;
 use regex::Regex;
 
 use crate::balancer::{self, Upstream};
+use crate::rewrite::RewriteRules;
 
 /// How a route matches the request path. Ordered here from most to least
 /// specific — the discriminant doubles as a tie-break rank.
@@ -95,6 +96,8 @@ pub struct Route {
     pub path: PathMatcher,
     /// The pool this route forwards to.
     pub upstream: Arc<Upstream>,
+    /// Level 5 header/path rewriting for requests matched by this route.
+    pub rules: RewriteRules,
 }
 
 impl Route {
@@ -107,6 +110,7 @@ impl Route {
             method: None,
             path: PathMatcher::Any,
             upstream: Arc::new(Upstream::single(backend)),
+            rules: RewriteRules::default(),
         }
     }
 
@@ -156,11 +160,19 @@ impl RouteTable {
     /// the `Arc<Upstream>` by reference so the caller can clone it (a refcount
     /// bump) and hold it for the whole exchange while the lease borrows it.
     pub fn find(&self, method: &str, host: Option<&str>, path: &str) -> Option<&Arc<Upstream>> {
+        self.find_route(method, host, path).map(|r| &r.upstream)
+    }
+
+    /// The most specific matching route, or `None`. `find` returns just its
+    /// pool; the proxy needs the whole route to reach its rewrite rules
+    /// (`route.rules`). Both share this one selection logic so a Level 3/4
+    /// caller reading `find` and a Level 5 caller reading `find_route` can
+    /// never disagree about which route won.
+    pub fn find_route(&self, method: &str, host: Option<&str>, path: &str) -> Option<&Route> {
         self.routes
             .iter()
             .filter(|r| r.matches(method, host, path))
             .max_by_key(|r| r.specificity())
-            .map(|r| &r.upstream)
     }
 
     /// Every distinct pool referenced by the table, for the health prober to
@@ -196,6 +208,10 @@ struct RouteMatchers {
     method: Option<String>,
     path: PathMatcher,
     target: String,
+    /// The raw `;`-separated rewrite option string (everything after the first
+    /// `;`), or empty when the spec carries no options. Parsed into
+    /// `RewriteRules` by [`resolve_route`].
+    options: String,
 }
 
 /// Parse the `[METHOD ][host]path_expr=TARGET` shape into its match conditions
@@ -204,6 +220,16 @@ struct RouteMatchers {
 /// `host:port`) separate from *matching*, which never changed in Level 3.
 fn parse_matchers(spec: &str) -> io::Result<RouteMatchers> {
     let err = |m: &str| io::Error::new(io::ErrorKind::InvalidInput, format!("{m}: {spec:?}"));
+
+    // Sever the ';'-separated rewrite options BEFORE splitting on '=', because
+    // option values contain '=' themselves (`strip=/api`). Splitting the other
+    // way round makes `rsplit_once('=')` return the option's value as the
+    // route target — a silent mis-route. A route's options therefore cannot
+    // contain a literal ';'.
+    let (spec, options) = match spec.split_once(';') {
+        Some((base, opts)) => (base, opts.to_string()),
+        None => (spec, String::new()),
+    };
 
     let (matchers, target) = spec
         .rsplit_once('=')
@@ -229,6 +255,7 @@ fn parse_matchers(spec: &str) -> io::Result<RouteMatchers> {
             method,
             path: PathMatcher::Regex(re),
             target: target.to_string(),
+            options,
         });
     }
 
@@ -249,7 +276,7 @@ fn parse_matchers(spec: &str) -> io::Result<RouteMatchers> {
         PathMatcher::Exact(path_expr.to_string())
     };
 
-    Ok(RouteMatchers { host, method, path, target: target.to_string() })
+    Ok(RouteMatchers { host, method, path, target: target.to_string(), options })
 }
 
 /// Parse one CLI route spec `[METHOD ][host]path_expr=TARGET` and bind its
@@ -277,8 +304,17 @@ fn parse_matchers(spec: &str) -> io::Result<RouteMatchers> {
 ///
 /// Several routes naming the same upstream share one `Arc`, so a pool's live
 /// counters are common across every route that targets it.
-pub fn resolve_route(spec: &str, upstreams: &HashMap<String, Arc<Upstream>>) -> io::Result<Route> {
+pub fn resolve_route(
+    spec: &str,
+    upstreams: &HashMap<String, Arc<Upstream>>,
+    forwarded: bool,
+) -> io::Result<Route> {
     let m = parse_matchers(spec)?;
+    // Parse the severed option string into rewrite rules. An empty `options`
+    // yields defaults (forwarded on unless `--no-forwarded` cleared it), so a
+    // route with no `;` behaves exactly as it did before Level 5. A bad option
+    // (unknown key, protected header) surfaces here as a startup error.
+    let rules = RewriteRules::from_options(&m.options, forwarded)?;
 
     let upstream = if let Some(up) = upstreams.get(&m.target) {
         Arc::clone(up) // rule 1: declared name
@@ -291,7 +327,7 @@ pub fn resolve_route(spec: &str, upstreams: &HashMap<String, Arc<Upstream>>) -> 
         ));
     };
 
-    Ok(Route { host: m.host, method: m.method, path: m.path, upstream })
+    Ok(Route { host: m.host, method: m.method, path: m.path, upstream, rules })
 }
 
 #[cfg(test)]
@@ -311,7 +347,7 @@ mod tests {
                     .or_insert_with(|| Arc::new(Upstream::single(target)));
             }
         }
-        RouteTable::new(specs.iter().map(|s| resolve_route(s, &ups).unwrap()).collect())
+        RouteTable::new(specs.iter().map(|s| resolve_route(s, &ups, true).unwrap()).collect())
     }
 
     /// The Level 2 assertions compared `find()` to a backend string. `find()`
@@ -420,14 +456,53 @@ mod tests {
         // Rule 1: named upstream — the route shares that exact pool's Arc
         // (a refcount bump, not a fresh pool), which is what lets several
         // routes naming one upstream share its live counters.
-        let named = resolve_route("/svc/**=api", &ups).unwrap();
+        let named = resolve_route("/svc/**=api", &ups, true).unwrap();
         assert!(Arc::ptr_eq(&named.upstream, &ups["api"]));
 
         // Rule 2: bare host:port auto-wraps.
-        let wrapped = resolve_route("/=127.0.0.1:9000", &ups).unwrap();
+        let wrapped = resolve_route("/=127.0.0.1:9000", &ups, true).unwrap();
         assert_eq!(wrapped.upstream.name(), "127.0.0.1:9000");
 
         // Rule 3: neither a known name nor a valid address.
-        assert!(resolve_route("/=not_a_pool", &ups).is_err());
+        assert!(resolve_route("/=not_a_pool", &ups, true).is_err());
+    }
+
+    // 17. Backward compatibility: a spec with no ';' options parses exactly as
+    //     before and gets default rules (forwarded headers on).
+    #[test]
+    fn route_without_options_gets_default_rules() {
+        let r = resolve_route("/api/**=127.0.0.1:9001", &HashMap::new(), true).unwrap();
+        assert!(r.rules.strip.is_none());
+        assert!(r.rules.forwarded);
+        assert_eq!(r.upstream.name(), "127.0.0.1:9001");
+    }
+
+    // Options parse, and — the trap — the TARGET must still be correct even
+    // though the options contain '='.
+    #[test]
+    fn route_with_options_parses_target_correctly() {
+        let r = resolve_route("/api/**=127.0.0.1:9001;strip=/api;host=b.local", &HashMap::new(), true)
+            .unwrap();
+        assert_eq!(r.upstream.name(), "127.0.0.1:9001", "target must not absorb the options");
+        assert_eq!(r.rules.strip.as_deref(), Some("/api"));
+        assert_eq!(r.rules.host.as_deref(), Some("b.local"));
+    }
+
+    // --no-forwarded propagates to every route's rules.
+    #[test]
+    fn no_forwarded_propagates_to_routes() {
+        let r = resolve_route("/=127.0.0.1:9001", &HashMap::new(), false).unwrap();
+        assert!(!r.rules.forwarded);
+    }
+
+    // A bad rewrite option is a startup error.
+    #[test]
+    fn route_with_bad_option_errors() {
+        assert!(resolve_route("/=127.0.0.1:9001;bogus=1", &HashMap::new(), true).is_err());
+        assert!(
+            resolve_route("/=127.0.0.1:9001;set-header=Connection:close", &HashMap::new(), true)
+                .is_err(),
+            "protected header must be rejected at startup"
+        );
     }
 }

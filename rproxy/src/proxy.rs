@@ -335,11 +335,13 @@ async fn serve_one(
     let client_keep_alive = http::wants_keep_alive(req.version, &req.headers);
     let method = req.method.clone();
 
-    // ---- 2. Route: pick a POOL from method + host + path ----
+    // ---- 2. Route: pick the ROUTE (not just its pool) from method + host +
+    // path. Level 5 needs the whole route to reach `route.rules`; we bind
+    // `upstream` from it to keep the balancing code below unchanged.
     let host = http::header(&req.headers, "host").map(http::host_without_port);
     let path = http::target_path(&req.target);
-    let upstream = match routes.find(&method, host, path) {
-        Some(u) => u,
+    let route = match routes.find_route(&method, host, path) {
+        Some(r) => r,
         None => {
             // No route matched. This is a routing decision, not a client
             // error — the request was well-formed, we just don't serve it.
@@ -354,6 +356,14 @@ async fn serve_one(
             return Ok(false);
         }
     };
+    let upstream = &route.upstream;
+
+    // Capture the client's original request target and Host BEFORE any
+    // rewriting. The original target feeds the "rewrite:" log line below, and
+    // `original_host` is what makes `X-Forwarded-Host` report what the client
+    // actually asked for even when a `host=` rule clobbers the Host header.
+    let original_target = req.target.clone();
+    let original_host = http::header(&req.headers, "host").map(str::to_string);
 
     // ---- 2b. Balance + connect, with retry ----
     // Retry is gated on three conditions, all required:
@@ -455,6 +465,27 @@ async fn serve_one(
 
     // ---- 4. Forward the request: rewritten head, then streamed body ----
     strip_hop_by_hop(&mut req.headers);
+    // Level 5: forwarded headers + path/Host/header rewriting. This must run
+    // AFTER hop-by-hop stripping (so a client cannot smuggle in a
+    // Connection-listed header that a rule then re-adds) and BEFORE the
+    // framing re-declaration below (so no rule can displace the framing
+    // headers this proxy owns).
+    let ctx = crate::rewrite::ForwardContext {
+        client_ip: peer.ip(),
+        original_host: original_host.as_deref(),
+        scheme: "http", // Level 8 sets "https" after TLS termination
+    };
+    route.rules.apply_request(&mut req, &ctx);
+    if req.target != original_target {
+        println!("[{peer}]   rewrite: {original_target} -> {}", req.target);
+    }
+    if let (Some(before), Some(after)) =
+        (original_host.as_deref(), http::header(&req.headers, "host"))
+    {
+        if before != after {
+            println!("[{peer}]   host: {before} -> {after}");
+        }
+    }
     // Take exclusive control of the body-framing header. strip_hop_by_hop
     // removes the "TE" header but NOT "Transfer-Encoding"; if we re-added a
     // chunked TE below without removing the original, the backend would see
@@ -494,6 +525,11 @@ async fn serve_one(
 
     // ---- 6. Relay the response: rewritten head, then streamed body ----
     strip_hop_by_hop(&mut resp.headers);
+    // Level 5 response rewriting (explicit set-/remove-resp-header rules).
+    // Placed after hop-by-hop stripping for the same reason as the request
+    // leg, and before the framing block so a rule cannot displace the
+    // Connection/Transfer-Encoding headers this proxy owns on the client leg.
+    route.rules.apply_response(&mut resp);
     // Same framing-header ownership as the request leg: drop any existing
     // Transfer-Encoding so re-declaring chunked below can't produce a
     // duplicate TE toward the client.
