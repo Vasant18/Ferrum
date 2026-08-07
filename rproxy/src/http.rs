@@ -223,6 +223,15 @@ pub fn remove_header(headers: &mut Vec<(String, String)>, name: &str) {
     headers.retain(|(n, _)| !n.eq_ignore_ascii_case(name));
 }
 
+/// Set a header, replacing any existing value(s) for that name. Overwrite
+/// rather than append, so applying a rule twice (e.g. across a retry) can
+/// never accumulate duplicates — and a duplicated header is exactly the
+/// ambiguity the Level 1 parser works to reject.
+pub fn set_header(headers: &mut Vec<(String, String)>, name: &str, value: &str) {
+    remove_header(headers, name);
+    headers.push((name.to_string(), value.to_string()));
+}
+
 /// Parse a Content-Length value strictly: ASCII digits only. This rejects
 /// the sneaky forms `parse::<u64>` might tolerate loosely or that confuse
 /// other parsers — a leading `+`, embedded commas (`5, 5`), whitespace, or

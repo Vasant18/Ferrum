@@ -1,0 +1,249 @@
+//! Level 5 — proxy headers and rewriting.
+//!
+//! A forwarder relays bytes; a *reverse proxy* also tells the backend the
+//! truth about the request's origin, and may present the backend a different
+//! URL space than it shows the world. This module is both halves:
+//!
+//! - **Forwarded headers** (`X-Forwarded-For`, `X-Real-IP`,
+//!   `X-Forwarded-Host`, `X-Forwarded-Proto`) — who really called.
+//! - **Rewriting** (path, `Host`, arbitrary request/response headers) — what
+//!   the backend sees.
+//!
+//! Everything here is a **pure synchronous transform over a head struct**: no
+//! sockets, no async, no I/O. That is deliberate. It means the entire level is
+//! testable by building a `RequestHead`, applying rules, and asserting on the
+//! result — the same discipline that keeps Level 3's algorithms and Level 4's
+//! breaker unit-testable.
+
+use std::net::IpAddr;
+
+use crate::http::{self, RequestHead, ResponseHead};
+
+/// Per-connection facts the transform needs that a request head doesn't carry.
+pub struct ForwardContext<'a> {
+    /// The immediate peer's IP: the real client, or the last proxy in a chain.
+    /// This is the one value in the forwarded headers that cannot be forged —
+    /// we observed it on the socket.
+    pub client_ip: IpAddr,
+    /// The `Host` the client originally asked for, captured BEFORE any
+    /// rewriting. See `apply_request` for why the capture must happen first.
+    pub original_host: Option<&'a str>,
+    /// Scheme on the client leg. `"http"` today; Level 8's TLS termination
+    /// sets `"https"` here and `X-Forwarded-Proto` follows automatically.
+    pub scheme: &'static str,
+}
+
+/// Parsed rewrite configuration for one route. `Default` injects the four
+/// forwarded headers and changes nothing else, so a route declared with no
+/// options behaves like Level 4 plus honest origin reporting.
+#[derive(Clone, Debug)]
+pub struct RewriteRules {
+    /// Path prefix to remove (`strip=/api`).
+    pub strip: Option<String>,
+    /// Path prefix to prepend (`prefix=/v2`), applied after `strip`.
+    pub prefix: Option<String>,
+    /// Replacement `Host` header value (`host=backend.local`).
+    pub host: Option<String>,
+    pub set_headers: Vec<(String, String)>,
+    pub remove_headers: Vec<String>,
+    pub set_resp_headers: Vec<(String, String)>,
+    pub remove_resp_headers: Vec<String>,
+    /// Whether to inject the forwarded headers. True by default; `--no-forwarded`
+    /// clears it. Note this is NOT `bool::default()` (which is `false`): the
+    /// meaning-preserving default for this struct is forwarded-on, so we hand-
+    /// write `impl Default` below rather than deriving it. That way a stray
+    /// `RewriteRules::default()` can never silently disable forwarded headers.
+    pub forwarded: bool,
+}
+
+/// Forwarded-header injection is ON by default. Deriving `Default` would set
+/// `forwarded: false` (the `bool` default), which is the opposite of what the
+/// struct *means* — so we spell the default out here and keep `Default` off the
+/// derive list above. `new()` is then just `Default::default()`, and only
+/// `no_forwarded()` flips the one field.
+impl Default for RewriteRules {
+    fn default() -> RewriteRules {
+        RewriteRules {
+            strip: None,
+            prefix: None,
+            host: None,
+            set_headers: Vec::new(),
+            remove_headers: Vec::new(),
+            set_resp_headers: Vec::new(),
+            remove_resp_headers: Vec::new(),
+            forwarded: true,
+        }
+    }
+}
+
+impl RewriteRules {
+    /// Rules that inject the forwarded headers and do nothing else.
+    pub fn new() -> RewriteRules {
+        RewriteRules::default()
+    }
+
+    /// Rules with forwarded-header injection disabled (`--no-forwarded`).
+    pub fn no_forwarded() -> RewriteRules {
+        RewriteRules { forwarded: false, ..Default::default() }
+    }
+
+    /// Transform the request head in place, in this fixed order:
+    ///
+    ///   1. (caller captured the original `Host` into `ctx` already)
+    ///   2. path rewrite
+    ///   3. `Host` rewrite
+    ///   4. forwarded-header injection
+    ///   5. explicit header rules
+    ///
+    /// Order 3-before-4 matters: `X-Forwarded-Host` must report what the
+    /// *client* asked for, which is why it reads `ctx.original_host` rather
+    /// than the (possibly rewritten) `Host` header.
+    ///
+    /// Order 5-last matters too: it lets an explicit `set-header` deliberately
+    /// override an injected value — e.g. pinning `X-Forwarded-Proto: https`
+    /// when an external TLS terminator sits in front of us.
+    pub fn apply_request(&self, req: &mut RequestHead, ctx: &ForwardContext) {
+        if self.forwarded {
+            self.inject_forwarded(req, ctx);
+        }
+    }
+
+    /// Inject the four forwarded headers. Append-vs-overwrite differs per
+    /// header and each choice is a security decision — see the comments.
+    fn inject_forwarded(&self, req: &mut RequestHead, ctx: &ForwardContext) {
+        let ip = ctx.client_ip.to_string();
+
+        // X-Forwarded-For: APPEND. Replacing would erase the chain recorded by
+        // upstream proxies; *trusting* an inbound value would let any client
+        // forge its own origin by sending `X-Forwarded-For: 1.2.3.4`.
+        // Appending is honest either way: the rightmost entry is the address we
+        // observed and cannot be forged, and everything left of it is hearsay.
+        // The lesson for a backend reading XFF: count from the RIGHT, and know
+        // how many proxies you sit behind.
+        let xff = match http::header(&req.headers, "x-forwarded-for") {
+            Some(existing) if !existing.trim().is_empty() => format!("{existing}, {ip}"),
+            _ => ip.clone(),
+        };
+        http::set_header(&mut req.headers, "X-Forwarded-For", &xff);
+
+        // X-Real-IP: OVERWRITE. Unlike XFF this is not a chain, so there is no
+        // legitimate multi-hop value to preserve — a client-supplied one is
+        // purely an attempt to spoof its own address.
+        http::set_header(&mut req.headers, "X-Real-IP", &ip);
+
+        // X-Forwarded-Host / -Proto: set only if ABSENT. A legitimate upstream
+        // proxy's value is closer to the truth than ours (it spoke to the real
+        // client), so we must not clobber it.
+        if http::header(&req.headers, "x-forwarded-host").is_none() {
+            if let Some(h) = ctx.original_host {
+                http::set_header(&mut req.headers, "X-Forwarded-Host", h);
+            }
+        }
+        if http::header(&req.headers, "x-forwarded-proto").is_none() {
+            http::set_header(&mut req.headers, "X-Forwarded-Proto", ctx.scheme);
+        }
+    }
+
+    /// Transform the response head in place. Only explicit header rules apply;
+    /// there is nothing to "forward" back toward the client.
+    pub fn apply_response(&self, resp: &mut ResponseHead) {
+        let _ = resp; // filled in by Task 3
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::http::{RequestHead, Version};
+    use std::net::{IpAddr, Ipv4Addr};
+
+    const CLIENT: IpAddr = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7));
+
+    fn req(headers: &[(&str, &str)]) -> RequestHead {
+        RequestHead {
+            method: "GET".to_string(),
+            target: "/users".to_string(),
+            version: Version::Http11,
+            headers: headers
+                .iter()
+                .map(|(n, v)| (n.to_string(), v.to_string()))
+                .collect(),
+        }
+    }
+
+    fn ctx<'a>(original_host: Option<&'a str>) -> ForwardContext<'a> {
+        ForwardContext { client_ip: CLIENT, original_host, scheme: "http" }
+    }
+
+    fn get<'a>(r: &'a RequestHead, name: &str) -> Option<&'a str> {
+        crate::http::header(&r.headers, name)
+    }
+
+    // 1. XFF appends to an existing chain. The rightmost entry is the one we
+    //    observed; everything left of it is hearsay from upstream proxies.
+    #[test]
+    fn xff_appends_to_existing_chain() {
+        let mut r = req(&[("X-Forwarded-For", "1.2.3.4")]);
+        RewriteRules::default().apply_request(&mut r, &ctx(None));
+        assert_eq!(get(&r, "x-forwarded-for"), Some("1.2.3.4, 203.0.113.7"));
+    }
+
+    // 2. XFF is created when absent.
+    #[test]
+    fn xff_created_when_absent() {
+        let mut r = req(&[]);
+        RewriteRules::default().apply_request(&mut r, &ctx(None));
+        assert_eq!(get(&r, "x-forwarded-for"), Some("203.0.113.7"));
+    }
+
+    // 3. A client-forged X-Real-IP must be OVERWRITTEN, not preserved: it is
+    //    not a chain, so a client-supplied value is purely a forgery attempt.
+    #[test]
+    fn x_real_ip_overwrites_forgery() {
+        let mut r = req(&[("X-Real-IP", "9.9.9.9")]);
+        RewriteRules::default().apply_request(&mut r, &ctx(None));
+        assert_eq!(get(&r, "x-real-ip"), Some("203.0.113.7"));
+        assert_eq!(
+            r.headers.iter().filter(|(n, _)| n.eq_ignore_ascii_case("x-real-ip")).count(),
+            1,
+            "overwrite must not leave a duplicate"
+        );
+    }
+
+    // 4. XFH/XFP are set when absent, and a legitimate upstream proxy's
+    //    values are preserved (it knows the true original; we don't).
+    #[test]
+    fn xfh_xfp_set_when_absent_preserved_when_present() {
+        let mut r = req(&[]);
+        RewriteRules::default().apply_request(&mut r, &ctx(Some("example.com")));
+        assert_eq!(get(&r, "x-forwarded-host"), Some("example.com"));
+        assert_eq!(get(&r, "x-forwarded-proto"), Some("http"));
+
+        let mut r2 = req(&[
+            ("X-Forwarded-Host", "orig.example.com"),
+            ("X-Forwarded-Proto", "https"),
+        ]);
+        RewriteRules::default().apply_request(&mut r2, &ctx(Some("example.com")));
+        assert_eq!(get(&r2, "x-forwarded-host"), Some("orig.example.com"));
+        assert_eq!(get(&r2, "x-forwarded-proto"), Some("https"));
+    }
+
+    // 6. --no-forwarded injects none of the four.
+    #[test]
+    fn no_forwarded_injects_nothing() {
+        let mut r = req(&[]);
+        RewriteRules::no_forwarded().apply_request(&mut r, &ctx(Some("example.com")));
+        for h in ["x-forwarded-for", "x-real-ip", "x-forwarded-host", "x-forwarded-proto"] {
+            assert_eq!(get(&r, h), None, "{h} must not be injected");
+        }
+    }
+
+    // http::set_header overwrites rather than duplicating.
+    #[test]
+    fn set_header_overwrites() {
+        let mut h = vec![("A".to_string(), "1".to_string()), ("B".to_string(), "2".to_string())];
+        crate::http::set_header(&mut h, "a", "9");
+        assert_eq!(crate::http::header(&h, "A"), Some("9"));
+        assert_eq!(h.len(), 2, "must overwrite, not append");
+    }
+}

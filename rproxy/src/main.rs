@@ -19,6 +19,7 @@ mod balancer;
 mod health;
 mod http;
 mod proxy;
+mod rewrite;
 mod router;
 
 use std::collections::HashMap;
