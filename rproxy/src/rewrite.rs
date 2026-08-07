@@ -15,6 +15,7 @@
 //! result — the same discipline that keeps Level 3's algorithms and Level 4's
 //! breaker unit-testable.
 
+use std::io;
 use std::net::IpAddr;
 
 use crate::http::{self, RequestHead, ResponseHead};
@@ -76,6 +77,23 @@ impl Default for RewriteRules {
     }
 }
 
+/// Headers a rewrite rule may never touch. The first three carry the message
+/// framing and connection semantics this proxy owns end to end; letting config
+/// set them would reopen the request-smuggling holes Level 1 closed. `Host` is
+/// excluded because it has a dedicated `host=` option that also feeds
+/// `X-Forwarded-Host` — setting it via `set-header` would bypass that.
+const PROTECTED_HEADERS: [&str; 4] =
+    ["content-length", "transfer-encoding", "connection", "host"];
+
+fn check_not_protected(name: &str, err: &impl Fn(&str) -> io::Error) -> io::Result<()> {
+    if PROTECTED_HEADERS.iter().any(|p| name.eq_ignore_ascii_case(p)) {
+        return Err(err(&format!(
+            "header {name:?} is managed by the proxy and cannot be rewritten"
+        )));
+    }
+    Ok(())
+}
+
 impl RewriteRules {
     /// Rules that inject the forwarded headers and do nothing else.
     pub fn new() -> RewriteRules {
@@ -85,6 +103,95 @@ impl RewriteRules {
     /// Rules with forwarded-header injection disabled (`--no-forwarded`).
     pub fn no_forwarded() -> RewriteRules {
         RewriteRules { forwarded: false, ..Default::default() }
+    }
+
+    /// Parse a `;`-separated option string into rules. The caller has already
+    /// severed these options from the route spec, so `opts` here is just
+    /// `strip=/api;host=backend.local` — never the whole route.
+    pub fn from_options(opts: &str, forwarded: bool) -> io::Result<RewriteRules> {
+        let err = |m: &str| {
+            io::Error::new(io::ErrorKind::InvalidInput, format!("rewrite option: {m}"))
+        };
+        let mut rules = RewriteRules { forwarded, ..Default::default() };
+
+        for raw in opts.split(';') {
+            let opt = raw.trim();
+            if opt.is_empty() {
+                // An empty segment (e.g. a trailing `;`) is skipped, not an
+                // error: writing `strip=/api;` should be as valid as `strip=/api`.
+                continue;
+            }
+            // Split on the FIRST '=' only: a value may itself contain '='
+            // (e.g. set-header=X-Q:a=b).
+            let (key, value) = opt
+                .split_once('=')
+                .ok_or_else(|| err(&format!("{opt:?} must be name=value")))?;
+            let key = key.trim();
+            let value = value.trim();
+            if value.is_empty() {
+                return Err(err(&format!("{key} needs a non-empty value")));
+            }
+
+            match key {
+                "strip" => {
+                    // Trailing-slash normalization — Task 2 review carry-over.
+                    //
+                    // Task 2 made `strip` segment-aware: it only strips when the
+                    // remainder is empty or begins with `/`. That introduced a
+                    // sharp edge — a configured `strip=/api/` (trailing slash)
+                    // against `/api/users` leaves remainder `users`, which has no
+                    // leading `/`, so the strip silently becomes a NO-OP and the
+                    // backend receives the un-stripped path. A trailing slash is a
+                    // plausible typo, and silent misrouting is the worst outcome,
+                    // so we fix it here at parse time (config normalization
+                    // belongs at parse time, not on the hot request path).
+                    //
+                    // We trim trailing `/` so `strip=/api/` == `strip=/api`. But
+                    // we must never reduce the value to empty: `strip=/` (or any
+                    // run of slashes) would trim to "" — which names no path
+                    // segment at all and would strip nothing meaningfully. That
+                    // is almost certainly a mistake, so we reject it as a hard
+                    // error rather than silently accepting a no-op rule.
+                    let normalized = value.trim_end_matches('/');
+                    if normalized.is_empty() {
+                        return Err(err(&format!(
+                            "strip {value:?} normalizes to empty and names no path segment"
+                        )));
+                    }
+                    rules.strip = Some(normalized.to_string());
+                }
+                "prefix" => rules.prefix = Some(value.to_string()),
+                "host" => rules.host = Some(value.to_string()),
+                "set-header" | "set-resp-header" => {
+                    // Split on the FIRST ':' so a value like a URL survives.
+                    let (name, hv) = value
+                        .split_once(':')
+                        .ok_or_else(|| err(&format!("{key} needs Name:Value, got {value:?}")))?;
+                    let name = name.trim();
+                    let hv = hv.trim();
+                    if name.is_empty() || hv.is_empty() {
+                        return Err(err(&format!("{key} needs a non-empty name and value")));
+                    }
+                    check_not_protected(name, &err)?;
+                    let pair = (name.to_string(), hv.to_string());
+                    if key == "set-header" {
+                        rules.set_headers.push(pair);
+                    } else {
+                        rules.set_resp_headers.push(pair);
+                    }
+                }
+                "remove-header" | "remove-resp-header" => {
+                    check_not_protected(value, &err)?;
+                    if key == "remove-header" {
+                        rules.remove_headers.push(value.to_string());
+                    } else {
+                        rules.remove_resp_headers.push(value.to_string());
+                    }
+                }
+                other => return Err(err(&format!("unknown option {other:?}"))),
+            }
+        }
+        Ok(rules)
     }
 
     /// Transform the request head in place, in this fixed order:
@@ -528,5 +635,93 @@ mod tests {
         rules.apply_response(&mut resp);
         assert_eq!(crate::http::header(&resp.headers, "x-cache"), Some("HIT"));
         assert_eq!(crate::http::header(&resp.headers, "Server"), None);
+    }
+
+    // 15. Every option parses, including combinations and surrounding space.
+    #[test]
+    fn options_parse() {
+        let r = RewriteRules::from_options(
+            " strip=/api ; prefix=/v2 ; host=backend.local ; set-header=X-Env:prod ; \
+             remove-header=X-Secret ; set-resp-header=X-Cache:HIT ; remove-resp-header=Server ",
+            true,
+        )
+        .unwrap();
+        assert_eq!(r.strip.as_deref(), Some("/api"));
+        assert_eq!(r.prefix.as_deref(), Some("/v2"));
+        assert_eq!(r.host.as_deref(), Some("backend.local"));
+        assert_eq!(r.set_headers, vec![("X-Env".to_string(), "prod".to_string())]);
+        assert_eq!(r.remove_headers, vec!["X-Secret".to_string()]);
+        assert_eq!(r.set_resp_headers, vec![("X-Cache".to_string(), "HIT".to_string())]);
+        assert_eq!(r.remove_resp_headers, vec!["Server".to_string()]);
+        assert!(r.forwarded);
+
+        // Empty options -> defaults, forwarded honored.
+        let d = RewriteRules::from_options("", true).unwrap();
+        assert!(d.strip.is_none() && d.forwarded);
+        let n = RewriteRules::from_options("", false).unwrap();
+        assert!(!n.forwarded);
+
+        // A header value may itself contain ':' (e.g. a URL).
+        let u = RewriteRules::from_options("set-header=X-Url:http://a/b", true).unwrap();
+        assert_eq!(u.set_headers[0].1, "http://a/b");
+    }
+
+    // 16. Errors: unknown option, empty values, malformed set-header, and each
+    //     protected header name. Protected names are a HARD error: silently
+    //     ignoring them would be a trap, and honoring them would reopen the
+    //     Level 1 request-smuggling holes.
+    #[test]
+    fn options_reject_bad_input() {
+        assert!(RewriteRules::from_options("bogus=1", true).is_err());
+        assert!(RewriteRules::from_options("strip=", true).is_err());
+        assert!(RewriteRules::from_options("prefix=", true).is_err());
+        assert!(RewriteRules::from_options("host=", true).is_err());
+        assert!(RewriteRules::from_options("set-header=NoColon", true).is_err());
+        assert!(RewriteRules::from_options("remove-header=", true).is_err());
+        for protected in ["Content-Length", "Transfer-Encoding", "Connection", "Host"] {
+            assert!(
+                RewriteRules::from_options(&format!("set-header={protected}:x"), true).is_err(),
+                "set-header must reject {protected}"
+            );
+            assert!(
+                RewriteRules::from_options(&format!("remove-header={protected}"), true).is_err(),
+                "remove-header must reject {protected}"
+            );
+            assert!(
+                RewriteRules::from_options(&format!("set-resp-header={protected}:x"), true).is_err(),
+                "set-resp-header must reject {protected}"
+            );
+        }
+        // Case-insensitively protected.
+        assert!(RewriteRules::from_options("set-header=content-length:5", true).is_err());
+    }
+
+    // 17. ADDITIONAL (Task 2 review carry-over): a trailing slash in `strip` is
+    //     normalized away at parse time, so `strip=/api/` behaves EXACTLY like
+    //     `strip=/api`. Without this, Task 2's segment-aware strip turned
+    //     `strip=/api/` against `/api/users` into a silent no-op (remainder
+    //     `users` has no leading `/`) — a plausible config typo causing silent
+    //     misrouting, the worst outcome. `strip=/` (all slashes) normalizes to
+    //     empty, which names no segment, so it is a hard error rather than a
+    //     silent no-op.
+    #[test]
+    fn strip_trailing_slash_normalized_at_parse() {
+        let a = RewriteRules::from_options("strip=/api/", true).unwrap();
+        let b = RewriteRules::from_options("strip=/api", true).unwrap();
+        assert_eq!(a.strip, b.strip, "trailing slash must be normalized away");
+        assert_eq!(a.strip.as_deref(), Some("/api"));
+
+        // And it produces identical routing behavior.
+        let mut r1 = req(&[]);
+        r1.target = "/api/users".to_string();
+        a.apply_request(&mut r1, &ctx(None));
+        let mut r2 = req(&[]);
+        r2.target = "/api/users".to_string();
+        b.apply_request(&mut r2, &ctx(None));
+        assert_eq!(r1.target, r2.target);
+        assert_eq!(r1.target, "/users");
+
+        // `strip=/` names no segment once normalized -> hard error, not no-op.
+        assert!(RewriteRules::from_options("strip=/", true).is_err());
     }
 }
