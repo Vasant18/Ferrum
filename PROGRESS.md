@@ -12,7 +12,7 @@ Course defined in [Build.md](Build.md). Theory reference: [Reverse-Proxy-Knowled
 | 2 | Routing (host/path/method, precedence) | 🟢 **Implemented** (2026-07-28) | `router.rs`: RouteTable + PathMatcher (exact/prefix/wildcard/regex/any) + host/method filters + specificity-ranked `find()`; CLI route specs; shared as `Arc<RouteTable>`. 404 on no match. 36 unit tests. Quiz pending. |
 | 3 | Load Balancing (RR, weighted, least-conn, consistent hashing) | 🟢 **Implemented** (2026-08-04) | `balancer.rs`: `Upstream` pools + 7 algorithms (rr/wrr/rand/lc/lrt/iphash/chash) + RAII `Lease`; `Route` now targets `Arc<Upstream>`; `--upstream NAME=SPEC` CLI. 52 unit tests. Live-verified all algos. Quiz pending. |
 | 4 | Health Checks (active/passive, retries, circuit breaker) | 🟢 **Implemented** (2026-08-06) | `balancer.rs`: per-server `Breaker` (Closed/Open/HalfOpen) + shared passive/active feeds via `Server::record_*`; `health.rs`: one prober task per upstream (`GET /health`, timeout, `probe_due` gate); `proxy.rs`: connect-retry loop (idempotent + pre-body + cap 2); `;health=PATH` spec suffix + `--hc-*` flags. 72 unit tests. Live-verified ejection, recovery, retry, and cap all with default config. Quiz pending. |
-| 5 | Proxy Headers & Rewriting (XFF, host/URL rewrite) | ⚪ Not started | |
+| 5 | Proxy Headers & Rewriting (XFF, host/URL rewrite) | 🟢 **Implemented** (2026-08-07) | `rewrite.rs`: pure sync transforms over head structs — four forwarded headers (XFF append, X-Real-IP overwrite, XFH/XFP set-if-absent), segment-aware path rewriting (`strip`/`prefix`, query preserved), Host rewriting with original capture, request/response header rules, protected-header guardrail; route-spec `;option` grammar + `--no-forwarded`; fixed transform ordering. 99 unit tests. Live-verified all four headers, append-vs-overwrite, path+Host+response rewrite ordering, guardrail. Quiz pending. |
 | 6 | Middleware (pipeline, auth, rate limiting) | ⚪ Not started | |
 | 7 | Performance (pooling, buffers, timeouts) | ⚪ Not started | Backend conns are close-per-request until pooling lands here |
 | 8 | Security & TLS (termination, mTLS, slowloris) | ⚪ Not started | Head-read timeout + head size cap already in place from L1 |
@@ -198,6 +198,107 @@ admit trials while HalfOpen, and a prober-loop-shaped regression test now guards
 8. The breaker uses `Relaxed` atomics, so two concurrent `record_failure`
    calls can lose an increment. Why is that acceptable here?
 
+## Level 5 — what was built
+
+- [x] `rewrite.rs`: the whole level is **pure synchronous transforms over head
+      structs** — no sockets, no async, no I/O. `RewriteRules::apply_request`
+      mutates a `RequestHead`, `apply_response` mutates a `ResponseHead`; both are
+      testable by building a head, applying rules, and asserting — the same
+      unit-test discipline as Level 3's algorithms and Level 4's breaker
+- [x] Four forwarded headers, each with a deliberate append-vs-overwrite choice:
+      **`X-Forwarded-For` APPENDS** (`existing, client_ip`) — replacing would
+      erase the upstream chain and *trusting* an inbound value would let any
+      client forge its origin; appending is honest because the rightmost entry is
+      the address we observed on the socket and cannot be forged (backends read
+      XFF from the RIGHT). **`X-Real-IP` OVERWRITES** with the observed peer — a
+      single-value header, so a forged `X-Real-IP: 9.9.9.9` must be replaced, not
+      trusted. **`X-Forwarded-Host` / `X-Forwarded-Proto` set-if-absent** from
+      `ctx.original_host` / `ctx.scheme`
+- [x] Segment-aware path rewriting (`strip`, `prefix`) with **query preserved**:
+      the `?query` is split off before prefix arithmetic and re-appended, so a
+      `?` can never be mangled. `strip` only fires on a path-SEGMENT boundary —
+      `strip=/api` turns `/api/users` into `/users` but leaves `/apixyz`
+      untouched (remainder `xyz` has no leading `/`), matching nginx/Traefik.
+      Stripping the whole path yields `/`, never `""` (an empty target is
+      malformed HTTP)
+- [x] Host rewriting with original capture: `host=backend.local` clobbers the
+      `Host` header (remove-then-push, so exactly one Host survives — a duplicate
+      Host is a smuggling vector), while `ForwardContext.original_host` — captured
+      **before** any rewriting — feeds `X-Forwarded-Host`, so the backend still
+      learns the client's real Host even after we rewrote it
+- [x] Request/response header rules: `set-header` / `remove-header` on the request
+      leg, `set-resp-header` / `remove-resp-header` on the response leg. Removals
+      run before sets so a `(remove X, set X)` pair is order-independent
+- [x] Protected-header guardrail: `set-header`/`remove-header` refuse
+      `Content-Length`, `Transfer-Encoding`, `Connection`, and `Host`
+      (case-insensitively) at **startup** with exit 1 — these are framing/routing
+      headers the proxy manages; letting a rule touch them reopens smuggling and
+      keep-alive-desync holes Level 1 closed. (`Host` has its own dedicated
+      `host=` option, which is the safe way to set it.)
+- [x] Route-spec `;option` grammar: options are severed on the first `;` BEFORE
+      the `=TARGET` split, because option values contain `=` (`strip=/api`) — the
+      naive order would swallow the target into the option string and mis-route.
+      A route's options therefore cannot contain a literal `;`. `--no-forwarded`
+      is a global flag clearing forwarded-injection on every route (applied even
+      to the two friendly catch-all defaults, so the flag is never a silent no-op)
+- [x] Fixed transform ordering in `apply_request`: (1) path rewrite, (2) Host
+      rewrite, (3) forwarded injection, (4) explicit header rules LAST. Explicit
+      rules run last so an operator can deliberately override an injected value
+      (e.g. pinning `X-Forwarded-Proto: https` behind an external TLS terminator).
+      The proxy's own framing re-declaration still runs after all of this, so a
+      rewrite rule can never desync Content-Length/Transfer-Encoding
+- [x] 99 unit tests (72 from Level 4 kept green; +27 for forwarded injection,
+      append/overwrite, segment-boundary strip, query preservation, Host + XFH
+      ordering, header rules, protected-header rejection, spec-option parsing)
+- [ ] **Level 5 quiz — Vishwa to answer before Level 6** (questions below)
+
+**Verified end-to-end (2026-08-07):** release binary driven against a python
+echo backend on :9001 that reports the path and headers it received. **Four
+forwarded headers** arrived exactly as designed: `x-forwarded-for: 127.0.0.1`,
+`x-real-ip: 127.0.0.1`, `x-forwarded-host: example.com`, `x-forwarded-proto:
+http`. **Append/overwrite:** sending `X-Forwarded-For: 1.2.3.4` + `X-Real-IP:
+9.9.9.9` produced `x-forwarded-for: 1.2.3.4, 127.0.0.1` (appended, chain
+preserved) and `x-real-ip: 127.0.0.1` (forgery replaced). **Rewrite +
+ordering:** with `/api/**=...;strip=/api;host=backend.local;remove-resp-header=Server`,
+a client GET to `/api/users?page=2` (Host `example.com`) reached the backend as
+`"path": "/users?page=2"` (prefix stripped, query intact), `"host":
+"backend.local"` (rewritten), and STILL `x-forwarded-host: example.com` (the
+client's original Host — the whole-level ordering guarantee), while the client's
+response had no `Server` header. **`--no-forwarded`** produced 0 forwarded
+headers. **Guardrail:** `;set-header=Content-Length:5` failed startup with
+`exit=1` (`header "Content-Length" is managed by the proxy and cannot be
+rewritten`). **Two extra regression checks passed:** on a live request with a
+catch-all `strip=/api`, `/apixyz` reached the backend as `/apixyz` (NOT `/xyz`),
+`/api/real` stripped to `/real`, and `/api` alone became `/`; and an
+`--upstream 'pool=rr:...;health=/health'` (L4 `;` grammar) coexisted in the same
+invocation with `/api/**=...;strip=...;host=...` (L5 `;` grammar) — both routes
+served correctly, the two `;` grammars did not interfere.
+
+**Run it:** `cargo run --release -- 127.0.0.1:8080 '/api/**=127.0.0.1:9001;strip=/api;host=backend.local;remove-resp-header=Server' '/=127.0.0.1:9000'`
+
+### Level 5 quiz — Vishwa to answer before Level 6
+
+1. `X-Forwarded-For` is appended but `X-Real-IP` is overwritten. Explain why
+   each choice is the secure one, and what a client could forge if we made the
+   opposite choice for either.
+2. A backend behind two proxies reads `X-Forwarded-For: 1.2.3.4, 10.0.0.1,
+   10.0.0.2`. Which entry is trustworthy, and why must it count from the right?
+3. `X-Forwarded-Host` is populated from `ForwardContext.original_host` rather
+   than from the `Host` header at injection time. What breaks if you read the
+   header instead, and which config makes the bug visible?
+4. The transform runs after `strip_hop_by_hop` and before the framing
+   re-declaration. Give a concrete attack or bug that each ordering constraint
+   prevents.
+5. `set-header` refuses `Content-Length`, `Transfer-Encoding`, `Connection`,
+   and `Host` at startup. For each, say what would break if it were allowed.
+6. Route specs sever `;` options before splitting on `=`. Show what
+   `/api/**=api;strip=/api` parses to under the naive order, and why the bug
+   would be hard to notice in production.
+7. Explicit header rules run last, after forwarded injection. Name a real
+   deployment where that ordering is required.
+8. `strip` of the entire path yields `/` rather than `""`. Why does the
+   distinction matter to a backend?
+
 ## Session log
 
 - **2026-07-26** — Course kickoff. Knowledge base built (all 14 levels). `rproxy` crate created. Module 1.1 taught & assigned. Repo pushed to github.com/Vasant18/Ferrum.
@@ -206,3 +307,4 @@ admit trials while HalfOpen, and a prober-loop-shaped regression test now guards
 - **2026-07-28** — Level 2 (Routing) implemented: `router.rs` with host/path/method matching and specificity-based precedence; wired through proxy + main as `Arc<RouteTable>`; added `regex` dep. 36 tests pass; live-verified against two backends; pushed.
 - **2026-08-03/04** — Level 3 (Load Balancing) implemented across two sessions per the approved design (`docs/superpowers/specs/2026-08-03-level-3-load-balancing-design.md`). New `balancer.rs`: 7 algorithms, `Upstream` pools, RAII `Lease` (inflight released on every path via `Drop`; RTT gated on `mark_served`). `Route` retargeted from `String` backend to `Arc<Upstream>`; `--upstream` CLI + 3-rule resolution + startup validation. 52 tests pass (36 existing kept green). Live-verified all algorithms with 3 python backends; dead-server-still-502 confirms the Level-4 seam. Refinement over the spec: RTT recording gated behind `mark_served()` so a failed connect can't bias LRT toward dead servers.
 - **2026-08-05/06** — Level 4 (Health Checks) implemented across six subagent-driven tasks per the approved design (`.superpowers/sdd/2026-08-05-level-4-health-checks/`). Tasks 1–5: per-server three-state `Breaker` with shared passive/active feeds (filling the Level-3 `available()` seam with no `select` changes), exponential backoff (double/cap/reset), one-prober-task-per-upstream in `health.rs` (`GET /health`), a three-gate connect-retry loop in `proxy.rs` (idempotent + pre-body + cap 2), and the CLI surface (`;health=PATH` + `--hc-*`). Task 6 (this session): tidied a carried-over dead-code warning (`from_spec` now `#[allow(dead_code)]` with a why-comment; release build down from 3 warnings to 2). Live-verified against python backends: ejection trips `Closed->Open` and drops the dead server from rotation with no 502s; backoff doubles live (1→2→4s); the retry loop (which has *no* unit test) hides a dead backend on GET with `[retry 1/2]` and returns 200, does NOT replay a POST (alternating `502 200`), and caps at `[retry 2/2]`. **Found and fixed a real bug:** active-only recovery deadlocked with the default `success_threshold=2` — `probe_due` returned `None` for HalfOpen after the single admitted trial, so `consec_success` froze at 1 and the breaker wedged in HalfOpen (client traffic is blocked there too, so passive successes can't help). Fix (fix round 1): `probe_due` now keeps admitting a `HalfOpenTrial` while HalfOpen, so the prober can accumulate the successes it needs; the one-probe-per-cooldown ceiling still holds because a failed trial trips straight back to Open with a doubled backoff. Added an integration-shaped regression test that drives recovery the way the prober does (alternating `probe_due`/`record_success` per tick) and asserts `Closed` with the default threshold — the case the old direct-call unit test missed. Re-verified live with the default config (no `--hc-success` override): `HalfOpen->Closed` and 9002 rejoined 3/3/3. 72 tests pass. Full report: `.superpowers/sdd/2026-08-05-level-4-health-checks/task-6-report.md`.
+- **2026-08-07** — Level 5 (Proxy Headers & Rewriting) implemented across six subagent-driven tasks per the approved design (`.superpowers/sdd/2026-08-07-level-5-proxy-headers-rewriting/`). New `rewrite.rs`: pure sync transforms over head structs — four forwarded headers (XFF append / X-Real-IP overwrite / XFH+XFP set-if-absent), segment-aware path rewriting with query preservation, Host rewriting with pre-rewrite `original_host` capture feeding XFH, request/response header rules, a startup protected-header guardrail (Content-Length/Transfer-Encoding/Connection/Host), the route-spec `;option` grammar (severed before `=` so option values keep their `=`), `--no-forwarded`, and a fixed transform order (path → Host → forwarded → explicit rules, all before framing re-declaration). Task 6 (this session): **live end-to-end verification + docs**. Drove the release binary against a python echo backend on :9001 and confirmed all 9 checks: four forwarded headers correct; `X-Forwarded-For: 1.2.3.4` appends to `1.2.3.4, 127.0.0.1` while forged `X-Real-IP: 9.9.9.9` is replaced with `127.0.0.1`; `strip=/api` + `host=backend.local` gives the backend `"path": "/users?page=2"` and `"host": "backend.local"` while `x-forwarded-host` STILL reports the client's `example.com` (the level's core ordering guarantee); `remove-resp-header=Server` strips it from the client's response; `--no-forwarded` yields 0 forwarded headers; `;set-header=Content-Length:5` fails startup with exit 1. **Two extra regression checks (beyond the brief):** on a live request the segment-boundary strip left `/apixyz` untouched (not `/xyz`), stripped `/api/real`→`/real`, and turned `/api`→`/`; and the L4 `;health=/health` upstream suffix coexisted with an L5 `;strip/;host` route in one invocation with no grammar interference. 99 tests pass. All background processes cleaned up (`pgrep` clean). Full report: `.superpowers/sdd/2026-08-07-level-5-proxy-headers-rewriting/task-6-report.md`.
