@@ -103,8 +103,52 @@ impl RewriteRules {
     /// override an injected value — e.g. pinning `X-Forwarded-Proto: https`
     /// when an external TLS terminator sits in front of us.
     pub fn apply_request(&self, req: &mut RequestHead, ctx: &ForwardContext) {
+        // Path first: everything downstream (including the log line) should see
+        // the target the backend will actually receive.
+        if self.strip.is_some() || self.prefix.is_some() {
+            req.target = self.rewrite_path(&req.target);
+        }
         if self.forwarded {
             self.inject_forwarded(req, ctx);
+        }
+    }
+
+    /// Rewrite the request target's path, preserving the query string.
+    ///
+    /// The query is split off first and re-appended after, so a `?` in the
+    /// target can never be mangled by prefix arithmetic — and a backend that
+    /// depends on its query parameters keeps getting them.
+    fn rewrite_path(&self, target: &str) -> String {
+        let (path, query) = match target.split_once('?') {
+            Some((p, q)) => (p, Some(q)),
+            None => (target, None),
+        };
+
+        let mut out = path.to_string();
+
+        // strip first, then prefix — the documented order. Stripping is a
+        // no-op when the prefix doesn't match, which keeps a mis-scoped rule
+        // from silently mangling unrelated paths.
+        if let Some(s) = &self.strip {
+            if let Some(rest) = out.strip_prefix(s.as_str()) {
+                out = rest.to_string();
+            }
+        }
+        if let Some(p) = &self.prefix {
+            out = format!("{p}{out}");
+        }
+
+        // An empty target is malformed HTTP; stripping "/api" from exactly
+        // "/api" must yield "/", not "".
+        if out.is_empty() {
+            out.push('/');
+        } else if !out.starts_with('/') {
+            out.insert(0, '/');
+        }
+
+        match query {
+            Some(q) => format!("{out}?{q}"),
+            None => out,
         }
     }
 
@@ -245,5 +289,49 @@ mod tests {
         crate::http::set_header(&mut h, "a", "9");
         assert_eq!(crate::http::header(&h, "A"), Some("9"));
         assert_eq!(h.len(), 2, "must overwrite, not append");
+    }
+
+    fn rules_path(strip: Option<&str>, prefix: Option<&str>) -> RewriteRules {
+        RewriteRules {
+            strip: strip.map(str::to_string),
+            prefix: prefix.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    fn target_after(target: &str, strip: Option<&str>, prefix: Option<&str>) -> String {
+        let mut r = req(&[]);
+        r.target = target.to_string();
+        rules_path(strip, prefix).apply_request(&mut r, &ctx(None));
+        r.target
+    }
+
+    // 7. strip removes the prefix AND preserves the query string.
+    #[test]
+    fn strip_removes_prefix_keeping_query() {
+        assert_eq!(target_after("/api/users?page=2", Some("/api"), None), "/users?page=2");
+        assert_eq!(target_after("/api/users", Some("/api"), None), "/users");
+    }
+
+    // 8. Stripping the whole path yields "/", never "" — an empty request
+    //    target is malformed and a backend would reject it.
+    #[test]
+    fn strip_whole_path_yields_root() {
+        assert_eq!(target_after("/api", Some("/api"), None), "/");
+        assert_eq!(target_after("/api?x=1", Some("/api"), None), "/?x=1");
+    }
+
+    // 9. A strip that doesn't match leaves the path untouched.
+    #[test]
+    fn strip_non_matching_is_noop() {
+        assert_eq!(target_after("/other/users", Some("/api"), None), "/other/users");
+    }
+
+    // 10. prefix prepends; strip and prefix compose in the documented order
+    //     (strip first, then prefix).
+    #[test]
+    fn prefix_prepends_and_composes_after_strip() {
+        assert_eq!(target_after("/users", None, Some("/v2")), "/v2/users");
+        assert_eq!(target_after("/api/users?a=b", Some("/api"), Some("/v2")), "/v2/users?a=b");
     }
 }
