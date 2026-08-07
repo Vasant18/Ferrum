@@ -234,12 +234,19 @@ pub fn remove_header(headers: &mut Vec<(String, String)>, name: &str) {
 /// (`rewrite::check_header_value`): rejecting bad config before it is ever
 /// stored is sound because every value that reaches this function originates
 /// either from validated config or from proxy-controlled data (IP strings, the
-/// scheme literal, a captured Host). We add a `debug_assert` tripwire here so
-/// that if a FUTURE code path ever routes unvalidated input through
-/// `set_header`, it fails loudly in tests rather than silently reopening the
-/// hole. It is only a debug assert (not a release check) precisely because the
-/// value type here is `&str`, not `io::Result`, and this hot path must not
-/// grow error handling for an invariant the parse gate already enforces.
+/// scheme literal, a captured Host).
+///
+/// The `debug_assert` below is a DEVELOPMENT-ONLY tripwire: it is compiled out
+/// in `--release`, so it provides NO protection in the shipped binary and must
+/// not be read as one. The actual defence is parse-time validation in
+/// `rewrite.rs` (`check_header_value` for `set-header`/`set-resp-header`,
+/// `check_host` for `host=`, `check_prefix` for `prefix=`), which rejects
+/// CR/LF before any value is ever stored. The assert exists only so that if a
+/// FUTURE code path routes unvalidated input through `set_header`, it fails
+/// loudly in debug tests and points the author back to the parse gate. It is a
+/// debug assert (not a release check) because the value type here is `&str`,
+/// not `io::Result`, and this hot path must not grow error handling for an
+/// invariant the parse gate already enforces.
 pub fn set_header(headers: &mut Vec<(String, String)>, name: &str, value: &str) {
     debug_assert!(
         !value.bytes().any(|b| b == b'\r' || b == b'\n'),

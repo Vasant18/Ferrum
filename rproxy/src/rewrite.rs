@@ -156,6 +156,62 @@ fn check_header_value(name: &str, value: &str, err: &impl Fn(&str) -> io::Error)
     Ok(())
 }
 
+/// Validate a `host=` value before it is stored.
+///
+/// `host` flows into `http::set_header(&mut req.headers, "Host", h)` and out
+/// through `write_request_head` — so a `\r\n` in it is the exact same
+/// CRLF-injection / request-smuggling vector that `check_header_value` guards
+/// on the `set-header` path (a smuggled `Transfer-Encoding: chunked` line).
+/// Rejecting control chars is therefore mandatory, and we do it by reusing
+/// `check_header_value` so the two doors enforce identical rules.
+///
+/// Beyond that, a `Host` header carries an authority (`uri-host [":" port]`),
+/// so it must actually LOOK like one. We accept the characters that can appear
+/// in a reg-name / IP-literal authority — ASCII letters and digits plus
+/// `-._~` (unreserved), `:` (host/port separator), and `[]` (IPv6 literal
+/// brackets) — and reject everything else. That rejects spaces (a space in a
+/// `Host` value would render a malformed header line) and any other stray
+/// punctuation that has no business in an authority, while still accepting
+/// `backend.local` and `backend.local:8080`.
+fn check_host(value: &str, err: &impl Fn(&str) -> io::Error) -> io::Result<()> {
+    check_header_value("Host", value, err)?;
+    let is_authority = |b: u8| b.is_ascii_alphanumeric() || b"-._~:[]".contains(&b);
+    if let Some(c) = value.chars().find(|&c| !c.is_ascii() || !is_authority(c as u8)) {
+        return Err(err(&format!(
+            "host {value:?} contains {c:?}, which cannot appear in an authority; a \
+             Host value must look like `backend.local` or `backend.local:8080`"
+        )));
+    }
+    Ok(())
+}
+
+/// Validate a `prefix=` value before it is stored.
+///
+/// Unlike `host`, `prefix` lands in the REQUEST LINE
+/// (`METHOD SP request-target SP HTTP-version`) via `rewrite_path`. Two byte
+/// classes are catastrophic there:
+///   - CR/LF (and any other control char) is the CRLF-injection vector — it
+///     would split the request line into a bogus extra header line.
+///   - A SPACE is arguably worse: the request line is space-delimited, so an
+///     interior space turns the rest of the target into a bogus HTTP-version
+///     field, corrupting the request line even without a newline
+///     (`GET /v2 X-Inj: yes/test HTTP/1.1`).
+/// `char::is_control` catches CR, LF, and tab; we additionally reject the
+/// literal space. We do NOT try to enforce full RFC 3986 path grammar here:
+/// other request-target characters (`?`, `#`, `%`, sub-delims) are legitimate
+/// or handled elsewhere (`rewrite_path` splits the query off on `?`), and the
+/// only bytes that can actually break the request-line framing are whitespace
+/// and controls — so those are exactly what we forbid.
+fn check_prefix(value: &str, err: &impl Fn(&str) -> io::Error) -> io::Result<()> {
+    if let Some(c) = value.chars().find(|&c| c.is_control() || c == ' ') {
+        return Err(err(&format!(
+            "prefix {value:?} contains {c:?}; whitespace or control characters in a \
+             path prefix corrupt the request line (CRLF-injection / bogus HTTP-version)"
+        )));
+    }
+    Ok(())
+}
+
 impl RewriteRules {
     /// Rules that inject the forwarded headers and do nothing else.
     pub fn new() -> RewriteRules {
@@ -220,10 +276,25 @@ impl RewriteRules {
                             "strip {value:?} normalizes to empty and names no path segment"
                         )));
                     }
+                    // No CR/LF check needed on `strip`: unlike `prefix`/`host`,
+                    // this value is never serialized. It is used only as a
+                    // `strip_prefix` match argument in `rewrite_path` against an
+                    // incoming target that Level 1 already guarantees is
+                    // CR/LF-free, so it can never reach the wire as bytes.
                     rules.strip = Some(normalized.to_string());
                 }
-                "prefix" => rules.prefix = Some(value.to_string()),
-                "host" => rules.host = Some(value.to_string()),
+                "prefix" => {
+                    // `prefix` lands in the request line — validate before store.
+                    check_prefix(value, &err)?;
+                    rules.prefix = Some(value.to_string());
+                }
+                "host" => {
+                    // `host` is serialized as the `Host` header value — same
+                    // CRLF-injection surface as `set-header`, plus authority
+                    // shape. Validate before store.
+                    check_host(value, &err)?;
+                    rules.host = Some(value.to_string());
+                }
                 "set-header" | "set-resp-header" => {
                     // Split on the FIRST ':' so a value like a URL survives.
                     let (name, hv) = value
@@ -835,6 +906,52 @@ mod tests {
                 "value with CR/LF must be rejected: {payload:?}"
             );
         }
+    }
+
+    // FINDING 1b — CRLF injection through `host=` and `prefix=`. The original
+    // fix wave closed the hole on `set-header`/`set-resp-header` but left the
+    // IDENTICAL vector open through these two options, which store their values
+    // RAW and then serialize them — `host` into the `Host` header value,
+    // `prefix` into the request line. Both must be refused at parse time with
+    // the EXACT reproduced payloads, so neither door can regress.
+    #[test]
+    fn host_and_prefix_reject_crlf() {
+        // host= : the reproduced Transfer-Encoding smuggling payload, plus a
+        // second header-injection payload. Both must be refused.
+        assert!(
+            RewriteRules::from_options("host=x\r\nTransfer-Encoding: chunked", true).is_err(),
+            "the reproduced host= Transfer-Encoding smuggling payload must be refused"
+        );
+        assert!(
+            RewriteRules::from_options("host=evil.local\r\nX-Injected: pwned", true).is_err(),
+            "a host= header-injection payload must be refused"
+        );
+
+        // prefix= : lands in the request line, so a CRLF corrupts it directly.
+        assert!(
+            RewriteRules::from_options("prefix=/v2\r\nX-Prefix-Inj: yes", true).is_err(),
+            "the reproduced prefix= request-line injection payload must be refused"
+        );
+
+        // A SPACE is its own vector: in host it makes a malformed header line,
+        // in prefix it splits the space-delimited request line.
+        assert!(
+            RewriteRules::from_options("host=back end.local", true).is_err(),
+            "a space in host= must be refused"
+        );
+        assert!(
+            RewriteRules::from_options("prefix=/v 2", true).is_err(),
+            "a space in prefix= must be refused"
+        );
+
+        // NO OVER-REJECTION: legitimate host/prefix configs must still parse.
+        // This fix must not break normal setups.
+        let h = RewriteRules::from_options("host=backend.local", true).unwrap();
+        assert_eq!(h.host.as_deref(), Some("backend.local"));
+        let hp = RewriteRules::from_options("host=backend.local:8080", true).unwrap();
+        assert_eq!(hp.host.as_deref(), Some("backend.local:8080"), "host:port must be accepted");
+        let p = RewriteRules::from_options("prefix=/v2", true).unwrap();
+        assert_eq!(p.prefix.as_deref(), Some("/v2"));
     }
 
     // FINDING 2 — header-name validation. A name must be a valid RFC 9110 token:
