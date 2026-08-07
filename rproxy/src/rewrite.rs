@@ -82,13 +82,75 @@ impl Default for RewriteRules {
 /// set them would reopen the request-smuggling holes Level 1 closed. `Host` is
 /// excluded because it has a dedicated `host=` option that also feeds
 /// `X-Forwarded-Host` — setting it via `set-header` would bypass that.
-const PROTECTED_HEADERS: [&str; 4] =
-    ["content-length", "transfer-encoding", "connection", "host"];
+///
+/// `Upgrade`, `TE`, and `Trailer` are the remaining hop-by-hop headers that
+/// `proxy.rs::strip_hop_by_hop` deletes on both legs. Without them here, step 5
+/// of `apply_request` (explicit `set-header` rules) could RE-ADD a hop-by-hop
+/// header after the strip, defeating it — a `set-header=Upgrade:websocket` rule
+/// would sail back onto the wire. Listing them preserves the hop-by-hop
+/// discipline end to end. We deliberately do NOT protect `Content-Encoding` or
+/// `Expect`: those are semantically hazardous but legitimately settable, so
+/// blocking them would be over-reach.
+const PROTECTED_HEADERS: [&str; 7] = [
+    "content-length",
+    "transfer-encoding",
+    "connection",
+    "host",
+    "upgrade",
+    "te",
+    "trailer",
+];
 
 fn check_not_protected(name: &str, err: &impl Fn(&str) -> io::Error) -> io::Result<()> {
     if PROTECTED_HEADERS.iter().any(|p| name.eq_ignore_ascii_case(p)) {
         return Err(err(&format!(
             "header {name:?} is managed by the proxy and cannot be rewritten"
+        )));
+    }
+    Ok(())
+}
+
+/// Reject a header *name* that is not a valid HTTP field-name token.
+///
+/// RFC 9110 §5.1 defines a field name as a `token`, whose permitted bytes
+/// (`tchar`) are ASCII letters, digits, and `!#$%&'*+-.^_`|~`. Everything else
+/// — spaces, `:`, control characters, non-ASCII bytes — is forbidden. This
+/// proxy's own Level 1 parser (`parse_header_lines`) would reject such a name
+/// off the wire; a name injected via config must clear the same bar, or we
+/// would emit a header line our own front door would refuse. Enforced as a
+/// hard startup error, consistent with the protected-header philosophy.
+fn check_header_name(name: &str, err: &impl Fn(&str) -> io::Error) -> io::Result<()> {
+    let is_tchar = |b: u8| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b);
+    if !name.bytes().all(is_tchar) {
+        return Err(err(&format!(
+            "header name {name:?} is not a valid HTTP token (RFC 9110 tchar: \
+             letters, digits, and !#$%&'*+-.^_`|~ only)"
+        )));
+    }
+    Ok(())
+}
+
+/// Reject a header *value* containing control characters — chiefly CR (`\r`)
+/// and LF (`\n`).
+///
+/// This is the CRLF-injection / request-smuggling guard. `str::trim()` only
+/// strips SURROUNDING whitespace: an interior `"\r\n"` in a configured value
+/// passes straight through `http::set_header` and out via `write_request_head`,
+/// where it renders as a header separator — turning one config value into an
+/// extra header line on the wire (e.g. a smuggled `Transfer-Encoding: chunked`).
+///
+/// Crucially, the framing re-declaration in `proxy.rs` does NOT save us: that
+/// block does `remove_header("transfer-encoding")` then re-pushes it, and
+/// `remove_header` matches on the header *name*. A `Transfer-Encoding` smuggled
+/// *inside another header's value* is not a distinct header entry — it is bytes
+/// in, say, `X-Foo`'s value — so `remove_header` never sees it and it reaches
+/// the backend intact. The only place to stop it is here, at parse time, before
+/// the bytes are ever accepted.
+fn check_header_value(name: &str, value: &str, err: &impl Fn(&str) -> io::Error) -> io::Result<()> {
+    if let Some(c) = value.chars().find(|c| c.is_control()) {
+        return Err(err(&format!(
+            "header {name:?} value contains control character {c:?}; CR/LF (or any \
+             control char) in a header value is a CRLF-injection / request-smuggling vector"
         )));
     }
     Ok(())
@@ -173,6 +235,8 @@ impl RewriteRules {
                         return Err(err(&format!("{key} needs a non-empty name and value")));
                     }
                     check_not_protected(name, &err)?;
+                    check_header_name(name, &err)?;
+                    check_header_value(name, hv, &err)?;
                     let pair = (name.to_string(), hv.to_string());
                     if key == "set-header" {
                         rules.set_headers.push(pair);
@@ -182,6 +246,7 @@ impl RewriteRules {
                 }
                 "remove-header" | "remove-resp-header" => {
                     check_not_protected(value, &err)?;
+                    check_header_name(value, &err)?;
                     if key == "remove-header" {
                         rules.remove_headers.push(value.to_string());
                     } else {
@@ -218,10 +283,11 @@ impl RewriteRules {
         // Path first: everything downstream (including the log line) should see
         // the target the backend will actually receive.
         //
-        // When neither rule is set we skip the rewrite entirely — deliberately.
-        // This means a malformed target is NOT normalized on this path, but that
-        // is a non-issue: HTTP targets are parsed upstream and are always rooted
-        // (they start with `/`), so there is nothing to fix up here.
+        // When neither rule is set we skip the rewrite entirely. Even when a
+        // rule IS set, `rewrite_path` only touches ORIGIN-FORM targets (those
+        // starting with `/`); an asterisk-form (`OPTIONS *`) or absolute-form
+        // (`http://host/path`) target is left untouched, because prefix/strip
+        // arithmetic on it would produce a malformed request line.
         if self.strip.is_some() || self.prefix.is_some() {
             req.target = self.rewrite_path(&req.target);
         }
@@ -259,7 +325,19 @@ impl RewriteRules {
     /// The query is split off first and re-appended after, so a `?` in the
     /// target can never be mangled by prefix arithmetic — and a backend that
     /// depends on its query parameters keeps getting them.
+    ///
+    /// Only ORIGIN-FORM targets (starting with `/`) are rewritten. RFC 9112 §3.2
+    /// also allows asterisk-form (`*`, for `OPTIONS *`), absolute-form
+    /// (`http://host/path`, used to proxies), and authority-form (`CONNECT`).
+    /// Prepending a prefix to, or "rooting", any of those would corrupt the
+    /// request line — `http://evil.com/api` would become `/http://evil.com/api`
+    /// and `*` would become `/*`. So a non-origin-form target is returned
+    /// unchanged; strip/prefix simply do not apply to it.
     fn rewrite_path(&self, target: &str) -> String {
+        if !target.starts_with('/') {
+            return target.to_string();
+        }
+
         let (path, query) = match target.split_once('?') {
             Some((p, q)) => (p, Some(q)),
             None => (target, None),
@@ -723,5 +801,105 @@ mod tests {
 
         // `strip=/` names no segment once normalized -> hard error, not no-op.
         assert!(RewriteRules::from_options("strip=/", true).is_err());
+    }
+
+    // FINDING 1 — CRLF injection in header values. A `\r`, `\n`, or `\r\n` in a
+    // set-header / set-resp-header value must be a HARD parse-time error. An
+    // interior CRLF survives `str::trim()` (which strips only surrounding
+    // whitespace) and, unchecked, `write_request_head` renders it as a header
+    // SEPARATOR — turning one config value into an extra header line on the
+    // wire. It bypasses PROTECTED_HEADERS entirely because that guard inspects
+    // only the header NAME, never the value.
+    #[test]
+    fn set_header_rejects_crlf_in_value() {
+        // The exact smuggling payload from the reproduction: a value that
+        // injects a separate `Transfer-Encoding: chunked` line. This must NEVER
+        // come back.
+        assert!(
+            RewriteRules::from_options(
+                "set-header=X-Foo:bar\r\nTransfer-Encoding: chunked",
+                true
+            )
+            .is_err(),
+            "the reproduced Transfer-Encoding smuggling payload must be refused"
+        );
+        // Bare CR, bare LF, and CRLF are each rejected, for set- and set-resp-.
+        for payload in [
+            "set-header=X-Foo:a\rb",
+            "set-header=X-Foo:a\nb",
+            "set-header=X-Foo:a\r\nb",
+            "set-resp-header=X-Foo:a\r\nEvil: 1",
+        ] {
+            assert!(
+                RewriteRules::from_options(payload, true).is_err(),
+                "value with CR/LF must be rejected: {payload:?}"
+            );
+        }
+    }
+
+    // FINDING 2 — header-name validation. A name must be a valid RFC 9110 token:
+    // no spaces, no `:`, no control chars, ASCII only. `Foo Bar` would reach the
+    // wire as `Foo Bar: x` — a name this proxy's own Level 1 parser rejects.
+    #[test]
+    fn header_names_must_be_valid_tokens() {
+        for bad in [
+            "set-header=Foo Bar:x",  // space
+            "set-header=Foo\x01:x",  // control char
+            "set-header=Föö:x",      // non-ASCII
+            "remove-header=Foo Bar", // remove path validated too
+        ] {
+            assert!(
+                RewriteRules::from_options(bad, true).is_err(),
+                "invalid header name must be rejected: {bad:?}"
+            );
+        }
+
+        // Don't over-reject: a legitimate name using token-special characters
+        // (`-`, `_`, `.`, digits) must still be ACCEPTED.
+        let ok = RewriteRules::from_options("set-header=X-My_Header.v1:value", true).unwrap();
+        assert_eq!(ok.set_headers[0].0, "X-My_Header.v1");
+        // And on the remove path.
+        let ok2 = RewriteRules::from_options("remove-header=X-My_Header.v1", true).unwrap();
+        assert_eq!(ok2.remove_headers[0], "X-My_Header.v1");
+    }
+
+    // FINDING 3 — the extra hop-by-hop names (Upgrade, TE, Trailer) are
+    // protected across ALL FOUR rule kinds, so step 5 of apply_request can't
+    // re-add what strip_hop_by_hop removed.
+    #[test]
+    fn hop_by_hop_headers_are_protected() {
+        for h in ["Upgrade", "TE", "Trailer"] {
+            assert!(
+                RewriteRules::from_options(&format!("set-header={h}:x"), true).is_err(),
+                "set-header must reject hop-by-hop {h}"
+            );
+            assert!(
+                RewriteRules::from_options(&format!("set-resp-header={h}:x"), true).is_err(),
+                "set-resp-header must reject hop-by-hop {h}"
+            );
+            assert!(
+                RewriteRules::from_options(&format!("remove-header={h}"), true).is_err(),
+                "remove-header must reject hop-by-hop {h}"
+            );
+            assert!(
+                RewriteRules::from_options(&format!("remove-resp-header={h}"), true).is_err(),
+                "remove-resp-header must reject hop-by-hop {h}"
+            );
+        }
+    }
+
+    // FINDING 4 — rewrite_path leaves a non-origin-form target unchanged. An
+    // absolute-form or asterisk-form target must pass through even with
+    // strip/prefix configured; rooting or prefixing it would corrupt the
+    // request line.
+    #[test]
+    fn non_origin_form_target_is_left_unchanged() {
+        // Absolute-form: must not become `/v2/http://host/api/users`.
+        assert_eq!(
+            target_after("http://evil.com/api/users", Some("/api"), Some("/v2")),
+            "http://evil.com/api/users"
+        );
+        // Asterisk-form (OPTIONS *): must not become `/*` or `/v2*`.
+        assert_eq!(target_after("*", Some("/api"), Some("/v2")), "*");
     }
 }

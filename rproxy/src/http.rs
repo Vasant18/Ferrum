@@ -227,7 +227,25 @@ pub fn remove_header(headers: &mut Vec<(String, String)>, name: &str) {
 /// rather than append, so applying a rule twice (e.g. across a retry) can
 /// never accumulate duplicates — and a duplicated header is exactly the
 /// ambiguity the Level 1 parser works to reject.
+///
+/// Defense-in-depth against CRLF injection: a `\r`/`\n` in `value` would, once
+/// serialized by `write_request_head`, split into an extra header line on the
+/// wire — the smuggling vector. The authoritative guard is at PARSE time
+/// (`rewrite::check_header_value`): rejecting bad config before it is ever
+/// stored is sound because every value that reaches this function originates
+/// either from validated config or from proxy-controlled data (IP strings, the
+/// scheme literal, a captured Host). We add a `debug_assert` tripwire here so
+/// that if a FUTURE code path ever routes unvalidated input through
+/// `set_header`, it fails loudly in tests rather than silently reopening the
+/// hole. It is only a debug assert (not a release check) precisely because the
+/// value type here is `&str`, not `io::Result`, and this hot path must not
+/// grow error handling for an invariant the parse gate already enforces.
 pub fn set_header(headers: &mut Vec<(String, String)>, name: &str, value: &str) {
+    debug_assert!(
+        !value.bytes().any(|b| b == b'\r' || b == b'\n'),
+        "set_header value for {name:?} contains CR/LF ({value:?}): a CRLF-injection \
+         vector must be rejected at parse time before reaching set_header"
+    );
     remove_header(headers, name);
     headers.push((name.to_string(), value.to_string()));
 }
