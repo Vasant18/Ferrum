@@ -113,8 +113,33 @@ impl RewriteRules {
         if self.strip.is_some() || self.prefix.is_some() {
             req.target = self.rewrite_path(&req.target);
         }
+
+        // 3. Host rewrite. The ORIGINAL host was captured into `ctx` by the
+        //    caller before we got here — that is what makes step 4's
+        //    X-Forwarded-Host honest even though we clobber Host here.
+        //    `set_header` is remove-then-push, so exactly one Host survives;
+        //    a duplicate Host is a request-smuggling vector.
+        if let Some(h) = &self.host {
+            http::set_header(&mut req.headers, "Host", h);
+        }
+
+        // 4. Forwarded headers. These read `ctx.original_host` / `ctx.scheme`,
+        //    NOT the (possibly rewritten) Host header, so X-Forwarded-Host
+        //    still reports what the client asked for.
         if self.forwarded {
             self.inject_forwarded(req, ctx);
+        }
+
+        // 5. Explicit header rules LAST, so an operator can deliberately
+        //    override an injected value — e.g. pinning `X-Forwarded-Proto:
+        //    https` behind an external TLS terminator. Removals run before
+        //    sets so a rule pair (remove X, set X) behaves predictably rather
+        //    than depending on which was declared first.
+        for name in &self.remove_headers {
+            http::remove_header(&mut req.headers, name);
+        }
+        for (name, value) in &self.set_headers {
+            http::set_header(&mut req.headers, name, value);
         }
     }
 
@@ -207,7 +232,16 @@ impl RewriteRules {
     /// Transform the response head in place. Only explicit header rules apply;
     /// there is nothing to "forward" back toward the client.
     pub fn apply_response(&self, resp: &mut ResponseHead) {
-        let _ = resp; // filled in by Task 3
+        // Same removals-before-sets discipline as the request path, for the
+        // same reason: a (remove X, set X) pair must land on a clean slate.
+        // There are no forwarded headers on the way back — the client is the
+        // final hop — so this is purely the explicit response rules.
+        for name in &self.remove_resp_headers {
+            http::remove_header(&mut resp.headers, name);
+        }
+        for (name, value) in &self.set_resp_headers {
+            http::set_header(&mut resp.headers, name, value);
+        }
     }
 }
 
@@ -370,5 +404,95 @@ mod tests {
     fn prefix_prepends_and_composes_after_strip() {
         assert_eq!(target_after("/users", None, Some("/v2")), "/v2/users");
         assert_eq!(target_after("/api/users?a=b", Some("/api"), Some("/v2")), "/v2/users?a=b");
+    }
+
+    // 5. THE ORDERING BUG THIS DESIGN EXISTS TO PREVENT: X-Forwarded-Host must
+    //    report the host the CLIENT asked for, even though `host=` overwrites
+    //    the Host header we send onward.
+    #[test]
+    fn xfh_reports_original_host_not_rewritten_one() {
+        let mut r = req(&[("Host", "example.com")]);
+        let rules = RewriteRules { host: Some("backend.local".to_string()), ..Default::default() };
+        rules.apply_request(&mut r, &ctx(Some("example.com")));
+        assert_eq!(get(&r, "host"), Some("backend.local"), "backend sees the rewritten Host");
+        assert_eq!(
+            get(&r, "x-forwarded-host"),
+            Some("example.com"),
+            "but X-Forwarded-Host must preserve what the client asked for"
+        );
+    }
+
+    // 11. host= replaces the Host header.
+    #[test]
+    fn host_rewrite_replaces_host() {
+        let mut r = req(&[("Host", "example.com")]);
+        let rules = RewriteRules { host: Some("backend.local".to_string()), ..Default::default() };
+        rules.apply_request(&mut r, &ctx(Some("example.com")));
+        assert_eq!(get(&r, "host"), Some("backend.local"));
+        assert_eq!(
+            r.headers.iter().filter(|(n, _)| n.eq_ignore_ascii_case("host")).count(),
+            1,
+            "exactly one Host header — duplicates are a smuggling vector"
+        );
+    }
+
+    // 12. set-header overwrites rather than duplicating.
+    #[test]
+    fn set_header_rule_overwrites() {
+        let mut r = req(&[("X-Env", "dev")]);
+        let rules = RewriteRules {
+            set_headers: vec![("X-Env".to_string(), "prod".to_string())],
+            ..Default::default()
+        };
+        rules.apply_request(&mut r, &ctx(None));
+        assert_eq!(get(&r, "x-env"), Some("prod"));
+        assert_eq!(r.headers.iter().filter(|(n, _)| n.eq_ignore_ascii_case("x-env")).count(), 1);
+    }
+
+    // 13. remove-header is case-insensitive.
+    #[test]
+    fn remove_header_rule_is_case_insensitive() {
+        let mut r = req(&[("X-Secret", "shh")]);
+        let rules = RewriteRules {
+            remove_headers: vec!["x-secret".to_string()],
+            ..Default::default()
+        };
+        rules.apply_request(&mut r, &ctx(None));
+        assert_eq!(get(&r, "X-Secret"), None);
+    }
+
+    // Header rules run LAST, so an explicit rule can deliberately override an
+    // injected forwarded header (e.g. behind an external TLS terminator).
+    #[test]
+    fn explicit_rule_overrides_injected_forwarded_header() {
+        let mut r = req(&[]);
+        let rules = RewriteRules {
+            set_headers: vec![("X-Forwarded-Proto".to_string(), "https".to_string())],
+            ..Default::default()
+        };
+        rules.apply_request(&mut r, &ctx(None));
+        assert_eq!(get(&r, "x-forwarded-proto"), Some("https"));
+    }
+
+    // 14. Response header rules.
+    #[test]
+    fn response_header_rules_apply() {
+        let mut resp = ResponseHead {
+            version: Version::Http11,
+            status: 200,
+            reason: "OK".to_string(),
+            headers: vec![
+                ("Server".to_string(), "backend/1.0".to_string()),
+                ("X-Cache".to_string(), "MISS".to_string()),
+            ],
+        };
+        let rules = RewriteRules {
+            set_resp_headers: vec![("X-Cache".to_string(), "HIT".to_string())],
+            remove_resp_headers: vec!["server".to_string()],
+            ..Default::default()
+        };
+        rules.apply_response(&mut resp);
+        assert_eq!(crate::http::header(&resp.headers, "x-cache"), Some("HIT"));
+        assert_eq!(crate::http::header(&resp.headers, "Server"), None);
     }
 }
