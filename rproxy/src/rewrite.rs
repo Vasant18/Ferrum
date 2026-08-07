@@ -105,6 +105,11 @@ impl RewriteRules {
     pub fn apply_request(&self, req: &mut RequestHead, ctx: &ForwardContext) {
         // Path first: everything downstream (including the log line) should see
         // the target the backend will actually receive.
+        //
+        // When neither rule is set we skip the rewrite entirely — deliberately.
+        // This means a malformed target is NOT normalized on this path, but that
+        // is a non-issue: HTTP targets are parsed upstream and are always rooted
+        // (they start with `/`), so there is nothing to fix up here.
         if self.strip.is_some() || self.prefix.is_some() {
             req.target = self.rewrite_path(&req.target);
         }
@@ -129,9 +134,20 @@ impl RewriteRules {
         // strip first, then prefix — the documented order. Stripping is a
         // no-op when the prefix doesn't match, which keeps a mis-scoped rule
         // from silently mangling unrelated paths.
+        //
+        // The match must be on a path-SEGMENT boundary, not a raw byte prefix.
+        // `str::strip_prefix` alone would strip `/api` from `/apixyz` and yield
+        // `/xyz` — but `/apixyz` is a different path that merely shares a textual
+        // prefix, and an operator writing `strip=/api` means "the /api segment",
+        // exactly as nginx and Traefik do. So we only strip when what remains is
+        // empty (the prefix was the whole path) or begins with `/` (a clean
+        // segment break). `/apixyz` leaves remainder `xyz` — no boundary — so it
+        // passes through untouched.
         if let Some(s) = &self.strip {
             if let Some(rest) = out.strip_prefix(s.as_str()) {
-                out = rest.to_string();
+                if rest.is_empty() || rest.starts_with('/') {
+                    out = rest.to_string();
+                }
             }
         }
         if let Some(p) = &self.prefix {
@@ -325,6 +341,27 @@ mod tests {
     #[test]
     fn strip_non_matching_is_noop() {
         assert_eq!(target_after("/other/users", Some("/api"), None), "/other/users");
+    }
+
+    // 9b. strip is SEGMENT-aware, not a raw byte prefix: `/apixyz` merely shares
+    //     a textual prefix with `/api`, so it must pass through untouched — a
+    //     raw prefix strip would silently mangle it to `/xyz`.
+    #[test]
+    fn strip_ignores_non_segment_boundary() {
+        assert_eq!(target_after("/apixyz", Some("/api"), None), "/apixyz");
+    }
+
+    // 9c. A clean segment break (`/api/users`) still strips as expected.
+    #[test]
+    fn strip_matches_on_segment_boundary() {
+        assert_eq!(target_after("/api/users", Some("/api"), None), "/users");
+    }
+
+    // 9d. A trailing slash (`/api/`) is a clean break too: remainder is "/",
+    //     which the empty/slash normalization collapses to "/".
+    #[test]
+    fn strip_trailing_slash_yields_root() {
+        assert_eq!(target_after("/api/", Some("/api"), None), "/");
     }
 
     // 10. prefix prepends; strip and prefix compose in the documented order
