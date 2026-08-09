@@ -18,6 +18,7 @@
 mod balancer;
 mod health;
 mod http;
+mod middleware;
 mod proxy;
 mod rewrite;
 mod router;
@@ -55,6 +56,11 @@ async fn main() -> std::io::Result<()> {
     // behavior; `--no-forwarded` opts out for the rare deployment that wants
     // the proxy to stay invisible. Applies to every route.
     let mut forwarded = true;
+    // Level 6 observability middleware. Both ON by default — a request id on
+    // every response and one access-log line per request are what you want from
+    // a proxy on day one, and neither can reject traffic. `--no-*` opts out.
+    let mut request_id = true;
+    let mut access_log = true;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--upstream" => upstream_specs.push(next_val(&mut args, "--upstream")?),
@@ -77,12 +83,21 @@ async fn main() -> std::io::Result<()> {
                     .map_err(|_| bad_arg("--hc-success expects a number"))?
             }
             "--no-forwarded" => forwarded = false,
+            "--no-request-id" => request_id = false,
+            "--no-access-log" => access_log = false,
             // Anything else is a route spec (bare host:port or path=BACKEND).
             _ => route_specs.push(arg),
         }
     }
 
-    let routes = build_routes(&upstream_specs, &route_specs, &hc, forwarded)?;
+    let routes = build_routes(
+        &upstream_specs,
+        &route_specs,
+        &hc,
+        forwarded,
+        request_id,
+        access_log,
+    )?;
     let routes = Arc::new(routes);
 
     let listener = TcpListener::bind(&listen_addr).await?;
@@ -172,6 +187,8 @@ fn build_routes(
     route_specs: &[String],
     hc: &balancer::HealthConfig,
     forwarded: bool,
+    request_id: bool,
+    access_log: bool,
 ) -> std::io::Result<RouteTable> {
     let bad = |m: String| std::io::Error::new(std::io::ErrorKind::InvalidInput, m);
 
@@ -199,20 +216,24 @@ fn build_routes(
     // resolve_route), so `forwarded` would not reach them on its own. Apply it
     // here too — otherwise `rproxy LISTEN --no-forwarded` and the bare
     // `host:port` shorthand would silently keep injecting forwarded headers,
-    // making the flag a no-op for exactly the simplest invocations.
+    // making the flag a no-op for exactly the simplest invocations. The same
+    // reasoning applies to `--no-request-id` / `--no-access-log`: rebuild the
+    // default chain with the flags so they aren't silent no-ops on the defaults.
     if route_specs.is_empty() {
         let mut route = Route::catch_all("127.0.0.1:9000");
         route.rules.forwarded = forwarded;
+        route.chain = router::default_chain(request_id, access_log);
         return Ok(RouteTable::new(vec![route]));
     }
     if route_specs.len() == 1 && !route_specs[0].contains('=') {
         let mut route = Route::catch_all(&route_specs[0]);
         route.rules.forwarded = forwarded;
+        route.chain = router::default_chain(request_id, access_log);
         return Ok(RouteTable::new(vec![route]));
     }
     let mut routes = Vec::with_capacity(route_specs.len());
     for spec in route_specs {
-        routes.push(resolve_route(spec, &upstreams, forwarded)?);
+        routes.push(resolve_route(spec, &upstreams, forwarded, request_id, access_log)?);
     }
     Ok(RouteTable::new(routes))
 }

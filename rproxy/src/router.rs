@@ -98,6 +98,8 @@ pub struct Route {
     pub upstream: Arc<Upstream>,
     /// Level 5 header/path rewriting for requests matched by this route.
     pub rules: RewriteRules,
+    /// Level 6 middleware pipeline for requests matched by this route.
+    pub chain: crate::middleware::Chain,
 }
 
 impl Route {
@@ -111,6 +113,11 @@ impl Route {
             path: PathMatcher::Any,
             upstream: Arc::new(Upstream::single(backend)),
             rules: RewriteRules::default(),
+            // The default posture: access log + request id on, no auth/rate.
+            // `build_routes` overrides this for the two catch-all defaults when
+            // `--no-request-id` / `--no-access-log` are set, mirroring how it
+            // already overrides `rules.forwarded`.
+            chain: default_chain(true, true),
         }
     }
 
@@ -195,7 +202,12 @@ impl RouteTable {
             .map(|r| {
                 let host = r.host.as_deref().unwrap_or("*");
                 let method = r.method.as_deref().unwrap_or("*");
-                format!("{method} {host} {} -> {}", r.path.describe(), r.upstream.describe())
+                format!(
+                    "{method} {host} {} -> {} (middleware: {})",
+                    r.path.describe(),
+                    r.upstream.describe(),
+                    r.chain.describe(),
+                )
             })
             .collect()
     }
@@ -308,13 +320,25 @@ pub fn resolve_route(
     spec: &str,
     upstreams: &HashMap<String, Arc<Upstream>>,
     forwarded: bool,
+    request_id: bool,
+    access_log: bool,
 ) -> io::Result<Route> {
     let m = parse_matchers(spec)?;
-    // Parse the severed option string into rewrite rules. An empty `options`
-    // yields defaults (forwarded on unless `--no-forwarded` cleared it), so a
-    // route with no `;` behaves exactly as it did before Level 5. A bad option
-    // (unknown key, protected header) surfaces here as a startup error.
-    let rules = RewriteRules::from_options(&m.options, forwarded)?;
+
+    // Level 6 added a second family of `;options` (auth, rate, ...). Both
+    // families share one severed option string, so we partition it by key
+    // before handing each half to its own parser. This partition is the single
+    // arbiter of "unknown option": `RewriteRules::from_options` and
+    // `MiddlewareConfig::from_options` each see only their own keys, so neither
+    // has to know about the other, and a typo is rejected here — once — with a
+    // message that names the offending key.
+    let (l5_opts, l6_opts) = partition_options(&m.options)?;
+
+    // An empty L5 string yields defaults (forwarded on unless `--no-forwarded`
+    // cleared it), so a route with no `;` behaves exactly as before Level 5.
+    let rules = RewriteRules::from_options(&l5_opts, forwarded)?;
+    let chain = crate::middleware::MiddlewareConfig::from_options(&l6_opts, request_id, access_log)?
+        .build();
 
     let upstream = if let Some(up) = upstreams.get(&m.target) {
         Arc::clone(up) // rule 1: declared name
@@ -327,7 +351,46 @@ pub fn resolve_route(
         ));
     };
 
-    Ok(Route { host: m.host, method: m.method, path: m.path, upstream, rules })
+    Ok(Route { host: m.host, method: m.method, path: m.path, upstream, rules, chain })
+}
+
+/// The default middleware chain (access log + request id, both toggleable),
+/// used by `catch_all` and anywhere a route needs the baseline policy.
+pub fn default_chain(request_id: bool, access_log: bool) -> crate::middleware::Chain {
+    crate::middleware::MiddlewareConfig::from_options("", request_id, access_log)
+        .expect("empty middleware options never error")
+        .build()
+}
+
+/// Split a route's raw `;`-separated option string into (Level-5 keys,
+/// Level-6 keys), preserving each segment verbatim so the sub-parsers see
+/// exactly what the operator wrote. A segment whose key is in neither family is
+/// the "unknown option" error — raised here, not in either sub-parser.
+fn partition_options(opts: &str) -> io::Result<(String, String)> {
+    let mut l5: Vec<&str> = Vec::new();
+    let mut l6: Vec<&str> = Vec::new();
+    for raw in opts.split(';') {
+        let seg = raw.trim();
+        if seg.is_empty() {
+            continue;
+        }
+        // The key is everything before the first '='. A segment with no '=' is
+        // malformed; let the owning sub-parser produce that error, so route it
+        // by its bare key if we recognize it, else treat the whole segment as
+        // the key for the unknown-option message.
+        let key = seg.split_once('=').map(|(k, _)| k.trim()).unwrap_or(seg);
+        if crate::rewrite::L5_KEYS.contains(&key) {
+            l5.push(seg);
+        } else if crate::middleware::L6_KEYS.contains(&key) {
+            l6.push(seg);
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("unknown route option {key:?}"),
+            ));
+        }
+    }
+    Ok((l5.join(";"), l6.join(";")))
 }
 
 #[cfg(test)]
@@ -347,7 +410,12 @@ mod tests {
                     .or_insert_with(|| Arc::new(Upstream::single(target)));
             }
         }
-        RouteTable::new(specs.iter().map(|s| resolve_route(s, &ups, true).unwrap()).collect())
+        RouteTable::new(
+            specs
+                .iter()
+                .map(|s| resolve_route(s, &ups, true, true, true).unwrap())
+                .collect(),
+        )
     }
 
     /// The Level 2 assertions compared `find()` to a backend string. `find()`
@@ -456,22 +524,22 @@ mod tests {
         // Rule 1: named upstream — the route shares that exact pool's Arc
         // (a refcount bump, not a fresh pool), which is what lets several
         // routes naming one upstream share its live counters.
-        let named = resolve_route("/svc/**=api", &ups, true).unwrap();
+        let named = resolve_route("/svc/**=api", &ups, true, true, true).unwrap();
         assert!(Arc::ptr_eq(&named.upstream, &ups["api"]));
 
         // Rule 2: bare host:port auto-wraps.
-        let wrapped = resolve_route("/=127.0.0.1:9000", &ups, true).unwrap();
+        let wrapped = resolve_route("/=127.0.0.1:9000", &ups, true, true, true).unwrap();
         assert_eq!(wrapped.upstream.name(), "127.0.0.1:9000");
 
         // Rule 3: neither a known name nor a valid address.
-        assert!(resolve_route("/=not_a_pool", &ups, true).is_err());
+        assert!(resolve_route("/=not_a_pool", &ups, true, true, true).is_err());
     }
 
     // 17. Backward compatibility: a spec with no ';' options parses exactly as
     //     before and gets default rules (forwarded headers on).
     #[test]
     fn route_without_options_gets_default_rules() {
-        let r = resolve_route("/api/**=127.0.0.1:9001", &HashMap::new(), true).unwrap();
+        let r = resolve_route("/api/**=127.0.0.1:9001", &HashMap::new(), true, true, true).unwrap();
         assert!(r.rules.strip.is_none());
         assert!(r.rules.forwarded);
         assert_eq!(r.upstream.name(), "127.0.0.1:9001");
@@ -481,8 +549,14 @@ mod tests {
     // though the options contain '='.
     #[test]
     fn route_with_options_parses_target_correctly() {
-        let r = resolve_route("/api/**=127.0.0.1:9001;strip=/api;host=b.local", &HashMap::new(), true)
-            .unwrap();
+        let r = resolve_route(
+            "/api/**=127.0.0.1:9001;strip=/api;host=b.local",
+            &HashMap::new(),
+            true,
+            true,
+            true,
+        )
+        .unwrap();
         assert_eq!(r.upstream.name(), "127.0.0.1:9001", "target must not absorb the options");
         assert_eq!(r.rules.strip.as_deref(), Some("/api"));
         assert_eq!(r.rules.host.as_deref(), Some("b.local"));
@@ -491,18 +565,69 @@ mod tests {
     // --no-forwarded propagates to every route's rules.
     #[test]
     fn no_forwarded_propagates_to_routes() {
-        let r = resolve_route("/=127.0.0.1:9001", &HashMap::new(), false).unwrap();
+        let r = resolve_route("/=127.0.0.1:9001", &HashMap::new(), false, true, true).unwrap();
         assert!(!r.rules.forwarded);
     }
 
     // A bad rewrite option is a startup error.
     #[test]
     fn route_with_bad_option_errors() {
-        assert!(resolve_route("/=127.0.0.1:9001;bogus=1", &HashMap::new(), true).is_err());
+        assert!(resolve_route("/=127.0.0.1:9001;bogus=1", &HashMap::new(), true, true, true).is_err());
         assert!(
-            resolve_route("/=127.0.0.1:9001;set-header=Connection:close", &HashMap::new(), true)
-                .is_err(),
+            resolve_route(
+                "/=127.0.0.1:9001;set-header=Connection:close",
+                &HashMap::new(),
+                true,
+                true,
+                true
+            )
+            .is_err(),
             "protected header must be rejected at startup"
         );
+    }
+
+    // ---- Level 6: option partition and chain wiring ----
+
+    // Level 5 and Level 6 options coexist on one spec: the partition sends each
+    // key to its own parser, and neither swallows the other's keys.
+    #[test]
+    fn l5_and_l6_options_compose() {
+        let r = resolve_route(
+            "/api/**=127.0.0.1:9002;strip=/api;auth=basic:u:p;rate=10/s",
+            &HashMap::new(),
+            true,
+            true,
+            true,
+        )
+        .unwrap();
+        assert!(r.rules.strip.is_some(), "L5 option parsed");
+        let d = r.chain.describe();
+        assert!(d.contains("auth") && d.contains("ratelimit"), "L6 chain built: {d}");
+    }
+
+    // A key belonging to neither family is still a startup error, raised by the
+    // partition (not by either sub-parser).
+    #[test]
+    fn unknown_option_still_errors_after_partition() {
+        assert!(resolve_route("/=127.0.0.1:9000;bogus=1", &HashMap::new(), true, true, true).is_err());
+    }
+
+    // A route with no middleware options gets the default chain (log +
+    // request-id) and no auth/ratelimit.
+    #[test]
+    fn no_options_gets_default_chain() {
+        let r = resolve_route("/=127.0.0.1:9000", &HashMap::new(), true, true, true).unwrap();
+        let d = r.chain.describe();
+        assert!(d.contains("log") && d.contains("request-id"));
+        assert!(!d.contains("auth"));
+    }
+
+    // --no-request-id / --no-access-log propagate into the built chain.
+    #[test]
+    fn no_request_id_flag_omits_it_from_chain() {
+        let r = resolve_route("/=127.0.0.1:9000", &HashMap::new(), true, false, true).unwrap();
+        let d = r.chain.describe();
+        assert!(!d.contains("request-id"), "request-id disabled: {d}");
+        assert!(d.contains("log"));
     }
 }

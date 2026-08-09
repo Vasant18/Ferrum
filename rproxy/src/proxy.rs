@@ -35,6 +35,12 @@ const BACKEND_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// through five timeouts.
 const MAX_RETRIES: usize = 2;
 
+/// How much of a short-circuited request's body we drain before giving up and
+/// closing. 64 KB is generous for the challenge case (a client retrying a small
+/// request after a 401) and small enough that we never read a large upload we
+/// intend to discard. See `Conn::drain_body` for why draining matters at all.
+const REJECT_DRAIN_CAP: u64 = 64 * 1024;
+
 /// Whether a request method may be safely replayed on another backend.
 ///
 /// Retrying is only correct when re-sending cannot cause a second side effect.
@@ -235,6 +241,78 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Conn<S> {
         }
     }
 
+    /// Discard up to `cap` bytes of a request body for a short-circuited
+    /// request. Returns `true` if the whole body was consumed within the cap
+    /// (the connection is reusable), `false` if the cap was hit (caller closes).
+    ///
+    /// Why drain at all, even when we intend to close: unread bytes still in the
+    /// socket when we `close()` make the kernel send a TCP **RST** instead of a
+    /// clean FIN, and an RST can discard data already in flight — including the
+    /// rejection response we just wrote. So the client would see a connection
+    /// reset rather than the 401/429 explaining why. Draining lets us send a
+    /// clean FIN, or keep-alive (which a 401 challenge needs so the client can
+    /// retry with credentials on the same connection).
+    pub async fn drain_body(&mut self, framing: BodyFraming, cap: u64) -> io::Result<bool> {
+        let mut sink = tokio::io::sink();
+        match framing {
+            BodyFraming::None => Ok(true),
+            // Length is known up front, so the keep-vs-close decision is made
+            // before reading a byte: a body within the cap is drained and the
+            // connection kept; an over-cap body is left unread and we signal
+            // close (reading megabytes we intend to discard is pointless).
+            BodyFraming::Length(n) if n <= cap => {
+                self.copy_exact(&mut sink, n).await?;
+                Ok(true)
+            }
+            BodyFraming::Length(_) => Ok(false),
+            BodyFraming::Chunked => self.drain_chunked_capped(cap).await,
+            // Requests never use until-close framing (http.rs enforces this);
+            // treat it defensively as "cannot safely reuse".
+            BodyFraming::UntilClose => Ok(false),
+        }
+    }
+
+    /// Drain a chunked request body, discarding, until the terminating
+    /// zero-chunk or until more than `cap` data bytes have gone by — whichever
+    /// comes first. Returns `false` on the cap overflow so the caller closes
+    /// (we can't know where the body ends without reading it all).
+    async fn drain_chunked_capped(&mut self, cap: u64) -> io::Result<bool> {
+        let mut sink = tokio::io::sink();
+        let mut seen: u64 = 0;
+        loop {
+            let size_line = self.read_line().await?;
+            let size_hex = size_line.split(';').next().unwrap_or("").trim();
+            let size = u64::from_str_radix(size_hex, 16).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("invalid chunk size: {size_line:?}"),
+                )
+            })?;
+            if size == 0 {
+                // Consume the trailer section up to the blank line.
+                loop {
+                    let trailer = self.read_line().await?;
+                    if trailer.is_empty() {
+                        return Ok(true);
+                    }
+                }
+            }
+            seen = seen.saturating_add(size);
+            if seen > cap {
+                return Ok(false);
+            }
+            self.copy_exact(&mut sink, size).await?;
+            // Each chunk's data is followed by its own CRLF.
+            let sep = self.read_line().await?;
+            if !sep.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "missing CRLF after chunk data",
+                ));
+            }
+        }
+    }
+
     pub async fn write_all(&mut self, data: &[u8]) -> io::Result<()> {
         self.stream.write_all(data).await
     }
@@ -365,6 +443,45 @@ async fn serve_one(
     let original_target = req.target.clone();
     let original_host = http::header(&req.headers, "host").map(str::to_string);
 
+    // ---- 2a. Middleware pipeline (Level 6) ----
+    // Runs AFTER routing (the chain is per-route, so we must know the route
+    // first) and BEFORE the balancer lease below (a rejected request must never
+    // open a backend socket or feed the breaker — that is the whole value of
+    // short-circuiting). The context carries the ORIGINAL method/target/host so
+    // the response-phase log reports what the client asked for, not the
+    // Level-5-rewritten values.
+    let mut ctx = crate::middleware::ReqCtx::new(
+        peer,
+        method.clone(),
+        original_target.clone(),
+        original_host.clone(),
+    );
+    if let Err((entered, rej)) = route.chain.run_request(&mut req, &mut ctx) {
+        // Drain the request body so closing (or keeping) the connection is safe
+        // — see Conn::drain_body for the TCP-RST reasoning. Within the cap the
+        // connection stays reusable; beyond it we must close.
+        let reusable = match client.drain_body(req_framing, REJECT_DRAIN_CAP).await {
+            Ok(r) => r,
+            // If draining errors the connection is unusable; still try to send
+            // the rejection, then close.
+            Err(_) => false,
+        };
+        // Build the rejection response and run the response phase in reverse for
+        // exactly the layers that were entered (indices [0, entered)). The
+        // rejecting layer produced this response and doesn't post-process its
+        // own output; layers after it never ran. So a 401 still gets its
+        // X-Request-Id and its access-log line.
+        let mut resp = ResponseHead {
+            version: Version::Http11,
+            status: rej.status,
+            reason: rej.reason.to_string(),
+            headers: rej.headers.clone(),
+        };
+        route.chain.run_response(&ctx, &mut resp, entered);
+        send_rejection(client, &resp, &rej.body, reusable && client_keep_alive).await?;
+        return Ok(reusable && client_keep_alive);
+    }
+
     // ---- 2b. Balance + connect, with retry ----
     // Retry is gated on three conditions, all required:
     //   1. attempts remain (MAX_RETRIES),
@@ -443,6 +560,11 @@ async fn serve_one(
     // The exchange is now underway; a completed exchange should feed the
     // server's response-time average, so arm the lease's RTT recording.
     lease.mark_served();
+    // Record the chosen pool and server so the access-log middleware (which
+    // runs in the response phase, after the body streams) can report where the
+    // request actually went.
+    ctx.upstream = Some(upstream.name().to_string());
+    ctx.backend = Some(lease.addr().to_string());
     // Pessimistic default: the request is about to go out, and from here to the
     // point where we hold a valid response head there are six `?` early-returns
     // (write head, stream body, flush, read head, "closed before responding",
@@ -470,12 +592,12 @@ async fn serve_one(
     // Connection-listed header that a rule then re-adds) and BEFORE the
     // framing re-declaration below (so no rule can displace the framing
     // headers this proxy owns).
-    let ctx = crate::rewrite::ForwardContext {
+    let fwd_ctx = crate::rewrite::ForwardContext {
         client_ip: peer.ip(),
         original_host: original_host.as_deref(),
         scheme: "http", // Level 8 sets "https" after TLS termination
     };
-    route.rules.apply_request(&mut req, &ctx);
+    route.rules.apply_request(&mut req, &fwd_ctx);
     if req.target != original_target {
         println!("[{peer}]   rewrite: {original_target} -> {}", req.target);
     }
@@ -513,7 +635,8 @@ async fn serve_one(
     let mut resp = http::parse_response_head(&resp_bytes)?;
     let resp_framing = http::response_body_framing(&method, &resp)?;
 
-    println!("[{peer}]   -> {} {}", resp.status, resp.reason);
+    // (The per-request status line is now emitted by the access-log middleware
+    // in the response phase below, so the old `-> {status}` println is gone.)
 
     // Passive health check: 5xx indicts the backend, anything below it does
     // not (a 404 means the backend is healthy and the path is wrong).
@@ -524,6 +647,13 @@ async fn serve_one(
     }
 
     // ---- 6. Relay the response: rewritten head, then streamed body ----
+    // Level 6 response phase, in REVERSE chain order, for every layer (the
+    // request was not rejected, so all were entered). Runs BEFORE Level 5's
+    // apply_response so an operator's explicit `set-resp-header` stays the final
+    // word over a middleware-injected header (X-Request-Id), matching Level 5's
+    // "explicit rules run last" principle — and both stay before the framing
+    // block below, so no header rule can displace the framing the proxy owns.
+    route.chain.run_response_all(&ctx, &mut resp);
     strip_hop_by_hop(&mut resp.headers);
     // Level 5 response rewriting (explicit set-/remove-resp-header rules).
     // Placed after hop-by-hop stripping for the same reason as the request
@@ -575,21 +705,75 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Conn<S> {
     }
 }
 
+/// Send a middleware rejection: the response head (already carrying the
+/// middleware's headers and any response-phase annotations like X-Request-Id),
+/// plus the proxy-managed framing headers, then the body. `keep_alive` decides
+/// the `Connection` header — false when the body couldn't be fully drained.
+async fn send_rejection<S>(
+    client: &mut Conn<S>,
+    resp: &ResponseHead,
+    body: &str,
+    keep_alive: bool,
+) -> io::Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    // Start from the middleware-supplied headers, then take exclusive control
+    // of the framing headers the proxy owns (same discipline as the forward
+    // path): drop any middleware-supplied framing, then set our own.
+    let mut headers = resp.headers.clone();
+    http::remove_header(&mut headers, "content-length");
+    http::remove_header(&mut headers, "transfer-encoding");
+    http::remove_header(&mut headers, "connection");
+    headers.push(("Content-Type".to_string(), "text/plain".to_string()));
+    headers.push(("Content-Length".to_string(), body.len().to_string()));
+    headers.push((
+        "Connection".to_string(),
+        if keep_alive { "keep-alive" } else { "close" }.to_string(),
+    ));
+    let head = ResponseHead {
+        version: Version::Http11,
+        status: resp.status,
+        reason: resp.reason.clone(),
+        headers,
+    };
+    client.write_all(&http::write_response_head(&head)).await?;
+    client.write_all(body.as_bytes()).await?;
+    client.flush().await
+}
+
 /// Minimal error response, generated by the proxy itself.
 async fn respond_error<S>(client: &mut Conn<S>, status: u16, reason: &str) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    respond_error_with(client, status, reason, &[]).await
+}
+
+/// Like `respond_error` but carries extra headers. Middleware rejections need
+/// this: a 401 must send `WWW-Authenticate`, a 429 `Retry-After`, and every
+/// rejection still gets its `X-Request-Id` from the response-phase pass.
+async fn respond_error_with<S>(
+    client: &mut Conn<S>,
+    status: u16,
+    reason: &str,
+    extra_headers: &[(String, String)],
+) -> io::Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     let body = format!("{status} {reason}\n");
+    let mut headers = vec![
+        ("Content-Type".to_string(), "text/plain".to_string()),
+        ("Content-Length".to_string(), body.len().to_string()),
+        ("Connection".to_string(), "close".to_string()),
+    ];
+    headers.extend_from_slice(extra_headers);
     let head = ResponseHead {
         version: Version::Http11,
         status,
         reason: reason.to_string(),
-        headers: vec![
-            ("Content-Type".to_string(), "text/plain".to_string()),
-            ("Content-Length".to_string(), body.len().to_string()),
-            ("Connection".to_string(), "close".to_string()),
-        ],
+        headers,
     };
     client.write_all(&http::write_response_head(&head)).await?;
     client.write_all(body.as_bytes()).await?;
@@ -672,6 +856,32 @@ mod tests {
         let mut conn = conn_with(b"zzz\r\nhello\r\n0\r\n\r\n").await;
         let mut out = Vec::new();
         assert!(conn.copy_body_to(&mut out, BodyFraming::Chunked).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn drain_length_body_within_cap_keeps_alive() {
+        let mut conn = conn_with(b"hello").await; // 5 bytes
+        let usable = conn.drain_body(BodyFraming::Length(5), 64 * 1024).await.unwrap();
+        assert!(usable);
+    }
+
+    #[tokio::test]
+    async fn drain_oversized_length_signals_close() {
+        // A 100 KB body against a 1 KB cap: we don't read it, we signal close.
+        let mut conn = conn_with(&vec![b'x'; 1024]).await;
+        let usable = conn.drain_body(BodyFraming::Length(100 * 1024), 1024).await.unwrap();
+        assert!(!usable);
+    }
+
+    #[tokio::test]
+    async fn drain_then_next_request_parses() {
+        // A rejected POST body followed by a pipelined GET: after draining the
+        // body, the next request head must still parse cleanly.
+        let mut conn = conn_with(b"helloGET /next HTTP/1.1\r\n\r\n").await;
+        let usable = conn.drain_body(BodyFraming::Length(5), 64 * 1024).await.unwrap();
+        assert!(usable);
+        let head = conn.read_head().await.unwrap().unwrap();
+        assert!(head.starts_with(b"GET /next"));
     }
 
     #[tokio::test]

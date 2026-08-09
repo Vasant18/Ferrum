@@ -212,6 +212,22 @@ fn check_prefix(value: &str, err: &impl Fn(&str) -> io::Error) -> io::Result<()>
     Ok(())
 }
 
+/// The option keys Level 5 owns. The router's option partition (Level 6) uses
+/// this to route each `;option` segment to the right sub-parser: a key in this
+/// list goes to `RewriteRules::from_options`, a Level 6 key goes to the
+/// middleware parser, and a key in neither is the "unknown option" error. This
+/// is the single source of truth for "is this an L5 key", so the two parsers
+/// can never disagree about who owns a name.
+pub const L5_KEYS: &[&str] = &[
+    "strip",
+    "prefix",
+    "host",
+    "set-header",
+    "remove-header",
+    "set-resp-header",
+    "remove-resp-header",
+];
+
 impl RewriteRules {
     /// Rules that inject the forwarded headers and do nothing else.
     pub fn new() -> RewriteRules {
