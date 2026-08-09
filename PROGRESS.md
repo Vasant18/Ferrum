@@ -13,7 +13,7 @@ Course defined in [Build.md](Build.md). Theory reference: [Reverse-Proxy-Knowled
 | 3 | Load Balancing (RR, weighted, least-conn, consistent hashing) | 🟢 **Implemented** (2026-08-04) | `balancer.rs`: `Upstream` pools + 7 algorithms (rr/wrr/rand/lc/lrt/iphash/chash) + RAII `Lease`; `Route` now targets `Arc<Upstream>`; `--upstream NAME=SPEC` CLI. 52 unit tests. Live-verified all algos. Quiz pending. |
 | 4 | Health Checks (active/passive, retries, circuit breaker) | 🟢 **Implemented** (2026-08-06) | `balancer.rs`: per-server `Breaker` (Closed/Open/HalfOpen) + shared passive/active feeds via `Server::record_*`; `health.rs`: one prober task per upstream (`GET /health`, timeout, `probe_due` gate); `proxy.rs`: connect-retry loop (idempotent + pre-body + cap 2); `;health=PATH` spec suffix + `--hc-*` flags. 72 unit tests. Live-verified ejection, recovery, retry, and cap all with default config. Quiz pending. |
 | 5 | Proxy Headers & Rewriting (XFF, host/URL rewrite) | 🟢 **Implemented** (2026-08-07) | `rewrite.rs`: pure sync transforms over head structs — four forwarded headers (XFF append, X-Real-IP overwrite, XFH/XFP set-if-absent), segment-aware path rewriting (`strip`/`prefix`, query preserved), Host rewriting with original capture, request/response header rules, protected-header guardrail; route-spec `;option` grammar + `--no-forwarded`; fixed transform ordering. 99 unit tests. Live-verified all four headers, append-vs-overwrite, path+Host+response rewrite ordering, guardrail. Quiz pending. |
-| 6 | Middleware (pipeline, auth, rate limiting) | ⚪ Not started | |
+| 6 | Middleware (pipeline, auth, rate limiting) | 🟢 **Implemented** (2026-08-09) | `middleware/` dir: sync two-phase `Middleware` trait (`on_request` fwd / `on_response` reverse) + `Chain` + `ReqCtx` + `Decision`/`Rejection`; five middleware — request-id, access-log (`observe.rs`), Basic/Bearer auth + require-user authz (`auth.rs`, constant-time + own base64), token-bucket rate limit (`ratelimit.rs`, 16-shard `std::sync::Mutex`, lazy refill, socket-IP key); fixed order log→request-id→ratelimit→auth→authz; per-route `;auth=/rate=/burst=/realm=/require-user=` via an option partition in `router.rs`; `--no-request-id`/`--no-access-log`; bounded 64 KB rejection drain in `proxy.rs`. 152 unit tests. Live-verified the ordering proof (`401×5 then 429×5` on an unauth flood), 403≠401, drain+keep-alive, and that rejections never hit the backend. Quiz pending. |
 | 7 | Performance (pooling, buffers, timeouts) | ⚪ Not started | Backend conns are close-per-request until pooling lands here |
 | 8 | Security & TLS (termination, mTLS, slowloris) | ⚪ Not started | Head-read timeout + head size cap already in place from L1 |
 | 9 | OS Internals (epoll/kqueue, Tokio internals) — theory | ⚪ Not started | |
@@ -299,6 +299,129 @@ served correctly, the two `;` grammars did not interfere.
 8. `strip` of the entire path yields `/` rather than `""`. Why does the
    distinction matter to a backend?
 
+## Level 6 — what was built
+
+- [x] `middleware/` **directory** (not one file): `mod.rs` (trait, `Chain`,
+      `ReqCtx`, config parsing), `observe.rs`, `auth.rs`, `ratelimit.rs`.
+      `rewrite.rs` was already 1022 lines and `balancer.rs` 1516; five
+      middleware + a sharded limiter + config in one file would have been the
+      biggest file in the crate on arrival.
+- [x] **A synchronous two-phase trait**, deliberately NOT the textbook async
+      `handle(req, next) -> Response`. `on_request` runs FORWARD through the
+      chain; the exchange streams untouched (Level 1's flat-memory guarantee
+      intact); `on_response` runs in REVERSE. The onion's semantics without ever
+      owning the response body — which is what lets it stay sync: no `async fn`
+      in a trait object, so no `Pin<Box<dyn Future>>` and no `async-trait` dep.
+      The async version would have needed an owned `Response`, forcing every
+      body to buffer and pre-breaking Level 7.
+- [x] **The reverse-order asymmetry**: when middleware *k* rejects,
+      `on_response` runs for layers *k-1…0* only (the ones actually entered).
+      A 401 from Auth still gets stamped with `X-Request-Id` and logged, while
+      Authz never runs. `Chain::run_request` returns the rejecting index so the
+      caller unwinds exactly the entered layers.
+- [x] **Five middleware** in a fixed, in-code order (log → request-id →
+      ratelimit → auth → authz): request-id (generate / honor-valid-inbound /
+      replace-hostile, echoed onto the response), access log (one `key=value`
+      line from `on_response`, so it sees final status + full duration), Basic +
+      Bearer auth (constant-time compare, own ~40-line base64 decoder, 401 +
+      `WWW-Authenticate`), require-user authz (403, NOT 401), and a token-bucket
+      rate limiter.
+- [x] **Rate-limit sits BEFORE auth** — a credential-guessing flood is refused
+      by the cheap bucket check before any comparison runs. The knowledge base
+      names this exact trade-off; we take the security side and document that
+      per-user limits would need the opposite order.
+- [x] **Token bucket keyed on the socket peer IP, never `X-Forwarded-For`** —
+      the one unforgeable identity. Keying on XFF would let an attacker send a
+      random value per request for unlimited throughput AND poison a chosen
+      real IP's bucket. Level 5 took the same stance for `X-Real-IP`. State is
+      16 `std::sync::Mutex<HashMap<IpAddr, Bucket>>` shards (an async mutex would
+      buy a scheduler hop for a critical section that never awaits; one global
+      mutex would serialize every request); lazy refill on access means no timer
+      task and no sweeper; a full+idle bucket is evicted under a per-shard cap,
+      and a full shard with nothing evictable fails OPEN. `allow(ip, now)` takes
+      `now` as a parameter, so refill is testable without sleeping.
+- [x] **Per-route config via an option partition.** `router.rs::resolve_route`
+      splits the severed `;options` by key into the Level 5 set
+      (`rewrite::L5_KEYS`) and the Level 6 set (`middleware::L6_KEYS`), hands
+      each half to its own parser, and is itself the single arbiter of "unknown
+      option" — so neither sub-parser has to know the other's keys and a typo
+      still fails startup with one clear message. This is why `rewrite.rs`
+      needed no change: only L5 keys ever reach it.
+- [x] **Startup guardrails (exit 1), the Level 6 sibling of L5's protected-header
+      rejection:** `require-user` with no `auth=` (nothing could set the identity
+      it checks), `rate=0`, `burst` without `rate`, unknown auth scheme,
+      `basic:` without `user:pass`. `--no-request-id` / `--no-access-log`
+      applied even to the catch-all defaults so the flags are never silent
+      no-ops (the bug class `--no-forwarded` had to avoid).
+- [x] **Chain runs AFTER routing** (the KB's lifecycle diagram puts middleware
+      first, but per-route config forces the other order — you can't pick the
+      chain before the route) **and BEFORE the balancer lease** (a rejection
+      takes no lease, opens no backend socket, and never feeds the breaker).
+      On both legs the chain wraps *outside* Level 5, so an operator's explicit
+      `set-resp-header` stays the final word over a middleware-injected header,
+      and both stay before the framing re-declaration so nothing can desync
+      Content-Length/Transfer-Encoding.
+- [x] **Bounded rejection drain (64 KB).** A rejected request carrying a body
+      must be drained before the connection is reused OR closed: unread bytes in
+      the socket at `close()` make the kernel send a TCP RST, which can nuke the
+      429/401 we just wrote. Within the cap the connection keeps alive (a 401 is
+      a challenge — the client retries on the same connection); over the cap we
+      send `Connection: close`.
+- [x] 152 unit tests (104 from Level 5 kept green; +48 for chain ordering /
+      reverse / short-circuit asymmetry, request-id, base64 + constant-time
+      compare, auth/authz, token-bucket refill + eviction + concurrency, config
+      parsing + partition, and the rejection drain).
+- [ ] **Level 6 quiz — Vishwa to answer before Level 7** (questions below)
+
+**Verified end-to-end (2026-08-09):** release binary against a python echo
+backend on :9001. **Request-id:** present on every response, a valid inbound
+`X-Request-Id` honored, a generated id otherwise (`18ca...-N` counter form).
+**Auth:** 401 + `WWW-Authenticate: Basic realm="ferrum"` with no creds, 200 with
+`-u admin:s3cret`, 401 with a wrong password. **Authz vs auth (403≠401):** on a
+route with two valid creds but `require-user=admin`, `intern` authenticates but
+gets **403**, `admin` gets 200, no creds gets 401 — three distinct statuses,
+one per stage. **Rate limit:** flooding `/api` (burst 3) gave `200 200 200 429
+429 …` with `Retry-After: 1`. **The ordering proof:** an unauthenticated flood
+against `/admin` (auth + `rate=5/s`) returned **`401 401 401 401 401 429 429 429
+429 429`** — five challenges drain the bucket, then rate-limit short-circuits
+*before auth runs*, proving it sits outside auth. **Short-circuit cost nothing
+downstream:** the backend logged zero hits for any 401/429 (only the 3 stripped
+`/api`→`/x` successes and the health prober's `/health` appeared). **Drain +
+keep-alive:** three pipelined `POST`s with bodies on one connection each got a
+correctly-framed 429 (`Connection: keep-alive`, distinct id, right
+Content-Length), so the body drain left no desync. **Startup guardrails:**
+`require-user` without `auth`, `rate=0/s`, unknown scheme, and unknown option
+each exit 1 with a clear message; `--no-request-id --no-access-log` produced an
+empty chain on the default route.
+
+**Run it:** `cargo run --release -- 127.0.0.1:8080 '/admin/**=127.0.0.1:9001;auth=basic:admin:s3cret;require-user=admin;rate=5/s' '/api/**=127.0.0.1:9001;strip=/api;rate=100/s;burst=200' '/health=127.0.0.1:9001' '/=127.0.0.1:9000'`
+
+### Level 6 quiz — Vishwa to answer before Level 7
+
+1. The trait is synchronous with a reverse `on_response` pass, not the textbook
+   async `handle(req, next) -> Response`. What does the async version cost in
+   *this* proxy specifically, and which Level 1 guarantee would it break?
+2. The chain runs AFTER routing, contradicting the knowledge base's lifecycle
+   diagram. Why is that forced here, and what config feature makes it necessary?
+3. Rate-limit sits before auth. Give the concrete attack this ordering defeats,
+   and the use case that would justify the opposite order.
+4. Why key the limiter on the socket IP and never on `X-Forwarded-For`? Describe
+   the two-part exploit if you keyed on XFF.
+5. A rejected request never takes a balancer lease. Why does that matter for the
+   circuit breaker during a 429 flood?
+6. Auth returns 401, authz returns 403. What goes wrong if authz returned 401
+   instead?
+7. A rejected request with a body must be drained before the connection is
+   reused *or* closed. Name the TCP mechanism that makes the "or closed" half
+   necessary, not just the keep-alive half.
+8. `require-user` with no `auth=` fails at startup. What would that route do on
+   every request if it were allowed to start?
+9. The rate limiter uses `std::sync::Mutex`, not `tokio::sync::Mutex`. What
+   property of the critical section makes that correct, and what would the async
+   mutex cost?
+10. When middleware #3 rejects, `on_response` runs for #1 and #0 but not #3 or
+    #4. Explain why each of those four choices is correct.
+
 ## Session log
 
 - **2026-07-26** — Course kickoff. Knowledge base built (all 14 levels). `rproxy` crate created. Module 1.1 taught & assigned. Repo pushed to github.com/Vasant18/Ferrum.
@@ -308,3 +431,4 @@ served correctly, the two `;` grammars did not interfere.
 - **2026-08-03/04** — Level 3 (Load Balancing) implemented across two sessions per the approved design (`docs/superpowers/specs/2026-08-03-level-3-load-balancing-design.md`). New `balancer.rs`: 7 algorithms, `Upstream` pools, RAII `Lease` (inflight released on every path via `Drop`; RTT gated on `mark_served`). `Route` retargeted from `String` backend to `Arc<Upstream>`; `--upstream` CLI + 3-rule resolution + startup validation. 52 tests pass (36 existing kept green). Live-verified all algorithms with 3 python backends; dead-server-still-502 confirms the Level-4 seam. Refinement over the spec: RTT recording gated behind `mark_served()` so a failed connect can't bias LRT toward dead servers.
 - **2026-08-05/06** — Level 4 (Health Checks) implemented across six subagent-driven tasks per the approved design (`.superpowers/sdd/2026-08-05-level-4-health-checks/`). Tasks 1–5: per-server three-state `Breaker` with shared passive/active feeds (filling the Level-3 `available()` seam with no `select` changes), exponential backoff (double/cap/reset), one-prober-task-per-upstream in `health.rs` (`GET /health`), a three-gate connect-retry loop in `proxy.rs` (idempotent + pre-body + cap 2), and the CLI surface (`;health=PATH` + `--hc-*`). Task 6 (this session): tidied a carried-over dead-code warning (`from_spec` now `#[allow(dead_code)]` with a why-comment; release build down from 3 warnings to 2). Live-verified against python backends: ejection trips `Closed->Open` and drops the dead server from rotation with no 502s; backoff doubles live (1→2→4s); the retry loop (which has *no* unit test) hides a dead backend on GET with `[retry 1/2]` and returns 200, does NOT replay a POST (alternating `502 200`), and caps at `[retry 2/2]`. **Found and fixed a real bug:** active-only recovery deadlocked with the default `success_threshold=2` — `probe_due` returned `None` for HalfOpen after the single admitted trial, so `consec_success` froze at 1 and the breaker wedged in HalfOpen (client traffic is blocked there too, so passive successes can't help). Fix (fix round 1): `probe_due` now keeps admitting a `HalfOpenTrial` while HalfOpen, so the prober can accumulate the successes it needs; the one-probe-per-cooldown ceiling still holds because a failed trial trips straight back to Open with a doubled backoff. Added an integration-shaped regression test that drives recovery the way the prober does (alternating `probe_due`/`record_success` per tick) and asserts `Closed` with the default threshold — the case the old direct-call unit test missed. Re-verified live with the default config (no `--hc-success` override): `HalfOpen->Closed` and 9002 rejoined 3/3/3. 72 tests pass. Full report: `.superpowers/sdd/2026-08-05-level-4-health-checks/task-6-report.md`.
 - **2026-08-07** — Level 5 (Proxy Headers & Rewriting) implemented across six subagent-driven tasks per the approved design (`.superpowers/sdd/2026-08-07-level-5-proxy-headers-rewriting/`). New `rewrite.rs`: pure sync transforms over head structs — four forwarded headers (XFF append / X-Real-IP overwrite / XFH+XFP set-if-absent), segment-aware path rewriting with query preservation, Host rewriting with pre-rewrite `original_host` capture feeding XFH, request/response header rules, a startup protected-header guardrail (Content-Length/Transfer-Encoding/Connection/Host), the route-spec `;option` grammar (severed before `=` so option values keep their `=`), `--no-forwarded`, and a fixed transform order (path → Host → forwarded → explicit rules, all before framing re-declaration). Task 6 (this session): **live end-to-end verification + docs**. Drove the release binary against a python echo backend on :9001 and confirmed all 9 checks: four forwarded headers correct; `X-Forwarded-For: 1.2.3.4` appends to `1.2.3.4, 127.0.0.1` while forged `X-Real-IP: 9.9.9.9` is replaced with `127.0.0.1`; `strip=/api` + `host=backend.local` gives the backend `"path": "/users?page=2"` and `"host": "backend.local"` while `x-forwarded-host` STILL reports the client's `example.com` (the level's core ordering guarantee); `remove-resp-header=Server` strips it from the client's response; `--no-forwarded` yields 0 forwarded headers; `;set-header=Content-Length:5` fails startup with exit 1. **Two extra regression checks (beyond the brief):** on a live request the segment-boundary strip left `/apixyz` untouched (not `/xyz`), stripped `/api/real`→`/real`, and turned `/api`→`/`; and the L4 `;health=/health` upstream suffix coexisted with an L5 `;strip/;host` route in one invocation with no grammar interference. 99 tests pass. All background processes cleaned up (`pgrep` clean). Full report: `.superpowers/sdd/2026-08-07-level-5-proxy-headers-rewriting/task-6-report.md`.
+- **2026-08-09** — Level 6 (Middleware) implemented inline in one session (not subagent-driven) per the approved design (`docs/superpowers/specs/2026-08-09-level-6-middleware-design.md`) and plan (`docs/superpowers/plans/2026-08-09-level-6-middleware.md`), across the plan's 7 tasks. New `middleware/` directory: a synchronous two-phase `Middleware` trait (`on_request` forward / `on_response` reverse — the onion without owning the streamed body, so no `async fn`-in-trait boxing and no new deps), `Chain` with short-circuit + entered-layer unwind, `ReqCtx`, `Decision`/`Rejection`; five middleware — request-id + access-log (`observe.rs`), Basic/Bearer auth + require-user authz (`auth.rs`; own base64 + constant-time compare), token-bucket rate limit (`ratelimit.rs`; 16-shard `std::sync::Mutex`, lazy refill, no timer, socket-IP key, fail-open eviction). Wired into `serve_one` AFTER routing and BEFORE the balancer lease (a rejection takes no lease / opens no socket / never touches the breaker), with a bounded 64 KB rejection drain to avoid the close-time TCP-RST that would nuke the 429/401. Per-route config via an option partition in `router.rs` (the single arbiter of "unknown option"; `rewrite::L5_KEYS` vs `middleware::L6_KEYS`), so `rewrite.rs` needed no change. `--no-request-id`/`--no-access-log` applied even to the catch-all defaults. **Design refinements over the plan:** kept the partition as the unknown-key arbiter (plan had proposed relaxing `rewrite.rs`'s error arm — unnecessary once the partition guarantees each parser sees only its keys); added a `Chain.summary` field so the startup banner shows per-layer tunables (`ratelimit(5/s burst=5)`) rather than bare names, which also made `MiddlewareConfig::describe` genuinely used. 152 tests pass (104 from L5 kept green, +48). Release build back to the 4-warning baseline (one new `Chain::new` warning resolved with `#[allow(dead_code)]` + why-comment, matching the `for_test`/`from_spec` precedent). Live-verified all checklist items incl. the ordering proof (`401×5 then 429×5`), 403≠401 via a two-cred/one-allow route, drain+keep-alive over pipelined POST bodies (raw-byte inspected), zero backend hits for rejections, and all startup guardrails. Background processes cleaned (`pgrep` clean). Not committed — working tree left for Vishwa to commit (repo history is all unsigned; he commits himself).
