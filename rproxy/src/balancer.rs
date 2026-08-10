@@ -777,6 +777,27 @@ impl<'a> Lease<'a> {
     pub fn mark_failure(&mut self) {
         self.outcome = Some(false);
     }
+
+    /// Take a live pooled connection for this lease's server, if one exists.
+    /// See `Server::take_conn` for the idle-timeout eviction this performs.
+    ///
+    /// Called only from this file's tests until Task 5 wires it into
+    /// `serve_one` — invisible to a `--release` build, so still dead code
+    /// from the compiler's perspective. Allowed dead for now, same as
+    /// `Server::take_conn`/`return_conn`.
+    #[allow(dead_code)]
+    pub fn take_conn(&self) -> Option<crate::proxy::Conn<TcpStream>> {
+        self.server.take_conn()
+    }
+
+    /// Return a connection whose exchange just finished successfully and was
+    /// judged poolable by the caller (see `proxy.rs`'s poolability
+    /// predicate — this method trusts the caller's judgement and performs no
+    /// re-checking of its own).
+    #[allow(dead_code)]
+    pub fn return_conn(&self, conn: crate::proxy::Conn<TcpStream>) {
+        self.server.return_conn(conn)
+    }
 }
 
 impl Drop for Lease<'_> {
@@ -1667,5 +1688,15 @@ mod tests {
         assert!(srv.take_conn().is_some());
         assert!(srv.take_conn().is_some());
         assert!(srv.take_conn().is_none(), "only two entries were ever in the pool");
+    }
+
+    #[tokio::test]
+    async fn lease_take_and_return_conn_delegates_to_server() {
+        let up = pool(Algorithm::RoundRobin, &[("127.0.0.1:9000", 1)]);
+        let lease = up.pick(ip(127, 0, 0, 1)).unwrap();
+        assert!(lease.take_conn().is_none(), "fresh server has an empty pool");
+        let (conn, _peer) = tcp_conn_pair().await;
+        lease.return_conn(conn);
+        assert!(lease.take_conn().is_some());
     }
 }
