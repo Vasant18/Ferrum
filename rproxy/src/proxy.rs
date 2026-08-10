@@ -320,6 +320,19 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Conn<S> {
     pub async fn flush(&mut self) -> io::Result<()> {
         self.stream.flush().await
     }
+
+    /// Whether every byte read from the stream so far has been consumed —
+    /// no pipelined-request or leftover body bytes are sitting in `buf`.
+    /// Used only by the backend-leg poolability check: a non-empty buffer
+    /// here means either backend misbehavior or a framing-accounting bug,
+    /// and pooling it forward would leak those bytes into the next checkout.
+    ///
+    /// Called only from tests until Task 5 wires it into `serve_one` —
+    /// allowed dead for now, same treatment as `is_poolable` above.
+    #[allow(dead_code)]
+    pub fn buffer_is_empty(&self) -> bool {
+        self.filled == 0
+    }
 }
 
 /// Hop-by-hop headers describe one TCP connection, not the end-to-end
@@ -347,6 +360,52 @@ fn strip_hop_by_hop(headers: &mut Vec<(String, String)>) {
         let n = n.to_ascii_lowercase();
         !HOP_BY_HOP.contains(&n.as_str()) && !named.contains(&n)
     });
+}
+
+/// Whether a backend connection that just finished an exchange may be
+/// returned to the pool. All five conditions are required:
+///
+///   1. `resp_framing` is not `UntilClose` — that framing means "read until
+///      the backend closes", which is unreusable by definition.
+///   2. the backend did not send `Connection: close` (`backend_sent_close`).
+///   3. the backend spoke HTTP/1.1 (`backend_is_http11`) — an HTTP/1.0
+///      backend doesn't support persistent connections at all.
+///   4. the exchange completed with no I/O error (`exchange_errored`).
+///   5. the connection's read buffer is fully drained. Unlike the client
+///      leg, there is no pipelining on the backend leg — this proxy sends
+///      one request per checkout and waits for its response before sending
+///      another. So any leftover bytes here are not a next message to
+///      preserve; pooling them forward would hand the next checkout's
+///      `read_head` a mix of stale and fresh bytes, the same class of
+///      connection-desync bug Level 1 closed on the client side.
+///
+/// Conditions 2 and 3 arrive as plain bools, not the response head itself —
+/// see the caller in `serve_one` for why they must be captured immediately
+/// after the head is parsed, before any later rewriting for the client leg.
+///
+/// Called only from tests until Task 5 wires it into `serve_one` — allowed
+/// dead for now, same treatment as the Task 1/2 pool items.
+#[allow(dead_code)]
+fn is_poolable(
+    resp_framing: BodyFraming,
+    backend_sent_close: bool,
+    backend_is_http11: bool,
+    exchange_errored: bool,
+    buffer_empty: bool,
+) -> bool {
+    if resp_framing == BodyFraming::UntilClose {
+        return false;
+    }
+    if backend_sent_close {
+        return false;
+    }
+    if !backend_is_http11 {
+        return false;
+    }
+    if exchange_errored {
+        return false;
+    }
+    buffer_empty
 }
 
 /// Serve one client connection: a sequence of request/response exchanges
@@ -920,5 +979,53 @@ mod tests {
         }
         // Method matching is case-insensitive per RFC 9110 practice here.
         assert!(is_idempotent("get"));
+    }
+
+    // ---- Level 7: poolability predicate ----
+
+    #[test]
+    fn poolable_when_all_five_conditions_hold() {
+        assert!(is_poolable(BodyFraming::Length(5), false, true, false, true));
+    }
+
+    #[test]
+    fn not_poolable_on_until_close_framing() {
+        assert!(!is_poolable(BodyFraming::UntilClose, false, true, false, true));
+    }
+
+    #[test]
+    fn not_poolable_when_backend_sent_connection_close() {
+        assert!(!is_poolable(BodyFraming::Length(5), true, true, false, true));
+    }
+
+    #[test]
+    fn not_poolable_on_http10_backend() {
+        assert!(!is_poolable(BodyFraming::Length(5), false, false, false, true));
+    }
+
+    #[test]
+    fn not_poolable_when_exchange_errored() {
+        assert!(!is_poolable(BodyFraming::Length(5), false, true, true, true));
+    }
+
+    #[test]
+    fn not_poolable_when_buffer_not_empty() {
+        assert!(!is_poolable(BodyFraming::Length(5), false, true, false, false));
+    }
+
+    #[tokio::test]
+    async fn conn_buffer_is_empty_true_when_fully_consumed() {
+        let mut conn = conn_with(b"GET / HTTP/1.1\r\n\r\n").await;
+        let _ = conn.read_head().await.unwrap();
+        assert!(conn.buffer_is_empty());
+    }
+
+    #[tokio::test]
+    async fn conn_buffer_is_empty_false_with_leftover_bytes() {
+        // A pipelined second request's bytes are still buffered after the
+        // first head is read — buffer_is_empty must report false.
+        let mut conn = conn_with(b"GET / HTTP/1.1\r\n\r\nGET /next HTTP/1.1\r\n\r\n").await;
+        let _ = conn.read_head().await.unwrap();
+        assert!(!conn.buffer_is_empty());
     }
 }
