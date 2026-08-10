@@ -37,7 +37,37 @@ use std::net::IpAddr;
 use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::LazyLock;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use tokio::net::TcpStream;
+
+/// How many idle backend connections one server's pool keeps at most. Bounds
+/// worst-case memory: a pool doesn't grow to match peak historical
+/// concurrency, it caps at a small constant per backend.
+///
+/// Unused until `Lease::return_conn` (Task 2) and the `serve_one` wiring
+/// (Task 5) read it — allowed dead for now, same treatment `Upstream::from_spec`
+/// already carries elsewhere in this file for a "defined now, wired in later"
+/// item.
+#[allow(dead_code)]
+pub const POOL_MAX_IDLE: usize = 4;
+
+/// How long an idle pooled connection is trusted to still be alive on the
+/// backend's side before we discard it rather than risk using it. Checked
+/// lazily on `take_conn` — no background sweeper task exists anywhere in
+/// this codebase, and this pool doesn't start one either.
+#[allow(dead_code)]
+pub const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// One idle backend connection, plus when it went idle. Storing the whole
+/// `Conn<TcpStream>` (not just the raw socket) means its already-allocated
+/// read buffer comes along for free — reusing the connection reuses the
+/// buffer, with no separate buffer-pool abstraction needed.
+#[allow(dead_code)]
+struct PooledConn {
+    conn: crate::proxy::Conn<TcpStream>,
+    idle_since: Instant,
+}
 
 /// The seven balancing strategies from the course spec. The discriminant
 /// carries no meaning; each variant selects a different `select` branch.
@@ -362,6 +392,13 @@ pub struct Server {
     ewma_us: AtomicU64,
     /// Level 4: the circuit breaker deciding whether this server gets traffic.
     breaker: Breaker,
+    /// Level 7: idle backend connections available for reuse. A plain
+    /// `std::sync::Mutex`, not `tokio::sync::Mutex` — every critical section
+    /// below is a `Vec::pop`/`push` with no `.await` inside, so an async
+    /// mutex would buy a scheduler hop for nothing (the same reasoning
+    /// Level 6's rate limiter used for its shard locks).
+    #[allow(dead_code)]
+    idle: Mutex<Vec<PooledConn>>,
 }
 
 /// EWMA smoothing factor. `new = old*(1-alpha) + sample*alpha`, done in integer
@@ -377,6 +414,7 @@ impl Server {
             inflight: AtomicUsize::new(0),
             ewma_us: AtomicU64::new(0),
             breaker: Breaker::new(health),
+            idle: Mutex::new(Vec::new()),
         }
     }
 
@@ -421,6 +459,40 @@ impl Server {
                 (old * (EWMA_ALPHA_DEN - EWMA_ALPHA_NUM) + sample * EWMA_ALPHA_NUM) / EWMA_ALPHA_DEN
             })
         });
+    }
+
+    /// Take a live pooled connection, if one exists. Discards anything past
+    /// `POOL_IDLE_TIMEOUT` along the way — a stale entry costs nothing until
+    /// something actually tries to use it, so there's no reason to clean the
+    /// pool proactively.
+    ///
+    /// Unused until `Lease::take_conn` (Task 2) wraps it — allowed dead until
+    /// then, same as the items above.
+    #[allow(dead_code)]
+    fn take_conn(&self) -> Option<crate::proxy::Conn<TcpStream>> {
+        let mut guard = self.idle.lock().unwrap();
+        let now = Instant::now();
+        while let Some(pc) = guard.pop() {
+            if now.saturating_duration_since(pc.idle_since) < POOL_IDLE_TIMEOUT {
+                return Some(pc.conn);
+            }
+            // else: stale, `pc` drops here (closes the socket), loop continues.
+        }
+        None
+    }
+
+    /// Return a connection whose exchange just finished successfully and was
+    /// judged poolable (see proxy.rs's poolability predicate). Bounded: past
+    /// `POOL_MAX_IDLE`, the NEW connection is dropped rather than evicting an
+    /// existing one — there's no reason to prefer a fresh-idle connection
+    /// over ones already resident.
+    #[allow(dead_code)]
+    fn return_conn(&self, conn: crate::proxy::Conn<TcpStream>) {
+        let mut guard = self.idle.lock().unwrap();
+        if guard.len() < POOL_MAX_IDLE {
+            guard.push(PooledConn { conn, idle_since: Instant::now() });
+        }
+        // else: `conn` is dropped here (closes the socket) — pool stays capped.
     }
 }
 
@@ -967,6 +1039,7 @@ impl Upstream {
 mod tests {
     use super::*;
     use std::net::Ipv4Addr;
+    use tokio::net::TcpListener;
 
     fn ip(a: u8, b: u8, c: u8, d: u8) -> IpAddr {
         IpAddr::V4(Ipv4Addr::new(a, b, c, d))
@@ -1512,5 +1585,87 @@ mod tests {
     fn spec_rejects_bad_health_suffix() {
         assert!(Upstream::from_spec("x", "127.0.0.1:9001;bogus=/x").is_err());
         assert!(Upstream::from_spec("x", "127.0.0.1:9001;health=").is_err());
+    }
+
+    // ---- Level 7: connection pooling ----
+
+    async fn tcp_conn_pair() -> (crate::proxy::Conn<TcpStream>, TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let connect = TcpStream::connect(addr);
+        let (accepted, connected) = tokio::join!(
+            async { listener.accept().await.unwrap().0 },
+            async { connect.await.unwrap() }
+        );
+        (crate::proxy::Conn::new(connected), accepted)
+    }
+
+    #[tokio::test]
+    async fn take_conn_on_empty_pool_returns_none() {
+        let srv = Server::new("127.0.0.1:9000".to_string(), hc());
+        assert!(srv.take_conn().is_none());
+    }
+
+    #[tokio::test]
+    async fn return_then_take_round_trips() {
+        let srv = Server::new("127.0.0.1:9000".to_string(), hc());
+        let (conn, _peer) = tcp_conn_pair().await;
+        srv.return_conn(conn);
+        assert!(srv.take_conn().is_some());
+        assert!(srv.take_conn().is_none(), "pool is empty after the one entry was taken");
+    }
+
+    #[tokio::test]
+    async fn idle_timeout_discards_stale_then_returns_live() {
+        let srv = Server::new("127.0.0.1:9000".to_string(), hc());
+        let (fresh_conn, _p1) = tcp_conn_pair().await;
+        let (stale_conn, _p2) = tcp_conn_pair().await;
+        // Push fresh FIRST (bottom of the LIFO stack), stale SECOND (top) — so
+        // take_conn's single pop-loop must walk past the stale entry on top
+        // before it reaches the live one underneath, in the SAME call.
+        srv.return_conn(fresh_conn);
+        srv.return_conn(stale_conn);
+        // Backdate the entry we just pushed (index 1, the stale one) by
+        // mutating it directly through the lock — this test lives in the same
+        // module as Server, so its private `idle` field is reachable.
+        srv.idle.lock().unwrap()[1].idle_since = Instant::now() - Duration::from_secs(120);
+        // take_conn pops the stale entry first, discards it (too old), and
+        // continues the loop to the fresh entry underneath, returning it.
+        assert!(srv.take_conn().is_some());
+        // Both entries are now gone: the stale one was discarded in the loop,
+        // the fresh one was returned. The pool is empty.
+        assert!(srv.idle.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn return_past_cap_drops_new_keeps_existing_count() {
+        let srv = Server::new("127.0.0.1:9000".to_string(), hc());
+        let mut peers = Vec::new();
+        for _ in 0..POOL_MAX_IDLE {
+            let (conn, peer) = tcp_conn_pair().await;
+            srv.return_conn(conn);
+            peers.push(peer);
+        }
+        assert_eq!(srv.idle.lock().unwrap().len(), POOL_MAX_IDLE);
+        let (extra_conn, _peer) = tcp_conn_pair().await;
+        srv.return_conn(extra_conn);
+        assert_eq!(
+            srv.idle.lock().unwrap().len(),
+            POOL_MAX_IDLE,
+            "returning past the cap must not grow the pool"
+        );
+    }
+
+    #[tokio::test]
+    async fn take_conn_lifo_order() {
+        let srv = Server::new("127.0.0.1:9000".to_string(), hc());
+        let (conn_a, _pa) = tcp_conn_pair().await;
+        let (conn_b, _pb) = tcp_conn_pair().await;
+        srv.return_conn(conn_a);
+        srv.return_conn(conn_b);
+        // conn_b was returned LAST, so it must be taken FIRST.
+        assert!(srv.take_conn().is_some());
+        assert!(srv.take_conn().is_some());
+        assert!(srv.take_conn().is_none(), "only two entries were ever in the pool");
     }
 }
