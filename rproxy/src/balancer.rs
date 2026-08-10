@@ -49,21 +49,18 @@ use tokio::net::TcpStream;
 /// (Task 5) read it — allowed dead for now, same treatment `Upstream::from_spec`
 /// already carries elsewhere in this file for a "defined now, wired in later"
 /// item.
-#[allow(dead_code)]
 pub const POOL_MAX_IDLE: usize = 4;
 
 /// How long an idle pooled connection is trusted to still be alive on the
 /// backend's side before we discard it rather than risk using it. Checked
 /// lazily on `take_conn` — no background sweeper task exists anywhere in
 /// this codebase, and this pool doesn't start one either.
-#[allow(dead_code)]
 pub const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// One idle backend connection, plus when it went idle. Storing the whole
 /// `Conn<TcpStream>` (not just the raw socket) means its already-allocated
 /// read buffer comes along for free — reusing the connection reuses the
 /// buffer, with no separate buffer-pool abstraction needed.
-#[allow(dead_code)]
 struct PooledConn {
     conn: crate::proxy::Conn<TcpStream>,
     idle_since: Instant,
@@ -397,7 +394,6 @@ pub struct Server {
     /// below is a `Vec::pop`/`push` with no `.await` inside, so an async
     /// mutex would buy a scheduler hop for nothing (the same reasoning
     /// Level 6's rate limiter used for its shard locks).
-    #[allow(dead_code)]
     idle: Mutex<Vec<PooledConn>>,
 }
 
@@ -468,7 +464,6 @@ impl Server {
     ///
     /// Unused until `Lease::take_conn` (Task 2) wraps it — allowed dead until
     /// then, same as the items above.
-    #[allow(dead_code)]
     fn take_conn(&self) -> Option<crate::proxy::Conn<TcpStream>> {
         let mut guard = self.idle.lock().unwrap();
         let now = Instant::now();
@@ -486,7 +481,6 @@ impl Server {
     /// `POOL_MAX_IDLE`, the NEW connection is dropped rather than evicting an
     /// existing one — there's no reason to prefer a fresh-idle connection
     /// over ones already resident.
-    #[allow(dead_code)]
     fn return_conn(&self, conn: crate::proxy::Conn<TcpStream>) {
         let mut guard = self.idle.lock().unwrap();
         if guard.len() < POOL_MAX_IDLE {
@@ -785,7 +779,6 @@ impl<'a> Lease<'a> {
     /// `serve_one` — invisible to a `--release` build, so still dead code
     /// from the compiler's perspective. Allowed dead for now, same as
     /// `Server::take_conn`/`return_conn`.
-    #[allow(dead_code)]
     pub fn take_conn(&self) -> Option<crate::proxy::Conn<TcpStream>> {
         self.server.take_conn()
     }
@@ -794,7 +787,6 @@ impl<'a> Lease<'a> {
     /// judged poolable by the caller (see `proxy.rs`'s poolability
     /// predicate — this method trusts the caller's judgement and performs no
     /// re-checking of its own).
-    #[allow(dead_code)]
     pub fn return_conn(&self, conn: crate::proxy::Conn<TcpStream>) {
         self.server.return_conn(conn)
     }

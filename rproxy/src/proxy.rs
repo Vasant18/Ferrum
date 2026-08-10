@@ -339,7 +339,6 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Conn<S> {
     ///
     /// Called only from tests until Task 5 wires it into `serve_one` —
     /// allowed dead for now, same treatment as `is_poolable` above.
-    #[allow(dead_code)]
     pub fn buffer_is_empty(&self) -> bool {
         self.filled == 0
     }
@@ -395,7 +394,6 @@ fn strip_hop_by_hop(headers: &mut Vec<(String, String)>) {
 ///
 /// Called only from tests until Task 5 wires it into `serve_one` — allowed
 /// dead for now, same treatment as the Task 1/2 pool items.
-#[allow(dead_code)]
 fn is_poolable(
     resp_framing: BodyFraming,
     backend_sent_close: bool,
@@ -566,12 +564,10 @@ async fn serve_one(
     // until the exchange ends, so the loop yields it outward.
     let retryable = is_idempotent(&method);
     let mut attempt = 0usize;
-    let (mut lease, backend) = loop {
+    let (mut lease, mut backend, _from_pool) = loop {
         let mut lease = match upstream.pick(peer.ip()) {
             Some(l) => l,
             None => {
-                // Every server in the pool is ejected by its breaker (or the
-                // pool is empty, which startup validation forbids).
                 eprintln!(
                     "[{peer}] no healthy server in upstream {:?}",
                     upstream.name()
@@ -581,9 +577,23 @@ async fn serve_one(
             }
         };
         let addr = lease.addr().to_string();
-        // Observability: name the pool, algorithm, chosen server, and its
-        // current in-flight depth so balancing is visible under a `curl` loop.
-        // On a retry we tag the attempt so the fan-out to a fresh server shows.
+
+        // Level 7: try a pooled connection first — this is the "0 RTT setup"
+        // path. A pool hit skips TcpStream::connect (and its timeout)
+        // entirely; only a miss falls through to dialing fresh.
+        if let Some(conn) = lease.take_conn() {
+            println!(
+                "[{peer}] {} {} {} -> {}[{}] {addr} (inflight={}) [pooled]",
+                req.method,
+                req.target,
+                req.version.as_str(),
+                upstream.name(),
+                upstream.algorithm().tag(),
+                lease.inflight(),
+            );
+            break (lease, conn, true);
+        }
+
         println!(
             "[{peer}] {} {} {} -> {}[{}] {addr} (inflight={}){}",
             req.method,
@@ -596,13 +606,11 @@ async fn serve_one(
         );
 
         match tokio::time::timeout(BACKEND_CONNECT_TIMEOUT, TcpStream::connect(&addr)).await {
-            Ok(Ok(s)) => break (lease, s),
+            Ok(Ok(s)) => {
+                let _ = s.set_nodelay(true);
+                break (lease, Conn::new(s), false);
+            }
             Ok(Err(e)) => {
-                // Transport failure: indict this server, then consider retrying
-                // on a different one. mark_failure fires before the next pick,
-                // so a tripped breaker excludes this server immediately. We must
-                // drop the lease before continuing: it borrows the Upstream, so
-                // the next pick() would conflict with the outstanding borrow.
                 lease.mark_failure();
                 eprintln!("[{peer}] backend {addr} connect failed: {e}");
                 drop(lease);
@@ -651,8 +659,6 @@ async fn serve_one(
     // not affect retries: the retry loop lives entirely above mark_served(), so
     // a failure recorded here can never trigger a replay.
     lease.mark_failure();
-    let _ = backend.set_nodelay(true);
-    let mut backend = Conn::new(backend);
 
     // ---- 4. Forward the request: rewritten head, then streamed body ----
     strip_hop_by_hop(&mut req.headers);
@@ -684,11 +690,14 @@ async fn serve_one(
     // left untouched: the parser already guaranteed at most one, and for
     // Length framing it carries the backend's only body delimiter.
     http::remove_header(&mut req.headers, "transfer-encoding");
-    // We speak HTTP/1.1 to the backend and manage its connection per
-    // exchange (Connection: close until Level 7 adds pooling).
     req.version = Version::Http11;
-    req.headers.push(("Connection".to_string(), "close".to_string()));
-    // Re-declare the body framing we just stripped/validated.
+    // Level 7: ask the backend to keep the connection open so it becomes a
+    // candidate for pooling. This does not by itself decide whether we
+    // actually pool it afterward — is_poolable still checks the backend's
+    // OWN Connection header on the response, since a backend is free to
+    // ignore our keep-alive request and close anyway (that's condition 2 of
+    // the poolability check).
+    req.headers.push(("Connection".to_string(), "keep-alive".to_string()));
     if req_framing == BodyFraming::Chunked {
         req.headers.push(("Transfer-Encoding".to_string(), "chunked".to_string()));
     }
@@ -719,6 +728,19 @@ async fn serve_one(
     };
     let mut resp = http::parse_response_head(&resp_bytes)?;
     let resp_framing = http::response_body_framing(&method, &resp)?;
+    // Level 7: capture the backend's ORIGINAL Connection header and version
+    // right now. Later in this function, resp.headers goes through
+    // strip_hop_by_hop (which strips Connection) and the client-leg framing
+    // block pushes a NEW Connection header describing what WE told the
+    // client — and resp.version gets force-set to Http11 for the client leg
+    // regardless of what the backend spoke. By the time this function
+    // reaches the poolability check, both fields describe the client leg,
+    // not the backend's original response — so both must be read here, now,
+    // or the poolability check would silently answer a different question.
+    let backend_sent_close = http::header(&resp.headers, "connection")
+        .map(|v| v.split(',').any(|t| t.trim().eq_ignore_ascii_case("close")))
+        .unwrap_or(false);
+    let backend_is_http11 = resp.version == Version::Http11;
 
     // (The per-request status line is now emitted by the access-log middleware
     // in the response phase below, so the old `-> {status}` println is gone.)
@@ -778,7 +800,25 @@ async fn serve_one(
     backend.copy_body_to(client.stream_mut(), resp_framing).await?;
     client.flush().await?;
 
-    // Backend conn drops here (Connection: close) — pooling is Level 7.
+    // Level 7: decide whether this backend connection can be reused. The
+    // exchange already fully completed by this point (both bodies streamed,
+    // both flushes succeeded) — an error anywhere above already returned via
+    // `?` and never reaches this line, so `exchange_errored` is always
+    // `false` here structurally, not by a separate flag. This is what makes
+    // the knowledge base's "a connection that just errored doesn't go back
+    // to the pool" rule true by construction: only the success path reaches
+    // `is_poolable` at all.
+    if is_poolable(
+        resp_framing,
+        backend_sent_close,
+        backend_is_http11,
+        false, // see comment above: reaching this line means no error occurred
+        backend.buffer_is_empty(),
+    ) {
+        lease.return_conn(backend);
+    }
+    // else: `backend` is dropped here, closing the socket — today's behavior.
+
     Ok(client_still_usable)
 }
 
