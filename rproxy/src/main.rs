@@ -61,6 +61,14 @@ async fn main() -> std::io::Result<()> {
     // a proxy on day one, and neither can reject traffic. `--no-*` opts out.
     let mut request_id = true;
     let mut access_log = true;
+    // Level 7 pool tunables, seeded with the same defaults the hardcoded
+    // constants carried. Each flag overrides one field; every declared upstream
+    // (and the default catch-all) inherits the result — these are GLOBAL, with
+    // no per-route override by design. `backend_timeout` mirrors `pool_cfg` but
+    // rides a separate path: it is a per-connection deadline threaded straight
+    // into `handle_client`, not part of pool construction.
+    let mut pool_cfg = balancer::PoolConfig::default();
+    let mut backend_timeout = proxy::DEFAULT_BACKEND_RESPONSE_TIMEOUT;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--upstream" => upstream_specs.push(next_val(&mut args, "--upstream")?),
@@ -82,6 +90,17 @@ async fn main() -> std::io::Result<()> {
                     .parse()
                     .map_err(|_| bad_arg("--hc-success expects a number"))?
             }
+            "--pool-max-idle" => {
+                pool_cfg.max_idle = next_val(&mut args, "--pool-max-idle")?
+                    .parse()
+                    .map_err(|_| bad_arg("--pool-max-idle expects a number"))?
+            }
+            "--pool-idle-timeout" => {
+                pool_cfg.idle_timeout = parse_duration(&next_val(&mut args, "--pool-idle-timeout")?)?
+            }
+            "--backend-timeout" => {
+                backend_timeout = parse_duration(&next_val(&mut args, "--backend-timeout")?)?
+            }
             "--no-forwarded" => forwarded = false,
             "--no-request-id" => request_id = false,
             "--no-access-log" => access_log = false,
@@ -94,6 +113,7 @@ async fn main() -> std::io::Result<()> {
         &upstream_specs,
         &route_specs,
         &hc,
+        pool_cfg,
         forwarded,
         request_id,
         access_log,
@@ -121,8 +141,11 @@ async fn main() -> std::io::Result<()> {
                 // Cloning the Arc is a cheap refcount bump; every task
                 // shares one immutable route table with no locking.
                 let routes = Arc::clone(&routes);
+                // `backend_timeout` is `Copy` (a `Duration`), so the spawned
+                // task takes its own copy the same way it clones the `routes`
+                // Arc — no shared state, no locking.
                 tokio::spawn(async move {
-                    proxy::handle_client(stream, &routes, peer).await;
+                    proxy::handle_client(stream, &routes, peer, backend_timeout).await;
                 });
             }
             Err(e) => {
@@ -186,6 +209,7 @@ fn build_routes(
     upstream_specs: &[String],
     route_specs: &[String],
     hc: &balancer::HealthConfig,
+    pool_cfg: balancer::PoolConfig,
     forwarded: bool,
     request_id: bool,
     access_log: bool,
@@ -208,7 +232,7 @@ fn build_routes(
         }
         upstreams.insert(
             name.to_string(),
-            Arc::new(Upstream::from_spec_with_health(name, spec, hc)?),
+            Arc::new(Upstream::from_spec_with_health(name, spec, hc, pool_cfg)?),
         );
     }
 

@@ -29,15 +29,22 @@ const HEAD_READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// default (~2 minutes) is an eternity to hold client resources.
 const BACKEND_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Deadline for the backend to deliver its response HEAD after we finished
-/// sending the request. Protects against hung application code — until this
-/// existed, a backend that accepted the connection and never responded
-/// blocked that connection task forever with no client-visible error and no
-/// breaker signal. This closes that gap: a hang now looks, to the breaker,
-/// like a connect failure. Does NOT bound body-streaming time — that's
-/// size-and-route-dependent and stays a documented gap (time-to-first-byte
-/// only, matching the knowledge base's framing of this timeout).
-const BACKEND_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
+/// Default deadline for the backend to deliver its response HEAD after we
+/// finished sending the request. Protects against hung application code —
+/// until this existed, a backend that accepted the connection and never
+/// responded blocked that connection task forever with no client-visible
+/// error and no breaker signal. This closes that gap: a hang now looks, to
+/// the breaker, like a connect failure. Does NOT bound body-streaming time —
+/// that's size-and-route-dependent and stays a documented gap
+/// (time-to-first-byte only, matching the knowledge base's framing of this
+/// timeout).
+///
+/// Level 7 makes this the *default*: `--backend-timeout` overrides it at
+/// startup, so this constant is now the fallback value threaded into
+/// `serve_one` rather than the only value it can read. Named with the
+/// `DEFAULT_` prefix and made `pub` so `main.rs` can seed its CLI variable
+/// from the same source of truth.
+pub const DEFAULT_BACKEND_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Maximum in-request retries after a failed backend *connect*. Three tries
 /// total by default. Kept small on purpose: retries multiply load on an
@@ -418,14 +425,24 @@ fn is_poolable(
 
 /// Serve one client connection: a sequence of request/response exchanges
 /// on the same socket (keep-alive), each routed to a backend by `routes`.
-pub async fn handle_client(client: TcpStream, routes: &RouteTable, peer: std::net::SocketAddr) {
+///
+/// `backend_timeout` is a connection-level tunable (the `--backend-timeout`
+/// CLI value), passed alongside `routes` because — like the route table — it
+/// is fixed for the life of the process, not per request. It rides down into
+/// every `serve_one` on this connection.
+pub async fn handle_client(
+    client: TcpStream,
+    routes: &RouteTable,
+    peer: std::net::SocketAddr,
+    backend_timeout: Duration,
+) {
     // Small writes (our serialized heads) should not sit in Nagle's buffer
     // waiting for a coalescing timer; proxies universally disable it.
     let _ = client.set_nodelay(true);
     let mut client = Conn::new(client);
 
     loop {
-        match serve_one(&mut client, routes, peer).await {
+        match serve_one(&mut client, routes, peer, backend_timeout).await {
             Ok(true) => continue,          // keep-alive: next request, same socket
             Ok(false) => return,           // clean close
             Err(e) => {
@@ -444,6 +461,7 @@ async fn serve_one(
     client: &mut Conn<TcpStream>,
     routes: &RouteTable,
     peer: std::net::SocketAddr,
+    backend_timeout: Duration,
 ) -> io::Result<bool> {
     // ---- 1. Read + parse the request head (with slowloris deadline) ----
     let head_bytes =
@@ -707,7 +725,7 @@ async fn serve_one(
     backend.flush().await?;
 
     // ---- 5. Read the backend's response head, with a deadline ----
-    let resp_bytes = match tokio::time::timeout(BACKEND_RESPONSE_TIMEOUT, backend.read_head()).await {
+    let resp_bytes = match tokio::time::timeout(backend_timeout, backend.read_head()).await {
         Err(_) => {
             // Hung backend: the connect succeeded and the request was sent,
             // so this is exactly as real a failure as a refused connect —

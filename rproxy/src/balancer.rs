@@ -57,6 +57,32 @@ pub const POOL_MAX_IDLE: usize = 4;
 /// this codebase, and this pool doesn't start one either.
 pub const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Level 7 pool tunables, set once at startup from CLI flags and shared by
+/// every `Server` in every `Upstream` — see the design spec's "global flags
+/// only, no per-route override" decision. Deliberately NOT shaped like
+/// `HealthConfig` (which is per-upstream and inheritable): these three values
+/// are process-wide, so they ride as a small `Copy` struct threaded once at
+/// construction rather than an `Arc` shared per pool.
+///
+/// The two fields default to the module constants above, so a caller that
+/// never touches the CLI flags (tests, the `single`/default shorthand paths)
+/// gets exactly the pre-Level-7 hardcoded behavior via `PoolConfig::default()`.
+#[derive(Clone, Copy)]
+pub struct PoolConfig {
+    /// Cap on idle connections kept per server — was the `POOL_MAX_IDLE`
+    /// constant read directly by `return_conn`.
+    pub max_idle: usize,
+    /// How long an idle pooled connection is trusted before `take_conn`
+    /// discards it — was the `POOL_IDLE_TIMEOUT` constant read by `take_conn`.
+    pub idle_timeout: Duration,
+}
+
+impl Default for PoolConfig {
+    fn default() -> PoolConfig {
+        PoolConfig { max_idle: POOL_MAX_IDLE, idle_timeout: POOL_IDLE_TIMEOUT }
+    }
+}
+
 /// One idle backend connection, plus when it went idle. Storing the whole
 /// `Conn<TcpStream>` (not just the raw socket) means its already-allocated
 /// read buffer comes along for free — reusing the connection reuses the
@@ -395,6 +421,11 @@ pub struct Server {
     /// mutex would buy a scheduler hop for nothing (the same reasoning
     /// Level 6's rate limiter used for its shard locks).
     idle: Mutex<Vec<PooledConn>>,
+    /// Level 7: the pool bounds (`max_idle`, `idle_timeout`) this server obeys.
+    /// Copied in at construction from the CLI-configured `PoolConfig` so
+    /// `take_conn`/`return_conn` read runtime values instead of the module
+    /// constants.
+    pool: PoolConfig,
 }
 
 /// EWMA smoothing factor. `new = old*(1-alpha) + sample*alpha`, done in integer
@@ -404,13 +435,34 @@ const EWMA_ALPHA_NUM: u64 = 1; // alpha = 1/5
 const EWMA_ALPHA_DEN: u64 = 5;
 
 impl Server {
+    /// Construct a server with the DEFAULT pool bounds. Kept as a thin wrapper
+    /// over `new_with_pool_config` so every pre-Level-7 call site compiles
+    /// unchanged — only callers that actually thread a CLI-configured
+    /// `PoolConfig` reach for the longer name.
+    ///
+    /// Production-dead since this task: `Upstream::build` (the sole non-test
+    /// constructor path) now always calls `new_with_pool_config` to thread the
+    /// `--pool-*` tunables, so nothing in a `--release` build reaches this
+    /// wrapper. Retained as the stock-defaults entry point and exercised
+    /// heavily by this file's pool tests — the same `#[allow(dead_code)]`
+    /// treatment `from_spec` already carries for exactly this reason.
+    #[allow(dead_code)]
     fn new(addr: String, health: Arc<HealthConfig>) -> Server {
+        Server::new_with_pool_config(addr, health, PoolConfig::default())
+    }
+
+    /// Construct a server with explicit pool bounds. This is the one real
+    /// CLI-fed path: `Upstream::build` calls it once per backend with the
+    /// process-wide `PoolConfig` parsed from `--pool-max-idle` /
+    /// `--pool-idle-timeout`.
+    fn new_with_pool_config(addr: String, health: Arc<HealthConfig>, pool: PoolConfig) -> Server {
         Server {
             addr,
             inflight: AtomicUsize::new(0),
             ewma_us: AtomicU64::new(0),
             breaker: Breaker::new(health),
             idle: Mutex::new(Vec::new()),
+            pool,
         }
     }
 
@@ -458,17 +510,14 @@ impl Server {
     }
 
     /// Take a live pooled connection, if one exists. Discards anything past
-    /// `POOL_IDLE_TIMEOUT` along the way — a stale entry costs nothing until
-    /// something actually tries to use it, so there's no reason to clean the
-    /// pool proactively.
-    ///
-    /// Unused until `Lease::take_conn` (Task 2) wraps it — allowed dead until
-    /// then, same as the items above.
+    /// this server's configured `idle_timeout` along the way — a stale entry
+    /// costs nothing until something actually tries to use it, so there's no
+    /// reason to clean the pool proactively.
     fn take_conn(&self) -> Option<crate::proxy::Conn<TcpStream>> {
         let mut guard = self.idle.lock().unwrap();
         let now = Instant::now();
         while let Some(pc) = guard.pop() {
-            if now.saturating_duration_since(pc.idle_since) < POOL_IDLE_TIMEOUT {
+            if now.saturating_duration_since(pc.idle_since) < self.pool.idle_timeout {
                 return Some(pc.conn);
             }
             // else: stale, `pc` drops here (closes the socket), loop continues.
@@ -478,12 +527,12 @@ impl Server {
 
     /// Return a connection whose exchange just finished successfully and was
     /// judged poolable (see proxy.rs's poolability predicate). Bounded: past
-    /// `POOL_MAX_IDLE`, the NEW connection is dropped rather than evicting an
-    /// existing one — there's no reason to prefer a fresh-idle connection
-    /// over ones already resident.
+    /// this server's configured `max_idle`, the NEW connection is dropped
+    /// rather than evicting an existing one — there's no reason to prefer a
+    /// fresh-idle connection over ones already resident.
     fn return_conn(&self, conn: crate::proxy::Conn<TcpStream>) {
         let mut guard = self.idle.lock().unwrap();
-        if guard.len() < POOL_MAX_IDLE {
+        if guard.len() < self.pool.max_idle {
             guard.push(PooledConn { conn, idle_since: Instant::now() });
         }
         // else: `conn` is dropped here (closes the socket) — pool stays capped.
@@ -537,6 +586,7 @@ impl Upstream {
         algorithm: Algorithm,
         servers: Vec<(String, u32)>,
         health: Arc<HealthConfig>,
+        pool: PoolConfig,
     ) -> Upstream {
         let wrr_index = if algorithm.uses_weight() {
             let mut v = Vec::new();
@@ -570,7 +620,7 @@ impl Upstream {
 
         let servers = servers
             .into_iter()
-            .map(|(addr, _)| Server::new(addr, Arc::clone(&health)))
+            .map(|(addr, _)| Server::new_with_pool_config(addr, Arc::clone(&health), pool))
             .collect();
         Upstream {
             name,
@@ -596,7 +646,7 @@ impl Upstream {
         health: Arc<HealthConfig>,
     ) -> Upstream {
         let servers = addrs.iter().map(|a| (a.to_string(), 1)).collect();
-        Upstream::build(name.to_string(), algorithm, servers, health)
+        Upstream::build(name.to_string(), algorithm, servers, health, PoolConfig::default())
     }
 
     /// Read-only view of the pool for the prober to walk.
@@ -960,7 +1010,7 @@ impl Upstream {
     // stock health settings) and exercised heavily by the spec-parser tests.
     #[allow(dead_code)]
     pub fn from_spec(name: &str, spec: &str) -> io::Result<Upstream> {
-        Upstream::from_spec_with_health(name, spec, &HealthConfig::default())
+        Upstream::from_spec_with_health(name, spec, &HealthConfig::default(), PoolConfig::default())
     }
 
     /// Parse `algo:server[*w][,server...][;health=PATH]`, inheriting `base` for
@@ -976,6 +1026,7 @@ impl Upstream {
         name: &str,
         spec: &str,
         base: &HealthConfig,
+        pool: PoolConfig,
     ) -> io::Result<Upstream> {
         let err = |m: &str| {
             io::Error::new(io::ErrorKind::InvalidInput, format!("upstream {name:?}: {m}"))
@@ -1031,7 +1082,7 @@ impl Upstream {
         if servers.is_empty() {
             return Err(err("empty pool (no servers)"));
         }
-        Ok(Upstream::build(name.to_string(), algorithm, servers, Arc::new(health)))
+        Ok(Upstream::build(name.to_string(), algorithm, servers, Arc::new(health), pool))
     }
 
     /// A single-server round-robin pool wrapping one backend address. This is
@@ -1044,6 +1095,7 @@ impl Upstream {
             Algorithm::RoundRobin,
             vec![(addr.to_string(), 1)],
             Arc::new(HealthConfig::default()),
+            PoolConfig::default(),
         )
     }
 }
@@ -1062,7 +1114,7 @@ mod tests {
     /// don't exercise the spec parser.
     fn pool(algo: Algorithm, servers: &[(&str, u32)]) -> Upstream {
         let servers = servers.iter().map(|(a, w)| (a.to_string(), *w)).collect();
-        Upstream::build("test".to_string(), algo, servers, hc())
+        Upstream::build("test".to_string(), algo, servers, hc(), PoolConfig::default())
     }
 
     fn hc() -> Arc<HealthConfig> {
@@ -1589,7 +1641,7 @@ mod tests {
     #[test]
     fn spec_inherits_global_health_config() {
         let base = HealthConfig { fail_threshold: 7, ..HealthConfig::default() };
-        let up = Upstream::from_spec_with_health("x", "127.0.0.1:9001;health=/hz", &base).unwrap();
+        let up = Upstream::from_spec_with_health("x", "127.0.0.1:9001;health=/hz", &base, PoolConfig::default()).unwrap();
         assert_eq!(up.health().fail_threshold, 7, "global tunables inherited");
         assert_eq!(up.health().path, "/hz", "per-upstream path still overrides");
     }
@@ -1690,5 +1742,19 @@ mod tests {
         let (conn, _peer) = tcp_conn_pair().await;
         lease.return_conn(conn);
         assert!(lease.take_conn().is_some());
+    }
+
+    // A Server built with a non-default PoolConfig honors the configured
+    // `max_idle` cap, proving the CLI-supplied bound reaches the pool rather
+    // than the compile-time `POOL_MAX_IDLE` constant.
+    #[tokio::test]
+    async fn server_respects_configured_pool_bounds() {
+        let cfg = PoolConfig { max_idle: 1, idle_timeout: Duration::from_secs(60) };
+        let srv = Server::new_with_pool_config("127.0.0.1:9000".to_string(), hc(), cfg);
+        let (c1, _p1) = tcp_conn_pair().await;
+        let (c2, _p2) = tcp_conn_pair().await;
+        srv.return_conn(c1);
+        srv.return_conn(c2); // max_idle = 1, so this one is dropped
+        assert_eq!(srv.idle.lock().unwrap().len(), 1);
     }
 }
