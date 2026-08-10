@@ -29,6 +29,16 @@ const HEAD_READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// default (~2 minutes) is an eternity to hold client resources.
 const BACKEND_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Deadline for the backend to deliver its response HEAD after we finished
+/// sending the request. Protects against hung application code — until this
+/// existed, a backend that accepted the connection and never responded
+/// blocked that connection task forever with no client-visible error and no
+/// breaker signal. This closes that gap: a hang now looks, to the breaker,
+/// like a connect failure. Does NOT bound body-streaming time — that's
+/// size-and-route-dependent and stays a documented gap (time-to-first-byte
+/// only, matching the knowledge base's framing of this timeout).
+const BACKEND_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Maximum in-request retries after a failed backend *connect*. Three tries
 /// total by default. Kept small on purpose: retries multiply load on an
 /// already-struggling pool, and a client would rather get a fast 502 than wait
@@ -687,10 +697,26 @@ async fn serve_one(
     client.copy_body_to(&mut backend.stream_mut(), req_framing).await?;
     backend.flush().await?;
 
-    // ---- 5. Read the backend's response head ----
-    let resp_bytes = backend.read_head().await?.ok_or_else(|| {
-        io::Error::new(io::ErrorKind::UnexpectedEof, "backend closed before responding")
-    })?;
+    // ---- 5. Read the backend's response head, with a deadline ----
+    let resp_bytes = match tokio::time::timeout(BACKEND_RESPONSE_TIMEOUT, backend.read_head()).await {
+        Err(_) => {
+            // Hung backend: the connect succeeded and the request was sent,
+            // so this is exactly as real a failure as a refused connect —
+            // indict the server the same way.
+            lease.mark_failure();
+            eprintln!("[{peer}] backend {} response timed out", lease.addr());
+            respond_error(client, 504, "Gateway Timeout").await?;
+            return Ok(false);
+        }
+        Ok(Ok(None)) => {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "backend closed before responding",
+            ));
+        }
+        Ok(Ok(Some(bytes))) => bytes,
+        Ok(Err(e)) => return Err(e),
+    };
     let mut resp = http::parse_response_head(&resp_bytes)?;
     let resp_framing = http::response_body_framing(&method, &resp)?;
 
@@ -850,6 +876,17 @@ mod tests {
         tx.write_all(data).await.unwrap();
         drop(tx); // EOF after the data
         Conn::new(rx)
+    }
+
+    #[tokio::test]
+    async fn read_head_can_be_timed_out() {
+        // A duplex pipe whose write side never sends the terminating CRLF CRLF
+        // stands in for a backend that accepted the connection but never
+        // responds — read_head blocks forever without a timeout wrapper.
+        let (_tx, rx) = duplex(64);
+        let mut conn = Conn::new(rx);
+        let result = tokio::time::timeout(Duration::from_millis(50), conn.read_head()).await;
+        assert!(result.is_err(), "read_head must not resolve before data arrives");
     }
 
     #[tokio::test]
