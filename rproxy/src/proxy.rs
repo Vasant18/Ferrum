@@ -343,9 +343,6 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Conn<S> {
     /// Used only by the backend-leg poolability check: a non-empty buffer
     /// here means either backend misbehavior or a framing-accounting bug,
     /// and pooling it forward would leak those bytes into the next checkout.
-    ///
-    /// Called only from tests until Task 5 wires it into `serve_one` —
-    /// allowed dead for now, same treatment as `is_poolable` above.
     pub fn buffer_is_empty(&self) -> bool {
         self.filled == 0
     }
@@ -398,9 +395,6 @@ fn strip_hop_by_hop(headers: &mut Vec<(String, String)>) {
 /// Conditions 2 and 3 arrive as plain bools, not the response head itself —
 /// see the caller in `serve_one` for why they must be captured immediately
 /// after the head is parsed, before any later rewriting for the client leg.
-///
-/// Called only from tests until Task 5 wires it into `serve_one` — allowed
-/// dead for now, same treatment as the Task 1/2 pool items.
 fn is_poolable(
     resp_framing: BodyFraming,
     backend_sent_close: bool,
@@ -521,11 +515,18 @@ async fn serve_one(
     };
     let upstream = &route.upstream;
 
-    // Capture the client's original request target and Host BEFORE any
-    // rewriting. The original target feeds the "rewrite:" log line below, and
-    // `original_host` is what makes `X-Forwarded-Host` report what the client
-    // actually asked for even when a `host=` rule clobbers the Host header.
+    // Capture the client's original request target, version, and Host BEFORE
+    // any rewriting. The original target feeds the "rewrite:" log line below,
+    // and `original_host` is what makes `X-Forwarded-Host` report what the
+    // client actually asked for even when a `host=` rule clobbers the Host
+    // header. `original_version` exists purely so the balancer "pick" log lines
+    // keep printing the client's own version: the rewrite now runs BEFORE the
+    // pick loop (so the head is serialized exactly once), and it force-sets
+    // `req.version = Http11` — so reading `req.version` live in the loop would
+    // report Http11 even for an HTTP/1.0 client, changing today's log output.
+    // `Version` is `Copy`, so this is a trivial snapshot.
     let original_target = req.target.clone();
+    let original_version = req.version;
     let original_host = http::header(&req.headers, "host").map(str::to_string);
 
     // ---- 2a. Middleware pipeline (Level 6) ----
@@ -567,6 +568,63 @@ async fn serve_one(
         return Ok(reusable && client_keep_alive);
     }
 
+    // ---- 2c. Serialize the forwarded request head ONCE, before any connection
+    // attempt. This ordering is the whole point of this function's shape:
+    // `route.rules.apply_request` (Level 5's rewrite) mutates `req` in place and
+    // is NOT idempotent — it APPENDS to `X-Forwarded-For`, sets `Connection`,
+    // etc., so running it twice would double-append forwarded headers. But
+    // `http::write_request_head(&req)` is a pure serialization of the
+    // already-rewritten head. Doing the rewrite here, exactly once, lets the
+    // acquire+write loop below re-attempt the *write* of these identical bytes
+    // on a fresh connection (when a pooled connection turns out dead) WITHOUT
+    // ever re-running the rewrite. Serialize once; retry only the write.
+    strip_hop_by_hop(&mut req.headers);
+    // Level 5: forwarded headers + path/Host/header rewriting. This must run
+    // AFTER hop-by-hop stripping (so a client cannot smuggle in a
+    // Connection-listed header that a rule then re-adds) and BEFORE the
+    // framing re-declaration below (so no rule can displace the framing
+    // headers this proxy owns).
+    let fwd_ctx = crate::rewrite::ForwardContext {
+        client_ip: peer.ip(),
+        original_host: original_host.as_deref(),
+        scheme: "http", // Level 8 sets "https" after TLS termination
+    };
+    route.rules.apply_request(&mut req, &fwd_ctx);
+    // Diagnostics for the rewrite, emitted right where the rewrite happens.
+    // (These moved up with the rewrite block; the pick log lines below now read
+    // the captured pre-rewrite originals instead of the live, rewritten `req`.)
+    if req.target != original_target {
+        println!("[{peer}]   rewrite: {original_target} -> {}", req.target);
+    }
+    if let (Some(before), Some(after)) =
+        (original_host.as_deref(), http::header(&req.headers, "host"))
+    {
+        if before != after {
+            println!("[{peer}]   host: {before} -> {after}");
+        }
+    }
+    // Take exclusive control of the body-framing header. strip_hop_by_hop
+    // removes the "TE" header but NOT "Transfer-Encoding"; if we re-added a
+    // chunked TE below without removing the original, the backend would see
+    // two Transfer-Encoding lines — a smuggling desync. Content-Length is
+    // left untouched: the parser already guaranteed at most one, and for
+    // Length framing it carries the backend's only body delimiter.
+    http::remove_header(&mut req.headers, "transfer-encoding");
+    req.version = Version::Http11;
+    // Level 7: ask the backend to keep the connection open so it becomes a
+    // candidate for pooling. This does not by itself decide whether we
+    // actually pool it afterward — is_poolable still checks the backend's
+    // OWN Connection header on the response, since a backend is free to
+    // ignore our keep-alive request and close anyway (that's condition 2 of
+    // the poolability check).
+    req.headers.push(("Connection".to_string(), "keep-alive".to_string()));
+    if req_framing == BodyFraming::Chunked {
+        req.headers.push(("Transfer-Encoding".to_string(), "chunked".to_string()));
+    }
+    // The single serialization. These exact bytes are what the loop below
+    // (re)writes on each connection attempt.
+    let head_bytes = http::write_request_head(&req);
+
     // ---- 2b. Balance + connect, with retry ----
     // Retry is gated on three conditions, all required:
     //   1. attempts remain (MAX_RETRIES),
@@ -596,58 +654,95 @@ async fn serve_one(
         };
         let addr = lease.addr().to_string();
 
-        // Level 7: try a pooled connection first — this is the "0 RTT setup"
-        // path. A pool hit skips TcpStream::connect (and its timeout)
-        // entirely; only a miss falls through to dialing fresh.
-        if let Some(conn) = lease.take_conn() {
+        // Acquire a backend connection for this attempt: a pooled one first
+        // (Level 7's "0 RTT setup" path — a hit skips TcpStream::connect and
+        // its timeout entirely), else dial fresh. Either way we leave this
+        // block holding a `Conn` we have NOT yet written to. The pick log
+        // lines read the pre-rewrite originals (`original_target`,
+        // `original_version`) rather than the live `req`: the rewrite ran once
+        // above the loop and force-set `req.version = Http11`, so reading it
+        // here would change today's log output for an HTTP/1.0 client.
+        let (mut conn, from_pool) = if let Some(conn) = lease.take_conn() {
             println!(
                 "[{peer}] {} {} {} -> {}[{}] {addr} (inflight={}) [pooled]",
                 req.method,
-                req.target,
-                req.version.as_str(),
+                original_target,
+                original_version.as_str(),
                 upstream.name(),
                 upstream.algorithm().tag(),
                 lease.inflight(),
             );
-            break (lease, conn, true);
-        }
+            (conn, true)
+        } else {
+            println!(
+                "[{peer}] {} {} {} -> {}[{}] {addr} (inflight={}){}",
+                req.method,
+                original_target,
+                original_version.as_str(),
+                upstream.name(),
+                upstream.algorithm().tag(),
+                lease.inflight(),
+                if attempt > 0 { format!(" [retry {attempt}/{MAX_RETRIES}]") } else { String::new() },
+            );
 
-        println!(
-            "[{peer}] {} {} {} -> {}[{}] {addr} (inflight={}){}",
-            req.method,
-            req.target,
-            req.version.as_str(),
-            upstream.name(),
-            upstream.algorithm().tag(),
-            lease.inflight(),
-            if attempt > 0 { format!(" [retry {attempt}/{MAX_RETRIES}]") } else { String::new() },
-        );
-
-        match tokio::time::timeout(BACKEND_CONNECT_TIMEOUT, TcpStream::connect(&addr)).await {
-            Ok(Ok(s)) => {
-                let _ = s.set_nodelay(true);
-                break (lease, Conn::new(s), false);
+            match tokio::time::timeout(BACKEND_CONNECT_TIMEOUT, TcpStream::connect(&addr)).await {
+                Ok(Ok(s)) => {
+                    let _ = s.set_nodelay(true);
+                    (Conn::new(s), false)
+                }
+                Ok(Err(e)) => {
+                    lease.mark_failure();
+                    eprintln!("[{peer}] backend {addr} connect failed: {e}");
+                    drop(lease);
+                    if retryable && attempt < MAX_RETRIES {
+                        attempt += 1;
+                        continue;
+                    }
+                    respond_error(client, 502, "Bad Gateway").await?;
+                    return Ok(false);
+                }
+                Err(_) => {
+                    lease.mark_failure();
+                    eprintln!("[{peer}] backend {addr} connect timed out");
+                    drop(lease);
+                    if retryable && attempt < MAX_RETRIES {
+                        attempt += 1;
+                        continue;
+                    }
+                    respond_error(client, 504, "Gateway Timeout").await?;
+                    return Ok(false);
+                }
             }
-            Ok(Err(e)) => {
+        };
+
+        // Write the pre-serialized request head, and treat a failure here
+        // EXACTLY like a failed connect: indict the server, drop the lease, and
+        // retry on a different server when the method is idempotent and
+        // attempts remain (the same two conditions the connect arms check). This
+        // arm exists because `take_conn()` can hand back a pooled connection the
+        // backend silently closed during its idle window — a classic
+        // time-of-check/time-of-use race. The socket looked alive at checkout,
+        // but the very first write discovers it is dead; a fresh-connect miss
+        // can never reach this, only a pool hit can. Retry is SAFE here, and
+        // ONLY here, because not one request byte has reached any backend yet:
+        // `head_bytes` is the identical pre-serialized head (the non-idempotent
+        // rewrite already ran once, above the loop, so replaying does not
+        // double-append X-Forwarded-For), and the body has not begun streaming.
+        // The moment we leave this loop and start `copy_body_to` below, a
+        // failure is no longer replayable — part of a possibly non-idempotent
+        // request is already committed to a backend — so those failures feed the
+        // breaker and surface to the client instead of retrying.
+        match conn.write_all(&head_bytes).await {
+            Ok(()) => break (lease, conn, from_pool),
+            Err(e) => {
                 lease.mark_failure();
-                eprintln!("[{peer}] backend {addr} connect failed: {e}");
+                eprintln!("[{peer}] backend {addr} write failed: {e}");
                 drop(lease);
                 if retryable && attempt < MAX_RETRIES {
                     attempt += 1;
                     continue;
                 }
                 respond_error(client, 502, "Bad Gateway").await?;
-                return Ok(false);
-            }
-            Err(_) => {
-                lease.mark_failure();
-                eprintln!("[{peer}] backend {addr} connect timed out");
-                drop(lease);
-                if retryable && attempt < MAX_RETRIES {
-                    attempt += 1;
-                    continue;
-                }
-                respond_error(client, 504, "Gateway Timeout").await?;
                 return Ok(false);
             }
         }
@@ -660,14 +755,15 @@ async fn serve_one(
     // request actually went.
     ctx.upstream = Some(upstream.name().to_string());
     ctx.backend = Some(lease.addr().to_string());
-    // Pessimistic default: the request is about to go out, and from here to the
-    // point where we hold a valid response head there are six `?` early-returns
-    // (write head, stream body, flush, read head, "closed before responding",
-    // parse head, framing). Each of those is a *real observed I/O failure* on a
-    // request we already committed to this backend, so each must indict it — but
-    // wiring mark_failure() into all six sites is easy to get wrong and easy for
-    // a future edit to skip. Instead we default the outcome to failure right
-    // here and let the mark_success() below upgrade it once a `<500` response
+    // Pessimistic default: the request head is already out (the acquire+write
+    // loop above sent it), and from here to the point where we hold a valid
+    // response head there are several `?` early-returns (stream body, flush,
+    // read head, "closed before responding", parse head, framing). Each of
+    // those is a *real observed I/O failure* on a request we already committed
+    // to this backend, so each must indict it — but
+    // wiring mark_failure() into every one of those sites is easy to get wrong
+    // and easy for a future edit to skip. Instead we default the outcome to
+    // failure right here and let the mark_success() below upgrade it once a `<500` response
     // head is actually in hand. Any `?` that fires in between therefore scores a
     // failure automatically, without touching a single call site. This is safe
     // because it only runs *after* the request was sent: cancellation before
@@ -678,49 +774,14 @@ async fn serve_one(
     // a failure recorded here can never trigger a replay.
     lease.mark_failure();
 
-    // ---- 4. Forward the request: rewritten head, then streamed body ----
-    strip_hop_by_hop(&mut req.headers);
-    // Level 5: forwarded headers + path/Host/header rewriting. This must run
-    // AFTER hop-by-hop stripping (so a client cannot smuggle in a
-    // Connection-listed header that a rule then re-adds) and BEFORE the
-    // framing re-declaration below (so no rule can displace the framing
-    // headers this proxy owns).
-    let fwd_ctx = crate::rewrite::ForwardContext {
-        client_ip: peer.ip(),
-        original_host: original_host.as_deref(),
-        scheme: "http", // Level 8 sets "https" after TLS termination
-    };
-    route.rules.apply_request(&mut req, &fwd_ctx);
-    if req.target != original_target {
-        println!("[{peer}]   rewrite: {original_target} -> {}", req.target);
-    }
-    if let (Some(before), Some(after)) =
-        (original_host.as_deref(), http::header(&req.headers, "host"))
-    {
-        if before != after {
-            println!("[{peer}]   host: {before} -> {after}");
-        }
-    }
-    // Take exclusive control of the body-framing header. strip_hop_by_hop
-    // removes the "TE" header but NOT "Transfer-Encoding"; if we re-added a
-    // chunked TE below without removing the original, the backend would see
-    // two Transfer-Encoding lines — a smuggling desync. Content-Length is
-    // left untouched: the parser already guaranteed at most one, and for
-    // Length framing it carries the backend's only body delimiter.
-    http::remove_header(&mut req.headers, "transfer-encoding");
-    req.version = Version::Http11;
-    // Level 7: ask the backend to keep the connection open so it becomes a
-    // candidate for pooling. This does not by itself decide whether we
-    // actually pool it afterward — is_poolable still checks the backend's
-    // OWN Connection header on the response, since a backend is free to
-    // ignore our keep-alive request and close anyway (that's condition 2 of
-    // the poolability check).
-    req.headers.push(("Connection".to_string(), "keep-alive".to_string()));
-    if req_framing == BodyFraming::Chunked {
-        req.headers.push(("Transfer-Encoding".to_string(), "chunked".to_string()));
-    }
-
-    backend.write_all(&http::write_request_head(&req)).await?;
+    // ---- 4. Forward the request body, then flush ----
+    // The request head was rewritten, serialized, and written inside the
+    // acquire+write loop above (that is what lets a dead-pooled-connection
+    // write failure retry on a fresh server). Only the body remains. Unlike the
+    // head-write, a failure here is NOT retried: once any request-body byte
+    // reaches a backend, part of a possibly non-idempotent request is committed,
+    // so a `?` from here on feeds the breaker (via the pessimistic
+    // mark_failure() above) and surfaces to the client rather than replaying.
     client.copy_body_to(&mut backend.stream_mut(), req_framing).await?;
     backend.flush().await?;
 

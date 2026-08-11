@@ -44,11 +44,6 @@ use tokio::net::TcpStream;
 /// How many idle backend connections one server's pool keeps at most. Bounds
 /// worst-case memory: a pool doesn't grow to match peak historical
 /// concurrency, it caps at a small constant per backend.
-///
-/// Unused until `Lease::return_conn` (Task 2) and the `serve_one` wiring
-/// (Task 5) read it — allowed dead for now, same treatment `Upstream::from_spec`
-/// already carries elsewhere in this file for a "defined now, wired in later"
-/// item.
 pub const POOL_MAX_IDLE: usize = 4;
 
 /// How long an idle pooled connection is trusted to still be alive on the
@@ -824,11 +819,6 @@ impl<'a> Lease<'a> {
 
     /// Take a live pooled connection for this lease's server, if one exists.
     /// See `Server::take_conn` for the idle-timeout eviction this performs.
-    ///
-    /// Called only from this file's tests until Task 5 wires it into
-    /// `serve_one` — invisible to a `--release` build, so still dead code
-    /// from the compiler's perspective. Allowed dead for now, same as
-    /// `Server::take_conn`/`return_conn`.
     pub fn take_conn(&self) -> Option<crate::proxy::Conn<TcpStream>> {
         self.server.take_conn()
     }

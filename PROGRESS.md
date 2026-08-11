@@ -14,7 +14,7 @@ Course defined in [Build.md](Build.md). Theory reference: [Reverse-Proxy-Knowled
 | 4 | Health Checks (active/passive, retries, circuit breaker) | 🟢 **Implemented** (2026-08-06) | `balancer.rs`: per-server `Breaker` (Closed/Open/HalfOpen) + shared passive/active feeds via `Server::record_*`; `health.rs`: one prober task per upstream (`GET /health`, timeout, `probe_due` gate); `proxy.rs`: connect-retry loop (idempotent + pre-body + cap 2); `;health=PATH` spec suffix + `--hc-*` flags. 72 unit tests. Live-verified ejection, recovery, retry, and cap all with default config. Quiz pending. |
 | 5 | Proxy Headers & Rewriting (XFF, host/URL rewrite) | 🟢 **Implemented** (2026-08-07) | `rewrite.rs`: pure sync transforms over head structs — four forwarded headers (XFF append, X-Real-IP overwrite, XFH/XFP set-if-absent), segment-aware path rewriting (`strip`/`prefix`, query preserved), Host rewriting with original capture, request/response header rules, protected-header guardrail; route-spec `;option` grammar + `--no-forwarded`; fixed transform ordering. 99 unit tests. Live-verified all four headers, append-vs-overwrite, path+Host+response rewrite ordering, guardrail. Quiz pending. |
 | 6 | Middleware (pipeline, auth, rate limiting) | 🟢 **Implemented** (2026-08-09) | `middleware/` dir: sync two-phase `Middleware` trait (`on_request` fwd / `on_response` reverse) + `Chain` + `ReqCtx` + `Decision`/`Rejection`; five middleware — request-id, access-log (`observe.rs`), Basic/Bearer auth + require-user authz (`auth.rs`, constant-time + own base64), token-bucket rate limit (`ratelimit.rs`, 16-shard `std::sync::Mutex`, lazy refill, socket-IP key); fixed order log→request-id→ratelimit→auth→authz; per-route `;auth=/rate=/burst=/realm=/require-user=` via an option partition in `router.rs`; `--no-request-id`/`--no-access-log`; bounded 64 KB rejection drain in `proxy.rs`. 152 unit tests. Live-verified the ordering proof (`401×5 then 429×5` on an unauth flood), 403≠401, drain+keep-alive, and that rejections never hit the backend. Quiz pending. |
-| 7 | Performance (pooling, buffers, timeouts) | ⚪ Not started | Backend conns are close-per-request until pooling lands here |
+| 7 | Performance (pooling, buffers, timeouts) | 🟢 **Implemented** (2026-08-10/11) | `balancer.rs`: per-`Server` bounded LIFO idle-connection pool (`std::sync::Mutex<Vec<PooledConn>>`, lazy idle-timeout eviction, max-size cap dropping the newest on overflow) + `Lease::take_conn`/`return_conn`; `proxy.rs`: five-condition `is_poolable` predicate (framing, backend `Connection: close`, HTTP/1.1, no I/O error, drained buffer) + `Conn::buffer_is_empty`, `BACKEND_RESPONSE_TIMEOUT` around the response-head read; wired into `serve_one` (pool-hit skips connect entirely, backend leg asks for `keep-alive`, poolability captured *before* the client-leg rewrite touches the response head); `--pool-max-idle`/`--pool-idle-timeout`/`--backend-timeout` CLI flags, global only. 168 unit tests. Live-verified connection reuse (`[pooled]` tag + backend accept counts), honoring a backend's own `Connection: close`, pipelining unaffected, idle-timeout eviction, and a hung backend producing a 504 + breaker ejection. Quiz pending. |
 | 8 | Security & TLS (termination, mTLS, slowloris) | ⚪ Not started | Head-read timeout + head size cap already in place from L1 |
 | 9 | OS Internals (epoll/kqueue, Tokio internals) — theory | ⚪ Not started | |
 | 10 | Observability (logs, metrics, tracing) | ⚪ Not started | Currently println/eprintln placeholders |
@@ -422,6 +422,170 @@ empty chain on the default route.
 10. When middleware #3 rejects, `on_response` runs for #1 and #0 but not #3 or
     #4. Explain why each of those four choices is correct.
 
+## Level 7 — what was built
+
+- [x] **Per-`Server` idle-connection pool**, not per-`Upstream` or global.
+      `Server` (already the home of `inflight`/`ewma_us`/`breaker`) gains
+      `idle: Mutex<Vec<PooledConn>>`, a bounded LIFO stack. `std::sync::Mutex`,
+      not `tokio::sync::Mutex` — the critical section is a `Vec::pop`/`push`
+      with no `.await` inside, the same reasoning Level 6's rate limiter used
+      for its shard locks. Sharding by *server* is, if anything, more natural
+      than Level 6's hash shards: it's already the unit of concurrency the
+      balancer fans requests across.
+- [x] **Lazy idle-timeout eviction, no sweeper task.** `take_conn` pops from
+      the back and discards anything past `POOL_IDLE_TIMEOUT`, walking
+      further down the stack until it finds a live connection or the pool
+      empties. A stale entry costs nothing until something actually tries to
+      use it — the same "nobody pays until somebody looks" principle as Level
+      6's lazy token-bucket refill. `return_conn` bounds the pool at
+      `POOL_MAX_IDLE` by dropping the *new* connection on overflow, never
+      evicting an existing one.
+- [x] **`Conn<TcpStream>` is what gets pooled, not the raw socket** — buffer
+      reuse "for free," the whole reason this design choice matters. A
+      reused connection's read buffer comes back already allocated; no
+      separate buffer-pool abstraction was needed.
+- [x] **Five-condition `is_poolable` predicate**, pure and synchronous:
+      not `BodyFraming::UntilClose`; backend didn't send `Connection: close`;
+      backend spoke HTTP/1.1; the exchange had no I/O error; the connection's
+      read buffer is fully drained. The fifth condition has no client-leg
+      analogue — there's no pipelining on the backend leg (one request per
+      checkout, wait for its response before sending another), so any
+      leftover buffered bytes are backend misbehavior or a framing-accounting
+      bug, never a next message worth preserving. Pooling them forward would
+      leak stale bytes into the next checkout's response parsing — the same
+      connection-desync bug class Level 1 closed on the client side.
+- [x] **The ordering bug caught during planning, and kept out of the code.**
+      Two of the five conditions (`backend_sent_close`, `backend_is_http11`)
+      must be captured *immediately* after the response head is parsed, not
+      read from `resp.headers`/`resp.version` at the point the pooling
+      decision actually happens — by then, the client-leg framing block has
+      already rewritten both fields for what the proxy tells the *client*,
+      not what the backend actually sent. `is_poolable` takes plain `bool`s
+      instead of the response head itself specifically so the caller cannot
+      make this mistake inside the function — it has to capture the right
+      values at the right time, at the call site. Every implementer and
+      reviewer in this level's build independently re-verified this ordering
+      by tracing the actual code, not trusting a comment.
+- [x] **`BACKEND_RESPONSE_TIMEOUT`** wraps the response-head read with
+      `tokio::time::timeout`, mirroring the existing `HEAD_READ_TIMEOUT`/
+      `BACKEND_CONNECT_TIMEOUT` pattern. Closes a real gap: before this, a
+      backend that accepted the connection and never responded blocked that
+      connection task forever, with no client-visible error and no breaker
+      signal. Now a hang is ejectable the same way a refused connect already
+      was — `lease.mark_failure()` fires on expiry, and a 504 goes to the
+      client. Bounds only time-to-first-byte, not total body-transfer time.
+- [x] **The backend leg now asks for `Connection: keep-alive`**, not
+      `close` — pooling can never find a live connection if every request
+      tells the backend to close it. This alone doesn't decide poolability:
+      `is_poolable` still independently checks the backend's *own* response
+      `Connection` header, since a backend is free to ignore the invitation.
+- [x] **Global CLI flags** `--pool-max-idle`, `--pool-idle-timeout`,
+      `--backend-timeout`, following the exact `--hc-*` pattern. No per-route
+      or per-upstream override — a deliberate scope decision (these are
+      transport tuning, not routing policy), not an oversight. `PoolConfig`
+      threads through `Upstream::build`/`from_spec_with_health` the same way
+      `HealthConfig` already does.
+- [x] 168 unit tests (152 from Level 6 kept green; +16 for the pool's LIFO/
+      cap/idle-timeout mechanics, the poolability predicate's five independent
+      conditions, the buffer-drain check, and the configured-vs-default pool
+      bound).
+- [ ] **Level 7 quiz — Vishwa to answer before Level 8** (questions below)
+
+**Verified end-to-end (2026-08-10/11):** release binary against a real
+`ThreadingHTTPServer` Python backend (a `BaseHTTPRequestHandler` defaults to
+HTTP/1.0 unless `protocol_version` is set — a real trap this verification hit
+and fixed in the test harness, not the proxy, before any of the following
+checks would have shown pooling at all).
+
+- **Connection reuse:** 5 requests on a keep-alive client connection produced
+  1 backend accept, not 5; the proxy's log line tagged requests 2-5 `[pooled]`
+  with response times dropping from ~1.3ms to ~0.5ms once the TCP handshake
+  was skipped.
+- **A backend's own `Connection: close` is honored per-request** while a
+  sibling keep-alive route on the same backend still pools: two requests to a
+  `/closeme` path (backend sends `Connection: close` every time) produced two
+  fresh accepts, while `/` on the same backend pooled normally.
+- **Pipelining is unaffected by pooling.** Two requests pipelined on one
+  client connection produced two distinct, correctly-framed responses (each
+  with its own `X-Request-Id`, correct `Content-Length`); the proxy's own log
+  showed the *backend* connection from serving the first request reused
+  (`[pooled]`) to serve the second.
+- **Idle-timeout eviction is observable.** With `--pool-idle-timeout 3s`: a
+  warm pool entry, followed by a 5-second gap with no traffic, followed by
+  another request — that request showed no `[pooled]` tag and produced a
+  second, fresh backend accept. The aged-out entry was discarded, not reused.
+- **A hung backend (accepts the connection, never responds) produces a 504
+  within `--backend-timeout`** (measured ~2.08s against a 2s configured
+  timeout) **and the breaker ejects it** on the very next request — a repeat
+  request returned an immediate 502 (0.04s) rather than hanging again,
+  confirming `lease.mark_failure()` on timeout genuinely feeds the same
+  passive breaker feed a refused connect already used.
+- **Two test-harness bugs found and fixed during verification, not proxy
+  bugs:** the default-HTTP/1.0 Python backend (above), and a hung-backend
+  test script that reassigned its `conn` variable each `accept()` loop —
+  letting the *health prober's* connection garbage-collect and RST the
+  *client's* still-in-flight connection when both landed on the same
+  never-responding backend. Neither affected the pool/timeout code under
+  test; both were caught by tracing an unexpected result back to its actual
+  cause rather than accepting a flaky number.
+
+**Theory documented, not implemented** (matching how Levels 5/6 handled
+knowledge-base sections framed as explanation rather than code):
+
+- **Async worker model.** Level 1's existing task-per-connection design on
+  Tokio, explained: why it sidesteps C10K (no per-connection thread, no
+  per-connection stack-sized memory cost) versus Nginx's process+epoll model,
+  and why Rust+Tokio gives event-driven behavior with task-shaped ergonomics
+  instead of raw callback/epoll code.
+- **Zero-copy / `splice()`/`sendfile()`.** Explained with the knowledge
+  base's own caveat: an L7 proxy mostly can't use it for headers (it has to
+  inspect them), and it needs measurement before reaching for it. No unsafe
+  syscalls added — there is no benchmark yet showing the streaming copy loop
+  (`Conn::copy_body_to`) is a bottleneck.
+- **Lock contention**, using this level's own pool as the worked example
+  rather than an abstract discussion: sharding per-`Server` (this level)
+  versus one global `Mutex<HashMap<Addr, Vec<Idle>>>` is exactly the
+  "shard the state" lesson — a busy backend's pool traffic never serializes
+  behind an unrelated backend's pool traffic, because they're different
+  mutexes entirely.
+- **Request pipelining.** Verified, not built. `Conn::read_head`'s existing
+  buffering already carries bytes past one request's boundary into the next
+  (proven by the Level 1 test `preserves_pipelined_bytes_after_head`, and
+  reconfirmed live above with pooling active). No pipelining exists on the
+  *backend* leg and none was added — this proxy sends one request per
+  checkout and waits for its response before sending the next.
+
+### Level 7 quiz — Vishwa to answer before Level 8
+
+1. The poolability predicate needed a fifth condition beyond the four the
+   client-leg keep-alive check already makes. What is it, and why does the
+   backend leg need it when the client leg doesn't?
+2. Two of the five poolability conditions had to be captured *before* certain
+   lines in `serve_one`, not read at the point where `return_conn` is called.
+   Which two, and what specifically would go wrong reading them late?
+3. Why does `Server::return_conn` drop the *new* connection past the size cap
+   instead of evicting an older one?
+4. Why is there no background task sweeping idle connections for staleness?
+   What would such a task cost that the lazy check avoids?
+5. `Server.idle` uses `std::sync::Mutex`, not `tokio::sync::Mutex`. What
+   property of `take_conn`/`return_conn` makes that correct?
+6. The pool is per-`Server`, not per-`Upstream` or global. Explain the
+   lock-contention argument for that choice concretely — what would a single
+   global pool mutex cost under load that per-server pools don't?
+7. Changing the backend's `Connection` header from `close` to `keep-alive`
+   was necessary but not sufficient for pooling to work. What's the second,
+   independent thing that has to be true for a connection to actually get
+   reused?
+8. `BACKEND_RESPONSE_TIMEOUT` only wraps the response-head read, not the
+   body. Why is bounding total-transfer time out of scope for this timeout
+   specifically?
+9. A write to a pooled connection can still fail (the backend closed it
+   between our idle check and our write). How does that failure get
+   handled — does it need its own retry-budget category?
+10. Why does storing a whole `Conn<TcpStream>` in the pool (not just the raw
+    socket) give buffer reuse "for free," and what would a separate
+    buffer-pool abstraction have needed to reimplement?
+
 ## Session log
 
 - **2026-07-26** — Course kickoff. Knowledge base built (all 14 levels). `rproxy` crate created. Module 1.1 taught & assigned. Repo pushed to github.com/Vasant18/Ferrum.
@@ -432,3 +596,4 @@ empty chain on the default route.
 - **2026-08-05/06** — Level 4 (Health Checks) implemented across six subagent-driven tasks per the approved design (`.superpowers/sdd/2026-08-05-level-4-health-checks/`). Tasks 1–5: per-server three-state `Breaker` with shared passive/active feeds (filling the Level-3 `available()` seam with no `select` changes), exponential backoff (double/cap/reset), one-prober-task-per-upstream in `health.rs` (`GET /health`), a three-gate connect-retry loop in `proxy.rs` (idempotent + pre-body + cap 2), and the CLI surface (`;health=PATH` + `--hc-*`). Task 6 (this session): tidied a carried-over dead-code warning (`from_spec` now `#[allow(dead_code)]` with a why-comment; release build down from 3 warnings to 2). Live-verified against python backends: ejection trips `Closed->Open` and drops the dead server from rotation with no 502s; backoff doubles live (1→2→4s); the retry loop (which has *no* unit test) hides a dead backend on GET with `[retry 1/2]` and returns 200, does NOT replay a POST (alternating `502 200`), and caps at `[retry 2/2]`. **Found and fixed a real bug:** active-only recovery deadlocked with the default `success_threshold=2` — `probe_due` returned `None` for HalfOpen after the single admitted trial, so `consec_success` froze at 1 and the breaker wedged in HalfOpen (client traffic is blocked there too, so passive successes can't help). Fix (fix round 1): `probe_due` now keeps admitting a `HalfOpenTrial` while HalfOpen, so the prober can accumulate the successes it needs; the one-probe-per-cooldown ceiling still holds because a failed trial trips straight back to Open with a doubled backoff. Added an integration-shaped regression test that drives recovery the way the prober does (alternating `probe_due`/`record_success` per tick) and asserts `Closed` with the default threshold — the case the old direct-call unit test missed. Re-verified live with the default config (no `--hc-success` override): `HalfOpen->Closed` and 9002 rejoined 3/3/3. 72 tests pass. Full report: `.superpowers/sdd/2026-08-05-level-4-health-checks/task-6-report.md`.
 - **2026-08-07** — Level 5 (Proxy Headers & Rewriting) implemented across six subagent-driven tasks per the approved design (`.superpowers/sdd/2026-08-07-level-5-proxy-headers-rewriting/`). New `rewrite.rs`: pure sync transforms over head structs — four forwarded headers (XFF append / X-Real-IP overwrite / XFH+XFP set-if-absent), segment-aware path rewriting with query preservation, Host rewriting with pre-rewrite `original_host` capture feeding XFH, request/response header rules, a startup protected-header guardrail (Content-Length/Transfer-Encoding/Connection/Host), the route-spec `;option` grammar (severed before `=` so option values keep their `=`), `--no-forwarded`, and a fixed transform order (path → Host → forwarded → explicit rules, all before framing re-declaration). Task 6 (this session): **live end-to-end verification + docs**. Drove the release binary against a python echo backend on :9001 and confirmed all 9 checks: four forwarded headers correct; `X-Forwarded-For: 1.2.3.4` appends to `1.2.3.4, 127.0.0.1` while forged `X-Real-IP: 9.9.9.9` is replaced with `127.0.0.1`; `strip=/api` + `host=backend.local` gives the backend `"path": "/users?page=2"` and `"host": "backend.local"` while `x-forwarded-host` STILL reports the client's `example.com` (the level's core ordering guarantee); `remove-resp-header=Server` strips it from the client's response; `--no-forwarded` yields 0 forwarded headers; `;set-header=Content-Length:5` fails startup with exit 1. **Two extra regression checks (beyond the brief):** on a live request the segment-boundary strip left `/apixyz` untouched (not `/xyz`), stripped `/api/real`→`/real`, and turned `/api`→`/`; and the L4 `;health=/health` upstream suffix coexisted with an L5 `;strip/;host` route in one invocation with no grammar interference. 99 tests pass. All background processes cleaned up (`pgrep` clean). Full report: `.superpowers/sdd/2026-08-07-level-5-proxy-headers-rewriting/task-6-report.md`.
 - **2026-08-09** — Level 6 (Middleware) implemented inline in one session (not subagent-driven) per the approved design (`docs/superpowers/specs/2026-08-09-level-6-middleware-design.md`) and plan (`docs/superpowers/plans/2026-08-09-level-6-middleware.md`), across the plan's 7 tasks. New `middleware/` directory: a synchronous two-phase `Middleware` trait (`on_request` forward / `on_response` reverse — the onion without owning the streamed body, so no `async fn`-in-trait boxing and no new deps), `Chain` with short-circuit + entered-layer unwind, `ReqCtx`, `Decision`/`Rejection`; five middleware — request-id + access-log (`observe.rs`), Basic/Bearer auth + require-user authz (`auth.rs`; own base64 + constant-time compare), token-bucket rate limit (`ratelimit.rs`; 16-shard `std::sync::Mutex`, lazy refill, no timer, socket-IP key, fail-open eviction). Wired into `serve_one` AFTER routing and BEFORE the balancer lease (a rejection takes no lease / opens no socket / never touches the breaker), with a bounded 64 KB rejection drain to avoid the close-time TCP-RST that would nuke the 429/401. Per-route config via an option partition in `router.rs` (the single arbiter of "unknown option"; `rewrite::L5_KEYS` vs `middleware::L6_KEYS`), so `rewrite.rs` needed no change. `--no-request-id`/`--no-access-log` applied even to the catch-all defaults. **Design refinements over the plan:** kept the partition as the unknown-key arbiter (plan had proposed relaxing `rewrite.rs`'s error arm — unnecessary once the partition guarantees each parser sees only its keys); added a `Chain.summary` field so the startup banner shows per-layer tunables (`ratelimit(5/s burst=5)`) rather than bare names, which also made `MiddlewareConfig::describe` genuinely used. 152 tests pass (104 from L5 kept green, +48). Release build back to the 4-warning baseline (one new `Chain::new` warning resolved with `#[allow(dead_code)]` + why-comment, matching the `for_test`/`from_spec` precedent). Live-verified all checklist items incl. the ordering proof (`401×5 then 429×5`), 403≠401 via a two-cred/one-allow route, drain+keep-alive over pipelined POST bodies (raw-byte inspected), zero backend hits for rejections, and all startup guardrails. Background processes cleaned (`pgrep` clean). Not committed — working tree left for Vishwa to commit (repo history is all unsigned; he commits himself).
+- **2026-08-10/11** — Level 7 (Performance) implemented via subagent-driven development across the plan's 7 tasks (`docs/superpowers/plans/2026-08-10-level-7-performance.md`, design at `docs/superpowers/specs/2026-08-10-level-7-performance-design.md`). Per-`Server` bounded LIFO idle-connection pool (`balancer.rs`: `PooledConn`, `Server.idle`, `Lease::take_conn`/`return_conn`) with lazy idle-timeout eviction and no background sweeper; a five-condition `is_poolable` predicate and `Conn::buffer_is_empty` (`proxy.rs`); a `BACKEND_RESPONSE_TIMEOUT` closing a real gap (a hung backend previously blocked forever with no client-visible error and no breaker signal); all wired into `serve_one` (pool-hit skips the connect+timeout entirely, backend leg now asks for `Connection: keep-alive`, poolability captured immediately after the response head is parsed — before the client-leg framing block rewrites the same fields); three global CLI flags (`--pool-max-idle`, `--pool-idle-timeout`, `--backend-timeout`) following the `--hc-*` pattern. 168 tests pass; release build holds the 4-warning baseline throughout every task. **Plan quality note:** during Task 1, the first implementer caught two real bugs in the plan text itself before writing any final code — a test whose push order couldn't produce the behavior its own comment claimed, and a missing `#[allow(dead_code)]` that would have broken the warning-baseline constraint — both fixed at the plan source (not just the dispatch message) so every downstream task's brief was already correct. During Task 6, a second implementer found and self-resolved an unanticipated consequence (`Server::new` becoming production-dead once its callers moved to a pool-config-aware constructor) using the exact same `from_spec` precedent, independently confirmed by that task's reviewer. **The task the whole level's design most worried about — Task 5's wiring — reviewed clean**, with the reviewer independently tracing (not trusting the report) that the two ordering-sensitive fields are captured before the client-leg rewrite and consumed correctly at the final call site, confirming the exact bug caught during planning did not creep back into the implementation. Live verification (done inline, not by subagent, since it needed real background processes and iterative debugging) hit two of its own bugs — a test backend defaulting to HTTP/1.0 (Python's `BaseHTTPRequestHandler`) and a hung-backend test script whose `accept()` loop let the health prober's connection garbage-collect and RST the client's in-flight one — both diagnosed to their actual cause and fixed in the harness, not the proxy, before re-confirming all six verification checks: connection reuse, per-request `Connection: close` honored, pipelining unaffected, idle-timeout eviction, and hung-backend 504 + breaker ejection. Every task's diff was independently re-verified (test counts, exact warning sets) rather than trusting subagent-reported numbers. All 6 code-task commits pushed to `github.com/Vasant18/Ferrum` main (`7809e8e` through `3064163`) via the `switching-gh-accounts` skill, each authored solely as Vasant18 with no co-author, gh credential switched back to the personal account after every push. Background test processes cleaned (`pgrep` clean).
