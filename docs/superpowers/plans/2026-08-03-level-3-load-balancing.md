@@ -1648,7 +1648,7 @@ Add a "Level 3 — what was built" section after the Level 2 one:
       pre-Level-3 invocations and tests keep working
 - [x] Startup validation: empty pool, duplicate name, portless address, zero weight
 - [x] Per-request log line names pool, algorithm, server, and in-flight count
-- [ ] **Level 3 quiz — Vishwa to answer before Level 4**
+- [ ] **Level 3 quiz — Vessey to answer before Level 4**
 
 **Known limitation (by design):** a dead server is still picked and still returns 502.
 Active/passive health checks, retries, and circuit breaking are Level 4. The seam is

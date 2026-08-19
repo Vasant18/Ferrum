@@ -19,7 +19,7 @@
 - **Fixed chain order, in code not config:** `Log`(0), `RequestId`(1), `RateLimit`(2), `Auth`(3), `Authz`(4). `on_request` runs 0→4; `on_response` runs 4→0 for the layers actually entered.
 - **Rate-limit key is `peer.ip()` only** — never `X-Forwarded-For`.
 - **Constant-time comparison** for all credential checks.
-- **Do NOT commit.** Leave all changes in the working tree; Vishwa commits himself. Each task's "Commit" step is replaced by "Stop and report for review" — the reviewer gate still happens, but no `git commit` is run.
+- **Do NOT commit.** Leave all changes in the working tree; Vessey commits himself. Each task's "Commit" step is replaced by "Stop and report for review" — the reviewer gate still happens, but no `git commit` is run.
 
 ### Existing APIs this plan consumes (verified against source)
 
@@ -1171,7 +1171,7 @@ pkill -f 'release/rproxy' ; pkill -f 'HTTPServer' ; pgrep -f rproxy || echo clea
   8. `require-user` with no `auth=` fails at startup. What would the route do at runtime if it were allowed?
 - Session-log entry dated 2026-08-09.
 
-- [ ] **Step 6: Stop and report** — final summary: test count, warning count, verification results, and that everything is uncommitted awaiting Vishwa's commit decision.
+- [ ] **Step 6: Stop and report** — final summary: test count, warning count, verification results, and that everything is uncommitted awaiting Vessey's commit decision.
 
 ---
 

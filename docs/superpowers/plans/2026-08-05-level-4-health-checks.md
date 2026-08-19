@@ -1498,7 +1498,7 @@ backoff with cap and reset, the CLI surface, and the live-verification results
 from Steps 2–4. Add a session-log entry. Then add the quiz:
 
 ```markdown
-### Level 4 quiz — Vishwa to answer before Level 5
+### Level 4 quiz — Vessey to answer before Level 5
 
 1. `allows_traffic()` is true only in `Closed`, not in `HalfOpen`. Why must
    client traffic stay blocked while a recovery probe is outstanding?

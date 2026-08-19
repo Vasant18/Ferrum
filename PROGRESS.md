@@ -2,7 +2,7 @@
 
 Course defined in [Build.md](Build.md). Theory reference: [Reverse-Proxy-Knowledge-Base.html](Reverse-Proxy-Knowledge-Base.html). Code lives in [`rproxy/`](rproxy/).
 
-**Mode:** originally strict mentor mode; at kickoff Vishwa asked Claude to implement Level 1 directly ("I implement, you learn" mode) with heavy in-code teaching. Each implemented level ends with a study quiz; later levels can return to mentor mode at any time.
+**Mode:** originally strict mentor mode; at kickoff Vessey asked Claude to implement Level 1 directly ("I implement, you learn" mode) with heavy in-code teaching. Each implemented level ends with a study quiz; later levels can return to mentor mode at any time.
 
 ## Level / Module Tracker
 
@@ -38,7 +38,7 @@ Course defined in [Build.md](Build.md). Theory reference: [Reverse-Proxy-Knowled
       splitting, no `str::lines()`); reject duplicate Content-Length / Transfer-Encoding;
       strict all-ASCII-digit Content-Length parsing; strip incoming Transfer-Encoding
       before re-declaring canonical framing on both legs (no duplicate TE to backend/client)
-- [ ] **Level 1 quiz — Vishwa to answer before Level 2** (questions in session notes / ask Claude)
+- [ ] **Level 1 quiz — Vessey to answer before Level 2** (questions in session notes / ask Claude)
 
 **Verified end-to-end:** `cargo test` (19 tests), GET/POST via curl against python backends,
 100 KB binary body round-trip byte-identical, chunked request via netcat, 20 concurrent requests,
@@ -56,7 +56,7 @@ dead backend → 502, garbage request → 400, keep-alive connection reuse confi
 - [x] `http::target_path` (strip query) + `http::host_without_port` (incl. IPv6) helpers
 - [x] Router shared as `Arc<RouteTable>`, cloned per connection, lock-free reads
 - [x] 404 Not Found on no matching route (well-formed request, just unserved)
-- [ ] **Level 2 quiz — Vishwa to answer before Level 3**
+- [ ] **Level 2 quiz — Vessey to answer before Level 3**
 
 **Verified end-to-end (2026-07-28):** `cargo test` (36 tests), two live backends with 5-route table —
 prefix/catch-all/method/host/regex all routed correctly; exact-beats-prefix precedence; 404 on no
@@ -82,7 +82,7 @@ route; keep-alive serving two requests on one connection to different backends.
 - [x] Level 4 seam: `Server::available()` hardcoded `true`, already honored by every `select` branch
 - [x] Observability: per-request log line `-> name[algo] addr (inflight=N)`
 - [x] 52 unit tests (36 existing kept green, mechanical `find()`/`route_to` adjustment only)
-- [ ] **Level 3 quiz — Vishwa to answer before Level 4** (questions below)
+- [ ] **Level 3 quiz — Vessey to answer before Level 4** (questions below)
 
 **Verified end-to-end (2026-08-04):** `cargo test` (52 tests); 3 python backends on :9001–:9003
 driven by `curl` loops — rr cycles `9001,9002,9003`; wrr `*5,*1` gives 50:10 over 60 requests;
@@ -92,7 +92,7 @@ invocations still work unchanged; all four bad configs reject at startup with ex
 
 **Run with a pool:** `cargo run -- 127.0.0.1:8080 --upstream 'api=lc:127.0.0.1:9001,127.0.0.1:9002' '/api/**=api' '/=127.0.0.1:9000'`
 
-### Level 3 quiz — Vishwa to answer before Level 4
+### Level 3 quiz — Vessey to answer before Level 4
 
 1. `Lease` releases the in-flight count in `Drop` rather than an explicit
    `release()` call. Give a concrete request flow where an explicit call would
@@ -159,7 +159,7 @@ invocations still work unchanged; all four bad configs reject at startup with ex
       the default-config API, exercised by tests)
 - [x] 72 unit tests (52 from Level 3 kept green; +20 for breaker states, backoff, passive
       feed, prober-driven recovery, spec health suffix, prober mapping)
-- [ ] **Level 4 quiz — Vishwa to answer before Level 5** (questions below)
+- [ ] **Level 4 quiz — Vessey to answer before Level 5** (questions below)
 
 **Verified end-to-end (2026-08-06):** `cargo test` (72 tests); release binary driven against
 python backends on :9001–:9003, all with the **default** config (`--hc-interval 1s --hc-fail 2`,
@@ -179,7 +179,7 @@ admit trials while HalfOpen, and a prober-loop-shaped regression test now guards
 
 **Run it:** `cargo run --release -- 127.0.0.1:8080 --upstream 'api=rr:127.0.0.1:9001,127.0.0.1:9002;health=/health' --hc-interval 1s --hc-fail 2 '/**=api'`
 
-### Level 4 quiz — Vishwa to answer before Level 5
+### Level 4 quiz — Vessey to answer before Level 5
 
 1. `allows_traffic()` is true only in `Closed`, not in `HalfOpen`. Why must
    client traffic stay blocked while a recovery probe is outstanding?
@@ -250,7 +250,7 @@ admit trials while HalfOpen, and a prober-loop-shaped regression test now guards
 - [x] 99 unit tests (72 from Level 4 kept green; +27 for forwarded injection,
       append/overwrite, segment-boundary strip, query preservation, Host + XFH
       ordering, header rules, protected-header rejection, spec-option parsing)
-- [ ] **Level 5 quiz — Vishwa to answer before Level 6** (questions below)
+- [ ] **Level 5 quiz — Vessey to answer before Level 6** (questions below)
 
 **Verified end-to-end (2026-08-07):** release binary driven against a python
 echo backend on :9001 that reports the path and headers it received. **Four
@@ -276,7 +276,7 @@ served correctly, the two `;` grammars did not interfere.
 
 **Run it:** `cargo run --release -- 127.0.0.1:8080 '/api/**=127.0.0.1:9001;strip=/api;host=backend.local;remove-resp-header=Server' '/=127.0.0.1:9000'`
 
-### Level 5 quiz — Vishwa to answer before Level 6
+### Level 5 quiz — Vessey to answer before Level 6
 
 1. `X-Forwarded-For` is appended but `X-Real-IP` is overwritten. Explain why
    each choice is the secure one, and what a client could forge if we made the
@@ -371,7 +371,7 @@ served correctly, the two `;` grammars did not interfere.
       reverse / short-circuit asymmetry, request-id, base64 + constant-time
       compare, auth/authz, token-bucket refill + eviction + concurrency, config
       parsing + partition, and the rejection drain).
-- [ ] **Level 6 quiz — Vishwa to answer before Level 7** (questions below)
+- [ ] **Level 6 quiz — Vessey to answer before Level 7** (questions below)
 
 **Verified end-to-end (2026-08-09):** release binary against a python echo
 backend on :9001. **Request-id:** present on every response, a valid inbound
@@ -396,7 +396,7 @@ empty chain on the default route.
 
 **Run it:** `cargo run --release -- 127.0.0.1:8080 '/admin/**=127.0.0.1:9001;auth=basic:admin:s3cret;require-user=admin;rate=5/s' '/api/**=127.0.0.1:9001;strip=/api;rate=100/s;burst=200' '/health=127.0.0.1:9001' '/=127.0.0.1:9000'`
 
-### Level 6 quiz — Vishwa to answer before Level 7
+### Level 6 quiz — Vessey to answer before Level 7
 
 1. The trait is synchronous with a reverse `on_response` pass, not the textbook
    async `handle(req, next) -> Response`. What does the async version cost in
@@ -489,7 +489,7 @@ empty chain on the default route.
       cap/idle-timeout mechanics, the poolability predicate's five independent
       conditions, the buffer-drain check, and the configured-vs-default pool
       bound).
-- [ ] **Level 7 quiz — Vishwa to answer before Level 8** (questions below)
+- [ ] **Level 7 quiz — Vessey to answer before Level 8** (questions below)
 
 **Verified end-to-end (2026-08-10/11):** release binary against a real
 `ThreadingHTTPServer` Python backend (a `BaseHTTPRequestHandler` defaults to
@@ -555,7 +555,7 @@ knowledge-base sections framed as explanation rather than code):
   *backend* leg and none was added — this proxy sends one request per
   checkout and waits for its response before sending the next.
 
-### Level 7 quiz — Vishwa to answer before Level 8
+### Level 7 quiz — Vessey to answer before Level 8
 
 1. The poolability predicate needed a fifth condition beyond the four the
    client-leg keep-alive check already makes. What is it, and why does the
@@ -589,12 +589,12 @@ knowledge-base sections framed as explanation rather than code):
 ## Session log
 
 - **2026-07-26** — Course kickoff. Knowledge base built (all 14 levels). `rproxy` crate created. Module 1.1 taught & assigned. Repo pushed to github.com/Vasant18/Ferrum.
-- **2026-07-26 (later)** — Mode switch: Vishwa asked for direct implementation. Level 1 implemented in full (http.rs, proxy.rs, main.rs), tested end-to-end, pushed.
+- **2026-07-26 (later)** — Mode switch: Vessey asked for direct implementation. Level 1 implemented in full (http.rs, proxy.rs, main.rs), tested end-to-end, pushed.
 - **2026-07-27** — Closed two request-smuggling gaps flagged by security review (bare-LF parsing, duplicate/ambiguous framing headers). 24 tests pass; live-verified all three vectors return 400. Level 1 complete pending quiz.
 - **2026-07-28** — Level 2 (Routing) implemented: `router.rs` with host/path/method matching and specificity-based precedence; wired through proxy + main as `Arc<RouteTable>`; added `regex` dep. 36 tests pass; live-verified against two backends; pushed.
 - **2026-08-03/04** — Level 3 (Load Balancing) implemented across two sessions per the approved design (`docs/superpowers/specs/2026-08-03-level-3-load-balancing-design.md`). New `balancer.rs`: 7 algorithms, `Upstream` pools, RAII `Lease` (inflight released on every path via `Drop`; RTT gated on `mark_served`). `Route` retargeted from `String` backend to `Arc<Upstream>`; `--upstream` CLI + 3-rule resolution + startup validation. 52 tests pass (36 existing kept green). Live-verified all algorithms with 3 python backends; dead-server-still-502 confirms the Level-4 seam. Refinement over the spec: RTT recording gated behind `mark_served()` so a failed connect can't bias LRT toward dead servers.
 - **2026-08-05/06** — Level 4 (Health Checks) implemented across six subagent-driven tasks per the approved design (`.superpowers/sdd/2026-08-05-level-4-health-checks/`). Tasks 1–5: per-server three-state `Breaker` with shared passive/active feeds (filling the Level-3 `available()` seam with no `select` changes), exponential backoff (double/cap/reset), one-prober-task-per-upstream in `health.rs` (`GET /health`), a three-gate connect-retry loop in `proxy.rs` (idempotent + pre-body + cap 2), and the CLI surface (`;health=PATH` + `--hc-*`). Task 6 (this session): tidied a carried-over dead-code warning (`from_spec` now `#[allow(dead_code)]` with a why-comment; release build down from 3 warnings to 2). Live-verified against python backends: ejection trips `Closed->Open` and drops the dead server from rotation with no 502s; backoff doubles live (1→2→4s); the retry loop (which has *no* unit test) hides a dead backend on GET with `[retry 1/2]` and returns 200, does NOT replay a POST (alternating `502 200`), and caps at `[retry 2/2]`. **Found and fixed a real bug:** active-only recovery deadlocked with the default `success_threshold=2` — `probe_due` returned `None` for HalfOpen after the single admitted trial, so `consec_success` froze at 1 and the breaker wedged in HalfOpen (client traffic is blocked there too, so passive successes can't help). Fix (fix round 1): `probe_due` now keeps admitting a `HalfOpenTrial` while HalfOpen, so the prober can accumulate the successes it needs; the one-probe-per-cooldown ceiling still holds because a failed trial trips straight back to Open with a doubled backoff. Added an integration-shaped regression test that drives recovery the way the prober does (alternating `probe_due`/`record_success` per tick) and asserts `Closed` with the default threshold — the case the old direct-call unit test missed. Re-verified live with the default config (no `--hc-success` override): `HalfOpen->Closed` and 9002 rejoined 3/3/3. 72 tests pass. Full report: `.superpowers/sdd/2026-08-05-level-4-health-checks/task-6-report.md`.
 - **2026-08-07** — Level 5 (Proxy Headers & Rewriting) implemented across six subagent-driven tasks per the approved design (`.superpowers/sdd/2026-08-07-level-5-proxy-headers-rewriting/`). New `rewrite.rs`: pure sync transforms over head structs — four forwarded headers (XFF append / X-Real-IP overwrite / XFH+XFP set-if-absent), segment-aware path rewriting with query preservation, Host rewriting with pre-rewrite `original_host` capture feeding XFH, request/response header rules, a startup protected-header guardrail (Content-Length/Transfer-Encoding/Connection/Host), the route-spec `;option` grammar (severed before `=` so option values keep their `=`), `--no-forwarded`, and a fixed transform order (path → Host → forwarded → explicit rules, all before framing re-declaration). Task 6 (this session): **live end-to-end verification + docs**. Drove the release binary against a python echo backend on :9001 and confirmed all 9 checks: four forwarded headers correct; `X-Forwarded-For: 1.2.3.4` appends to `1.2.3.4, 127.0.0.1` while forged `X-Real-IP: 9.9.9.9` is replaced with `127.0.0.1`; `strip=/api` + `host=backend.local` gives the backend `"path": "/users?page=2"` and `"host": "backend.local"` while `x-forwarded-host` STILL reports the client's `example.com` (the level's core ordering guarantee); `remove-resp-header=Server` strips it from the client's response; `--no-forwarded` yields 0 forwarded headers; `;set-header=Content-Length:5` fails startup with exit 1. **Two extra regression checks (beyond the brief):** on a live request the segment-boundary strip left `/apixyz` untouched (not `/xyz`), stripped `/api/real`→`/real`, and turned `/api`→`/`; and the L4 `;health=/health` upstream suffix coexisted with an L5 `;strip/;host` route in one invocation with no grammar interference. 99 tests pass. All background processes cleaned up (`pgrep` clean). Full report: `.superpowers/sdd/2026-08-07-level-5-proxy-headers-rewriting/task-6-report.md`.
-- **2026-08-09** — Level 6 (Middleware) implemented inline in one session (not subagent-driven) per the approved design (`docs/superpowers/specs/2026-08-09-level-6-middleware-design.md`) and plan (`docs/superpowers/plans/2026-08-09-level-6-middleware.md`), across the plan's 7 tasks. New `middleware/` directory: a synchronous two-phase `Middleware` trait (`on_request` forward / `on_response` reverse — the onion without owning the streamed body, so no `async fn`-in-trait boxing and no new deps), `Chain` with short-circuit + entered-layer unwind, `ReqCtx`, `Decision`/`Rejection`; five middleware — request-id + access-log (`observe.rs`), Basic/Bearer auth + require-user authz (`auth.rs`; own base64 + constant-time compare), token-bucket rate limit (`ratelimit.rs`; 16-shard `std::sync::Mutex`, lazy refill, no timer, socket-IP key, fail-open eviction). Wired into `serve_one` AFTER routing and BEFORE the balancer lease (a rejection takes no lease / opens no socket / never touches the breaker), with a bounded 64 KB rejection drain to avoid the close-time TCP-RST that would nuke the 429/401. Per-route config via an option partition in `router.rs` (the single arbiter of "unknown option"; `rewrite::L5_KEYS` vs `middleware::L6_KEYS`), so `rewrite.rs` needed no change. `--no-request-id`/`--no-access-log` applied even to the catch-all defaults. **Design refinements over the plan:** kept the partition as the unknown-key arbiter (plan had proposed relaxing `rewrite.rs`'s error arm — unnecessary once the partition guarantees each parser sees only its keys); added a `Chain.summary` field so the startup banner shows per-layer tunables (`ratelimit(5/s burst=5)`) rather than bare names, which also made `MiddlewareConfig::describe` genuinely used. 152 tests pass (104 from L5 kept green, +48). Release build back to the 4-warning baseline (one new `Chain::new` warning resolved with `#[allow(dead_code)]` + why-comment, matching the `for_test`/`from_spec` precedent). Live-verified all checklist items incl. the ordering proof (`401×5 then 429×5`), 403≠401 via a two-cred/one-allow route, drain+keep-alive over pipelined POST bodies (raw-byte inspected), zero backend hits for rejections, and all startup guardrails. Background processes cleaned (`pgrep` clean). Not committed — working tree left for Vishwa to commit (repo history is all unsigned; he commits himself).
+- **2026-08-09** — Level 6 (Middleware) implemented inline in one session (not subagent-driven) per the approved design (`docs/superpowers/specs/2026-08-09-level-6-middleware-design.md`) and plan (`docs/superpowers/plans/2026-08-09-level-6-middleware.md`), across the plan's 7 tasks. New `middleware/` directory: a synchronous two-phase `Middleware` trait (`on_request` forward / `on_response` reverse — the onion without owning the streamed body, so no `async fn`-in-trait boxing and no new deps), `Chain` with short-circuit + entered-layer unwind, `ReqCtx`, `Decision`/`Rejection`; five middleware — request-id + access-log (`observe.rs`), Basic/Bearer auth + require-user authz (`auth.rs`; own base64 + constant-time compare), token-bucket rate limit (`ratelimit.rs`; 16-shard `std::sync::Mutex`, lazy refill, no timer, socket-IP key, fail-open eviction). Wired into `serve_one` AFTER routing and BEFORE the balancer lease (a rejection takes no lease / opens no socket / never touches the breaker), with a bounded 64 KB rejection drain to avoid the close-time TCP-RST that would nuke the 429/401. Per-route config via an option partition in `router.rs` (the single arbiter of "unknown option"; `rewrite::L5_KEYS` vs `middleware::L6_KEYS`), so `rewrite.rs` needed no change. `--no-request-id`/`--no-access-log` applied even to the catch-all defaults. **Design refinements over the plan:** kept the partition as the unknown-key arbiter (plan had proposed relaxing `rewrite.rs`'s error arm — unnecessary once the partition guarantees each parser sees only its keys); added a `Chain.summary` field so the startup banner shows per-layer tunables (`ratelimit(5/s burst=5)`) rather than bare names, which also made `MiddlewareConfig::describe` genuinely used. 152 tests pass (104 from L5 kept green, +48). Release build back to the 4-warning baseline (one new `Chain::new` warning resolved with `#[allow(dead_code)]` + why-comment, matching the `for_test`/`from_spec` precedent). Live-verified all checklist items incl. the ordering proof (`401×5 then 429×5`), 403≠401 via a two-cred/one-allow route, drain+keep-alive over pipelined POST bodies (raw-byte inspected), zero backend hits for rejections, and all startup guardrails. Background processes cleaned (`pgrep` clean). Not committed — working tree left for Vessey to commit (repo history is all unsigned; he commits himself).
 - **2026-08-10/11** — Level 7 (Performance) implemented via subagent-driven development across the plan's 7 tasks (`docs/superpowers/plans/2026-08-10-level-7-performance.md`, design at `docs/superpowers/specs/2026-08-10-level-7-performance-design.md`). Per-`Server` bounded LIFO idle-connection pool (`balancer.rs`: `PooledConn`, `Server.idle`, `Lease::take_conn`/`return_conn`) with lazy idle-timeout eviction and no background sweeper; a five-condition `is_poolable` predicate and `Conn::buffer_is_empty` (`proxy.rs`); a `BACKEND_RESPONSE_TIMEOUT` closing a real gap (a hung backend previously blocked forever with no client-visible error and no breaker signal); all wired into `serve_one` (pool-hit skips the connect+timeout entirely, backend leg now asks for `Connection: keep-alive`, poolability captured immediately after the response head is parsed — before the client-leg framing block rewrites the same fields); three global CLI flags (`--pool-max-idle`, `--pool-idle-timeout`, `--backend-timeout`) following the `--hc-*` pattern. 168 tests pass; release build holds the 4-warning baseline throughout every task. **Plan quality note:** during Task 1, the first implementer caught two real bugs in the plan text itself before writing any final code — a test whose push order couldn't produce the behavior its own comment claimed, and a missing `#[allow(dead_code)]` that would have broken the warning-baseline constraint — both fixed at the plan source (not just the dispatch message) so every downstream task's brief was already correct. During Task 6, a second implementer found and self-resolved an unanticipated consequence (`Server::new` becoming production-dead once its callers moved to a pool-config-aware constructor) using the exact same `from_spec` precedent, independently confirmed by that task's reviewer. **The task the whole level's design most worried about — Task 5's wiring — reviewed clean**, with the reviewer independently tracing (not trusting the report) that the two ordering-sensitive fields are captured before the client-leg rewrite and consumed correctly at the final call site, confirming the exact bug caught during planning did not creep back into the implementation. Live verification (done inline, not by subagent, since it needed real background processes and iterative debugging) hit two of its own bugs — a test backend defaulting to HTTP/1.0 (Python's `BaseHTTPRequestHandler`) and a hung-backend test script whose `accept()` loop let the health prober's connection garbage-collect and RST the client's in-flight one — both diagnosed to their actual cause and fixed in the harness, not the proxy, before re-confirming all six verification checks: connection reuse, per-request `Connection: close` honored, pipelining unaffected, idle-timeout eviction, and hung-backend 504 + breaker ejection. Every task's diff was independently re-verified (test counts, exact warning sets) rather than trusting subagent-reported numbers. All 6 code-task commits pushed to `github.com/Vasant18/Ferrum` main (`7809e8e` through `3064163`) via the `switching-gh-accounts` skill, each authored solely as Vasant18 with no co-author, gh credential switched back to the personal account after every push. Background test processes cleaned (`pgrep` clean).
 - **2026-08-11 (later)** — Final whole-branch review of Level 7 (most capable model, looking at the six task-diffs as one composed feature rather than task-by-task) found one **critical cross-task interaction bug** that no individual task review could see: a pooled connection that dies between the idle-check and the first write (a genuine TOCTOU race — the backend closes it during its idle window) was neither retried nor answered. The connect-retry loop only covered `TcpStream::connect`; a pool hit broke out of that loop immediately, so the first write's failure hit a bare `?` that propagated past the already-exited retry logic straight to `handle_client`'s generic handler, which just logs and drops the connection — **no HTTP response at all**, not even a 502, for a case that should have retried on another server exactly like a failed connect already did. Confirmed independently by re-reading the actual source before dispatching a fix (not just trusting the reviewer's report). The review also caught four stale "dead until Task 5" comments that should have been removed when Task 5 removed the `#[allow(dead_code)]` attributes they were justifying. **Fix:** the non-idempotent request rewrite (`route.rules.apply_request` — appends `X-Forwarded-For`, etc.) now runs exactly once, before any connection attempt, producing a serialized `head_bytes` once; the connection-acquisition loop was extended so a write failure on either a pooled or freshly-dialed connection is handled identically to a connect failure (`mark_failure`, log, retry-or-502) — scoped *only* to the head-write, never to body-streaming or flush, since a body byte reaching a backend commits a possibly non-idempotent side effect and can never be safely replayed. Live-verified with a deliberately-poisoned pooled socket (TCP RST via `SO_LINGER`): an idempotent GET drawing the dead connection produces a `write failed` log line and a transparent retry to a healthy backend (client sees 200); a non-idempotent POST in the same situation correctly gets 502 with no replay. Fix dispatch took three attempts — two lost to transient infrastructure errors (API stream timeouts), not design problems; the correct design (serialize once, retry only the write) was worked out on the first attempt and carried forward via resume, then via a fresh self-contained brief once resume itself hit the same class of error. One agent's mid-edit had left a coherent-but-incomplete intermediate state (a duplicate rewrite block, two extra transient warnings); the next dispatch correctly detected and finished it rather than compounding it — verified by the coordinator reading the final source directly, not by trusting either report. Scoped re-review (most capable model) verdict: **ADDRESSED, no new findings**, independently re-confirmed. 168 tests pass; release build holds the exact 4-warning baseline throughout. This finding and its fix are the reason a whole-branch final review is worth the cost even after every task passed its own scoped review — cross-task composition bugs are structurally invisible to a reviewer who only ever sees one task's diff at a time.

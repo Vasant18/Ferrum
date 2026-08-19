@@ -18,7 +18,7 @@
 - **All 152 existing tests must stay green** after every task. Target ~165 tests total.
 - **`cargo build --release` must not add warnings** beyond the existing 4-warning baseline.
 - **Heavy in-code teaching comments** — "I implement, you learn" mode, matching the density in `balancer.rs`/`proxy.rs`.
-- **Do NOT commit.** Leave all changes in the working tree; Vishwa commits himself (signed or unsigned, his call each time).
+- **Do NOT commit.** Leave all changes in the working tree; Vessey commits himself (signed or unsigned, his call each time).
 
 ### Existing APIs this plan consumes (verified against source)
 
@@ -1168,7 +1168,7 @@ pgrep -f 'release/rproxy' || echo "proxy clean"
   10. Why does storing a whole `Conn<TcpStream>` in the pool (not just the raw socket) give buffer reuse "for free," and what would a separate buffer-pool abstraction have needed to reimplement?
 - Session-log entry dated today.
 
-- [ ] **Step 9: Stop and report** — final test count, warning count, verification results, everything uncommitted awaiting Vishwa's commit decision.
+- [ ] **Step 9: Stop and report** — final test count, warning count, verification results, everything uncommitted awaiting Vessey's commit decision.
 
 ---
 
