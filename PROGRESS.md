@@ -15,7 +15,7 @@ Course defined in [Build.md](Build.md). Theory reference: [Reverse-Proxy-Knowled
 | 5 | Proxy Headers & Rewriting (XFF, host/URL rewrite) | 🟢 **Implemented** (2026-08-07) | `rewrite.rs`: pure sync transforms over head structs — four forwarded headers (XFF append, X-Real-IP overwrite, XFH/XFP set-if-absent), segment-aware path rewriting (`strip`/`prefix`, query preserved), Host rewriting with original capture, request/response header rules, protected-header guardrail; route-spec `;option` grammar + `--no-forwarded`; fixed transform ordering. 99 unit tests. Live-verified all four headers, append-vs-overwrite, path+Host+response rewrite ordering, guardrail. Quiz pending. |
 | 6 | Middleware (pipeline, auth, rate limiting) | 🟢 **Implemented** (2026-08-09) | `middleware/` dir: sync two-phase `Middleware` trait (`on_request` fwd / `on_response` reverse) + `Chain` + `ReqCtx` + `Decision`/`Rejection`; five middleware — request-id, access-log (`observe.rs`), Basic/Bearer auth + require-user authz (`auth.rs`, constant-time + own base64), token-bucket rate limit (`ratelimit.rs`, 16-shard `std::sync::Mutex`, lazy refill, socket-IP key); fixed order log→request-id→ratelimit→auth→authz; per-route `;auth=/rate=/burst=/realm=/require-user=` via an option partition in `router.rs`; `--no-request-id`/`--no-access-log`; bounded 64 KB rejection drain in `proxy.rs`. 152 unit tests. Live-verified the ordering proof (`401×5 then 429×5` on an unauth flood), 403≠401, drain+keep-alive, and that rejections never hit the backend. Quiz pending. |
 | 7 | Performance (pooling, buffers, timeouts) | 🟢 **Implemented** (2026-08-10/11) | `balancer.rs`: per-`Server` bounded LIFO idle-connection pool (`std::sync::Mutex<Vec<PooledConn>>`, lazy idle-timeout eviction, max-size cap dropping the newest on overflow) + `Lease::take_conn`/`return_conn`; `proxy.rs`: five-condition `is_poolable` predicate (framing, backend `Connection: close`, HTTP/1.1, no I/O error, drained buffer) + `Conn::buffer_is_empty`, `BACKEND_RESPONSE_TIMEOUT` around the response-head read; wired into `serve_one` (pool-hit skips connect entirely, backend leg asks for `keep-alive`, poolability captured *before* the client-leg rewrite touches the response head); `--pool-max-idle`/`--pool-idle-timeout`/`--backend-timeout` CLI flags, global only. 168 unit tests. Live-verified connection reuse (`[pooled]` tag + backend accept counts), honoring a backend's own `Connection: close`, pipelining unaffected, idle-timeout eviction, and a hung backend producing a 504 + breaker ejection. Quiz pending. |
-| 8 | Security & TLS (termination, mTLS, slowloris) | ⚪ Not started | Head-read timeout + head size cap already in place from L1 |
+| 8 | Security & TLS (termination, mTLS, slowloris) | 🟢 **Implemented** (2026-08-19/20) | `tls.rs`: rustls + tokio-rustls (`ring` provider), PEM loading, TLS1.3+1.2 with no path to anything older, ALPN pinned to `http/1.1`, mTLS as `off`/`optional`/`required` via `WebPkiClientVerifier`, 4 startup guardrails, `TLS_HANDSHAKE_TIMEOUT`; `security.rs`: `ConnLimiter` (global + per-IP, `Drop`-released) + hand-rolled `Cidr`/`CidrList` (deny-beats-allow, allow-list is default-deny, IPv4-mapped normalized) + `Limits`/`parse_size`; `proxy.rs`: `handle_client`/`serve_one` now generic over `S: AsyncRead + AsyncWrite + Unpin`, `scheme` threaded into `ForwardContext` (fills the L5 seam), `BodyCopy` + `copy_body_limited` enforcing the body cap mid-stream, 431 on header count, 413 on body; `main.rs`: handshake moved INSIDE the spawned task, 10 CLI flags. 214 unit tests. Live-verified TLS, mTLS reject/admit, 413/431, CIDR, connection cap, slot reuse, and that 3 stalled handshakes don't block the accept loop. Quiz pending. |
 | 9 | OS Internals (epoll/kqueue, Tokio internals) — theory | ⚪ Not started | |
 | 10 | Observability (logs, metrics, tracing) | ⚪ Not started | Currently println/eprintln placeholders |
 | 11 | Caching (LRU, TTL, ETag, revalidation) | ⚪ Not started | |
@@ -586,6 +586,260 @@ knowledge-base sections framed as explanation rather than code):
     socket) give buffer reuse "for free," and what would a separate
     buffer-pool abstraction have needed to reimplement?
 
+## Level 8 — what was built
+
+- [x] **`tls.rs` — the one place this course stops building from scratch.**
+      `rustls` + `tokio-rustls`, with the crypto provider pinned to **`ring`**
+      rather than the `aws-lc-rs` default: a far lighter build with no
+      cmake/NASM toolchain requirement. First new dependencies since Level 2's
+      `regex`, and the knowledge base names hand-rolling crypto or certificate
+      parsing as this level's mistake #1 — the failure mode is not a visible bug,
+      it is a silent loss of confidentiality.
+- [x] **Levels 1–7 run over TLS completely unchanged**, because Level 1 made
+      `Conn<S>` generic over `S: AsyncRead + AsyncWrite + Unpin` instead of
+      concrete over `TcpStream`, and `tokio_rustls::server::TlsStream` satisfies
+      both. Seven levels later that single decision *is* this level's entire
+      integration cost: `handle_client` and `serve_one` were the only two
+      signatures pinning the concrete type. Generics rather than an
+      `enum Stream { Plain, Tls }` — this is the hottest loop in the program and
+      an enum would cost a match on every read and write; the price is two
+      monomorphized copies in the binary, the right trade for a proxy.
+- [x] **The handshake runs INSIDE the spawned task, never in the accept loop.**
+      The most important decision in the level, and it is about our code, not
+      rustls. Awaiting `acceptor.accept()` in the accept loop would let one
+      client that connects and sends a single `ClientHello` byte stall *every*
+      new connection process-wide — a one-attacker, one-line total denial of
+      service that would pass every functional test, because a proxy serving one
+      client at a time still works perfectly. Level 1's own comment on that loop
+      already stated the rule ("anything slow in this loop delays every new
+      client"); TLS is where breaking it becomes catastrophic rather than slow.
+- [x] **`TLS_HANDSHAKE_TIMEOUT` (10s)** — the TLS-layer analogue of Level 1's
+      `HEAD_READ_TIMEOUT`, and not optional: without it slowloris simply moves
+      one layer down. A connection stuck mid-handshake never produces a request
+      head, so the head deadline never *arms*, let alone fires. Deliberately
+      tighter than the 30s head deadline — a handshake is a fixed small number
+      of round trips with no user think-time in it.
+- [x] **mTLS as three modes** (`off`/`optional`/`required`) via
+      `WebPkiClientVerifier` against `--tls-client-ca`. `optional` exists because
+      it is the only safe migration path: enable it, watch which callers actually
+      present certificates, *then* flip to `required`. Going straight to
+      `required` on a live listener is an outage. A misspelled mode is a startup
+      error, never a silent downgrade — quietly reading `requried` as `off` would
+      disable client authentication on a listener whose operator believes it is
+      enforced.
+- [x] **Four startup guardrails, both directions of the trap** (exit 1, the
+      Level-5/6 discipline): cert without key, key without cert, client-auth with
+      no CA to validate against, and — the inverse, easier-to-miss one — a CA
+      supplied while client-auth is off, where the bundle would be loaded, never
+      consulted, and read as enforcement to whoever wrote the config. TLS is
+      built **before** `bind`, so a bad certificate fails with no socket ever
+      opened.
+- [x] **`security.rs` — armoring, answering this level's threat table.**
+      `ConnLimiter` gives a global ceiling plus a per-source-IP cap, checked
+      before the spawn (the check has to be cheaper than the attack). This is the
+      piece Level 1's per-connection deadline *cannot* provide: a deadline does
+      not help when the attacker simply opens more connections. Released by
+      `Drop` on an RAII guard — the Level 3 `Lease` pattern, for a sharper
+      version of the same reason: a connection ends on many paths (clean close,
+      parse error, head timeout, failed handshake, a task unwinding from a
+      panic), an explicit `release()` will eventually be missed on one, and a
+      leaked *connection slot* is permanent where a leaked in-flight count merely
+      biases least-connections.
+- [x] **Three subtleties in the limiter that a naive version gets wrong.**
+      (1) The global claim uses `fetch_update`, not `load`-then-`fetch_add`, so
+      two accepts cannot both observe `total == max - 1` and both proceed —
+      unlike Level 4's breaker counters, where a lost increment merely delays a
+      state change, a lost increment here means the ceiling does not hold.
+      (2) A per-IP refusal **rolls back** the global claim it already made,
+      otherwise a source hammering its own cap would leak the global counter to
+      exhaustion and take the whole listener down — the refusal path becoming the
+      outage. (3) The map entry is *removed* when a source's last connection
+      closes, not left at zero, or the map grows one permanent entry per address
+      ever seen: a slow memory leak reachable by a source-address scan.
+- [x] **Hand-rolled CIDR allow/deny**, no new dependency (the practice this
+      project already follows for FNV-1a in L3, duration parsing in L4, base64
+      and constant-time compare in L6). Matched against the **socket peer
+      address only**, never `X-Forwarded-For` — Level 5 took this stance for
+      `X-Real-IP` and Level 6 for the rate-limit key, and this is the third time:
+      a deny list keyed on something the client controls is not a deny list.
+      Deny beats allow (a broad `--allow-cidr 10.0.0.0/8` must not silently
+      re-admit a host the operator just banned) and a non-empty allow list is
+      default-deny (otherwise `--allow-cidr` is a no-op).
+- [x] **IPv4-mapped normalization at the edge.** A listener on `[::]` reports an
+      IPv4 client as `::ffff:203.0.113.7`. Without collapsing that once, at the
+      edge, an operator's perfectly reasonable `--deny-cidr 203.0.113.0/24`
+      matches nothing — a deny list that appears configured and enforces
+      *nothing*, which is the worst available failure mode for this feature.
+- [x] **A denied connection is closed with no response — deliberately not 403,
+      reversing the design doc.** nginx's `deny` does answer 403, so 403 was the
+      obvious default and is what the spec originally said. But on a TLS listener
+      the proxy cannot send any HTTP status without first completing a handshake,
+      and handshaking for an address already refused means spending an
+      RSA/ECDHE operation on the attacker's behalf — turning the cheapest
+      rejection in the system into one of the most expensive. Both alternatives
+      were worse: 403 on plaintext but drop on TLS means one config behaving two
+      ways depending on a flag, and handshake-then-403 everywhere is a DoS
+      amplifier. The connection limits shed load the same way, so the two gates
+      stay consistent.
+- [x] **Body caps enforced WHILE streaming**, never buffer-then-check — this
+      level's named mistake #1 ("the damage is done"). Level 1's windowed copy
+      loop is what makes the correct version cheap: a loop already sees every
+      byte, so enforcement is a running total and a comparison, not a new
+      mechanism. The framings are deliberately asymmetric: a declared
+      `Content-Length` is knowable before any byte moves, so an over-cap request
+      is refused with **413 before routing, before the middleware chain, and
+      before any backend socket opens** — strictly better than
+      stream-and-abort, since the client gets a clean answer and the backend is
+      never contacted. `Chunked` has no declared size, so mid-stream at a chunk
+      boundary is the *only* possible enforcement point, and by then the head is
+      already at the backend: that exchange is unsalvageable by construction and
+      closes both legs.
+- [x] **The chunked cap counts decoded payload, not wire bytes.** Framing
+      overhead is attacker-controlled — a million 1-byte chunks carry a megabyte
+      of framing around a megabyte of data — so a wire-byte cap would reject
+      honest large-chunk requests while admitting pathological small-chunk ones.
+      The overhead is separately bounded by `read_line`'s buffer check.
+- [x] **`BodyCopy { Done { reusable }, TooLarge }` instead of
+      `io::Result<bool>`.** "Too large" is not an I/O error and must not be
+      handled like one: the socket is healthy, the client is well-behaved by
+      TCP's standards, and the right answer is a specific HTTP status rather than
+      a dropped connection with a logged errno. A distinct variant forces the
+      caller to decide — a `?` cannot silently swallow a limit breach into the
+      generic error path, which is exactly the property wanted at a security
+      boundary.
+- [x] **Header count capped at 431** (RFC 6585). Level 1's 16 KB
+      `MAX_HEAD_BYTES` bounds head *size* but not field *count*: ~8,000 one-byte
+      header lines fit inside that budget, and every one multiplies the linear
+      header scans this proxy performs per request (routing, hop-by-hop
+      stripping, rewriting, framing, the middleware chain). Checked before
+      routing, so the work is refused before it starts.
+- [x] **Filled the Level 5 seam.** `proxy.rs` had carried
+      `scheme: "http", // Level 8 sets "https" after TLS termination` since
+      Level 5; `X-Forwarded-Proto` now reports what the client actually spoke.
+      It is the *listener's* scheme, never a client-supplied hint — a backend
+      gating secure cookies or redirect-to-HTTPS on that header must be reading
+      an observation, not an assertion.
+- [x] **Secure defaults.** TLS is opt-in (every Level 1–7 invocation still
+      works untouched), but the armoring half is ON by default with safe values:
+      an unbounded listener is a memory-exhaustion primitive, not a neutral
+      default. rustls gives no path to SSLv3 or TLS 1.0/1.1 at all — that
+      absence is the strongest form of "the config a lazy user gets must be the
+      safe one," a config where the unsafe option cannot be typed. Plus a
+      warning when a private key is readable beyond its owner (warn, not refuse:
+      key material legitimately arrives group-readable from plenty of secret
+      managers, and a proxy that will not start over a permission bit it merely
+      dislikes is one operators route around).
+- [x] 214 unit tests (168 from Level 7 kept green; +13 `tls`, +26 `security`,
+      +7 `proxy` body-cap). Release build holds the exact 4-warning baseline —
+      and the two dead-code warnings this level introduced were resolved by
+      **making the methods real** rather than by `#[allow(dead_code)]`:
+      `in_flight` now reports the in-flight count on every refusal line (the
+      number that distinguishes "one abusive source" from "genuinely at
+      capacity"), and `is_empty` suppresses the banner's access line when no
+      policy exists.
+- [ ] **Level 8 quiz — Vessey to answer before Level 9** (questions below)
+
+**Verified end-to-end (2026-08-20):** release binary against a
+`ThreadingHTTPServer` echo backend on :9001, with a self-signed server
+certificate (SAN `DNS:localhost,IP:127.0.0.1`) and a separate test CA issuing a
+`clientAuth` certificate for the mTLS checks.
+
+- **TLS termination:** `curl https://localhost:8443/hello` → 200 relayed to the
+  backend, banner reporting `(https)` and `TLS1.3+1.2, client-auth=Off`.
+- **The Level 5 seam:** the backend received `x-forwarded-proto: https`
+  alongside `x-forwarded-for`, `x-real-ip`, and `x-forwarded-host` — the whole
+  point of threading `scheme` through.
+- **mTLS `required` both ways:** no client certificate → handshake refused with
+  `tls handshake failed: peer sent no certificates`; a CA-issued client
+  certificate → 200, request served.
+- **413 and 431:** with `--max-body 100 --max-headers 5`, a 50-byte body → 200,
+  a 500-byte body → `413 Payload Too Large`, 12 headers →
+  `431 Request Header Fields Too Large`.
+- **Rejections cost the backend nothing:** a baseline-versus-after hit count
+  across one 413 and one 431 showed the backend saw *only* the two measurement
+  probes — zero rejected requests reached it.
+- **CIDR both semantics:** `--deny-cidr 127.0.0.0/8` refused our connection
+  (`refused: address not permitted`); `--allow-cidr 10.0.0.0/8`, which excludes
+  us, *also* refused — confirming a non-empty allow list is default-deny rather
+  than merely additive.
+- **Connection cap and slot reuse:** with `--max-conns-per-ip 3`, six
+  slowloris-shaped connections gave exactly 3 held and 3 refused, each refusal
+  logged with the in-flight count; after closing them a fresh request returned
+  200, proving `Drop` released the slots.
+- **The accept-loop guarantee, measured:** with **three handshakes deliberately
+  stalled** (one TLS record byte, then silence), a real client was served in
+  **0.03s**. This is the level's central claim and the one thing a unit test
+  cannot check.
+- **The handshake deadline fires:** a stalled connection was closed at exactly
+  **10.0s** with `tls handshake timed out after 10s`.
+- **Backward compatibility:** the Level 1 shorthand
+  `rproxy LISTEN BACKEND` → 200 unchanged; and an invocation combining L4
+  `--upstream …;health=`, L5 `;strip=`, L6 `;rate=`, and L7 `--pool-max-idle`
+  served correctly with `/api/users` still arriving as `/users`.
+- **All 8 startup guardrails** exit 1 with a specific, actionable message.
+- **A verification bug worth recording.** The first guardrail run reported all
+  four cases exiting 1 and *looked* like a pass. It was not: unquoted `$args` in
+  **zsh does not word-split** (unlike bash), so each flag pair arrived as one
+  argument, fell through to the route-spec arm, and exited 1 with `route spec
+  missing '=TARGET'` — the right exit code for entirely the wrong reason. Caught
+  by reading the error text instead of the exit status, and re-run through a
+  shell function taking `"$@"`. Level 7's verification hit this class twice (a
+  Python backend defaulting to HTTP/1.0, a test script whose `accept()` loop let
+  the health prober's socket garbage-collect and RST the client's); the standing
+  lesson is that **a passing test harness is itself untested code.** Separately,
+  one new unit test wrote 200 KB into `conn_with`'s 64 KB duplex and deadlocked
+  the suite — the test's bug, not the proxy's; reduced to 32 KB, which still
+  exercises the multi-window path.
+
+**Run it (TLS):** `cargo run --release -- 127.0.0.1:8443 --tls-cert server-cert.pem --tls-key server-key.pem '/=127.0.0.1:9001'`
+
+**Run it (mTLS + armoring):** `cargo run --release -- 127.0.0.1:8443 --tls-cert server-cert.pem --tls-key server-key.pem --tls-client-ca ca-cert.pem --tls-client-auth required --max-conns-per-ip 32 --max-body 1m --deny-cidr 203.0.113.0/24 '/=127.0.0.1:9001'`
+
+### Level 8 quiz — Vessey to answer before Level 9
+
+1. `Conn<S>` was generic from Level 1 and this level finally used it. Name the
+   two signatures that had to change, and explain why `set_nodelay` could not
+   stay where it was.
+2. The TLS handshake is awaited inside the spawned task, not in the accept loop.
+   Describe the exact attack the other placement enables, and say why every
+   functional test would still pass.
+3. There are now two deadlines that both defend against slowloris
+   (`HEAD_READ_TIMEOUT` and `TLS_HANDSHAKE_TIMEOUT`). Why does the first one not
+   cover the case the second one does?
+4. `ClientAuth::Optional` looks strictly weaker than `Required`. What is it for,
+   and what breaks if you skip it?
+5. Two of the four TLS startup guardrails catch a *missing* thing; one catches a
+   *present* thing (`--tls-client-ca` with client-auth off). Why is that third
+   one worth an exit-1 rather than a warning?
+6. `try_acquire` claims the global counter with `fetch_update` rather than
+   `load` then `fetch_add`. Level 4's breaker happily uses `Relaxed` atomics and
+   tolerates lost increments. What makes this counter different?
+7. A per-IP refusal rolls back the global claim. Construct the outage that
+   happens if it does not.
+8. The per-IP map removes an entry when a source's last connection closes,
+   rather than leaving a zero. What attack does that prevent?
+9. A denied CIDR closes the connection instead of answering 403, even though
+   nginx answers 403. Give the TLS-specific reason, and say why "403 on
+   plaintext, drop on TLS" would be worse than either consistent choice.
+10. `Content-Length` over the cap is refused before routing, but a chunked body
+    over the cap is only caught mid-stream. Explain why the second case leaves
+    *both* connections unusable, and why that is unavoidable rather than a
+    shortcoming of the implementation.
+11. The chunked cap counts decoded payload rather than bytes on the wire.
+    Construct the request that would defeat a wire-byte cap.
+12. Body-too-large is a `BodyCopy::TooLarge` variant rather than an
+    `io::Error`. What specifically goes wrong if it were an error that callers
+    reach with `?`?
+13. Level 1 already caps the head at 16 KB. Why was a separate header-*count*
+    cap still needed, and what does the count protect that the byte cap does
+    not?
+14. `X-Forwarded-Proto` is set from the listener's scheme rather than from
+    anything the client sent. Name a concrete backend behaviour that becomes a
+    vulnerability if you trust the client's value instead.
+15. An IPv4 client on a `[::]` listener arrives as `::ffff:a.b.c.d`. Describe
+    the failure an operator would see if `normalize_peer` did not exist, and why
+    it is more dangerous than an outright error.
+
 ## Session log
 
 - **2026-07-26** — Course kickoff. Knowledge base built (all 14 levels). `rproxy` crate created. Module 1.1 taught & assigned. Repo pushed to github.com/Vasant18/Ferrum.
@@ -598,3 +852,4 @@ knowledge-base sections framed as explanation rather than code):
 - **2026-08-09** — Level 6 (Middleware) implemented inline in one session (not subagent-driven) per the approved design (`docs/superpowers/specs/2026-08-09-level-6-middleware-design.md`) and plan (`docs/superpowers/plans/2026-08-09-level-6-middleware.md`), across the plan's 7 tasks. New `middleware/` directory: a synchronous two-phase `Middleware` trait (`on_request` forward / `on_response` reverse — the onion without owning the streamed body, so no `async fn`-in-trait boxing and no new deps), `Chain` with short-circuit + entered-layer unwind, `ReqCtx`, `Decision`/`Rejection`; five middleware — request-id + access-log (`observe.rs`), Basic/Bearer auth + require-user authz (`auth.rs`; own base64 + constant-time compare), token-bucket rate limit (`ratelimit.rs`; 16-shard `std::sync::Mutex`, lazy refill, no timer, socket-IP key, fail-open eviction). Wired into `serve_one` AFTER routing and BEFORE the balancer lease (a rejection takes no lease / opens no socket / never touches the breaker), with a bounded 64 KB rejection drain to avoid the close-time TCP-RST that would nuke the 429/401. Per-route config via an option partition in `router.rs` (the single arbiter of "unknown option"; `rewrite::L5_KEYS` vs `middleware::L6_KEYS`), so `rewrite.rs` needed no change. `--no-request-id`/`--no-access-log` applied even to the catch-all defaults. **Design refinements over the plan:** kept the partition as the unknown-key arbiter (plan had proposed relaxing `rewrite.rs`'s error arm — unnecessary once the partition guarantees each parser sees only its keys); added a `Chain.summary` field so the startup banner shows per-layer tunables (`ratelimit(5/s burst=5)`) rather than bare names, which also made `MiddlewareConfig::describe` genuinely used. 152 tests pass (104 from L5 kept green, +48). Release build back to the 4-warning baseline (one new `Chain::new` warning resolved with `#[allow(dead_code)]` + why-comment, matching the `for_test`/`from_spec` precedent). Live-verified all checklist items incl. the ordering proof (`401×5 then 429×5`), 403≠401 via a two-cred/one-allow route, drain+keep-alive over pipelined POST bodies (raw-byte inspected), zero backend hits for rejections, and all startup guardrails. Background processes cleaned (`pgrep` clean). Not committed — working tree left for Vessey to commit (repo history is all unsigned; he commits himself).
 - **2026-08-10/11** — Level 7 (Performance) implemented via subagent-driven development across the plan's 7 tasks (`docs/superpowers/plans/2026-08-10-level-7-performance.md`, design at `docs/superpowers/specs/2026-08-10-level-7-performance-design.md`). Per-`Server` bounded LIFO idle-connection pool (`balancer.rs`: `PooledConn`, `Server.idle`, `Lease::take_conn`/`return_conn`) with lazy idle-timeout eviction and no background sweeper; a five-condition `is_poolable` predicate and `Conn::buffer_is_empty` (`proxy.rs`); a `BACKEND_RESPONSE_TIMEOUT` closing a real gap (a hung backend previously blocked forever with no client-visible error and no breaker signal); all wired into `serve_one` (pool-hit skips the connect+timeout entirely, backend leg now asks for `Connection: keep-alive`, poolability captured immediately after the response head is parsed — before the client-leg framing block rewrites the same fields); three global CLI flags (`--pool-max-idle`, `--pool-idle-timeout`, `--backend-timeout`) following the `--hc-*` pattern. 168 tests pass; release build holds the 4-warning baseline throughout every task. **Plan quality note:** during Task 1, the first implementer caught two real bugs in the plan text itself before writing any final code — a test whose push order couldn't produce the behavior its own comment claimed, and a missing `#[allow(dead_code)]` that would have broken the warning-baseline constraint — both fixed at the plan source (not just the dispatch message) so every downstream task's brief was already correct. During Task 6, a second implementer found and self-resolved an unanticipated consequence (`Server::new` becoming production-dead once its callers moved to a pool-config-aware constructor) using the exact same `from_spec` precedent, independently confirmed by that task's reviewer. **The task the whole level's design most worried about — Task 5's wiring — reviewed clean**, with the reviewer independently tracing (not trusting the report) that the two ordering-sensitive fields are captured before the client-leg rewrite and consumed correctly at the final call site, confirming the exact bug caught during planning did not creep back into the implementation. Live verification (done inline, not by subagent, since it needed real background processes and iterative debugging) hit two of its own bugs — a test backend defaulting to HTTP/1.0 (Python's `BaseHTTPRequestHandler`) and a hung-backend test script whose `accept()` loop let the health prober's connection garbage-collect and RST the client's in-flight one — both diagnosed to their actual cause and fixed in the harness, not the proxy, before re-confirming all six verification checks: connection reuse, per-request `Connection: close` honored, pipelining unaffected, idle-timeout eviction, and hung-backend 504 + breaker ejection. Every task's diff was independently re-verified (test counts, exact warning sets) rather than trusting subagent-reported numbers. All 6 code-task commits pushed to `github.com/Vasant18/Ferrum` main (`7809e8e` through `3064163`) via the `switching-gh-accounts` skill, each authored solely as Vasant18 with no co-author, gh credential switched back to the personal account after every push. Background test processes cleaned (`pgrep` clean).
 - **2026-08-11 (later)** — Final whole-branch review of Level 7 (most capable model, looking at the six task-diffs as one composed feature rather than task-by-task) found one **critical cross-task interaction bug** that no individual task review could see: a pooled connection that dies between the idle-check and the first write (a genuine TOCTOU race — the backend closes it during its idle window) was neither retried nor answered. The connect-retry loop only covered `TcpStream::connect`; a pool hit broke out of that loop immediately, so the first write's failure hit a bare `?` that propagated past the already-exited retry logic straight to `handle_client`'s generic handler, which just logs and drops the connection — **no HTTP response at all**, not even a 502, for a case that should have retried on another server exactly like a failed connect already did. Confirmed independently by re-reading the actual source before dispatching a fix (not just trusting the reviewer's report). The review also caught four stale "dead until Task 5" comments that should have been removed when Task 5 removed the `#[allow(dead_code)]` attributes they were justifying. **Fix:** the non-idempotent request rewrite (`route.rules.apply_request` — appends `X-Forwarded-For`, etc.) now runs exactly once, before any connection attempt, producing a serialized `head_bytes` once; the connection-acquisition loop was extended so a write failure on either a pooled or freshly-dialed connection is handled identically to a connect failure (`mark_failure`, log, retry-or-502) — scoped *only* to the head-write, never to body-streaming or flush, since a body byte reaching a backend commits a possibly non-idempotent side effect and can never be safely replayed. Live-verified with a deliberately-poisoned pooled socket (TCP RST via `SO_LINGER`): an idempotent GET drawing the dead connection produces a `write failed` log line and a transparent retry to a healthy backend (client sees 200); a non-idempotent POST in the same situation correctly gets 502 with no replay. Fix dispatch took three attempts — two lost to transient infrastructure errors (API stream timeouts), not design problems; the correct design (serialize once, retry only the write) was worked out on the first attempt and carried forward via resume, then via a fresh self-contained brief once resume itself hit the same class of error. One agent's mid-edit had left a coherent-but-incomplete intermediate state (a duplicate rewrite block, two extra transient warnings); the next dispatch correctly detected and finished it rather than compounding it — verified by the coordinator reading the final source directly, not by trusting either report. Scoped re-review (most capable model) verdict: **ADDRESSED, no new findings**, independently re-confirmed. 168 tests pass; release build holds the exact 4-warning baseline throughout. This finding and its fix are the reason a whole-branch final review is worth the cost even after every task passed its own scoped review — cross-task composition bugs are structurally invisible to a reviewer who only ever sees one task's diff at a time.
+- **2026-08-19/20** — Level 8 (Security & TLS) implemented inline **in one pass, straight from the design to code**, at Vessey's explicit instruction to skip the approval ceremony and execute in "auto mode" — the first level built without either a subagent-driven task sequence (L4/L5/L7) or a pre-written plan reviewed before coding (L6). Design at `docs/superpowers/specs/2026-08-19-level-8-security-tls-design.md`; the plan (`docs/superpowers/plans/2026-08-19-level-8-security-tls.md`) was written *after* the code, as a record rather than a brief. New `tls.rs`: rustls + tokio-rustls with the crypto provider pinned to `ring` rather than the `aws-lc-rs` default (far lighter build, no cmake/NASM), PEM chain/key loading, TLS1.3+1.2 with no reachable path to anything older, ALPN pinned to `http/1.1`, mTLS as `off`/`optional`/`required` via `WebPkiClientVerifier`, four startup guardrails covering both directions of the config trap, and `TLS_HANDSHAKE_TIMEOUT`. New `security.rs`: `ConnLimiter` (global ceiling + per-IP cap, `Drop`-released via the L3 `Lease` pattern, `fetch_update` for the global claim, rollback on per-IP refusal, map-entry removal on last close) plus hand-rolled `Cidr`/`CidrList` (deny-beats-allow, non-empty allow list is default-deny, socket-peer only, IPv4-mapped normalized at the edge) plus `Limits`/`parse_size`. `proxy.rs`: `handle_client`/`serve_one` made generic over `S: AsyncRead + AsyncWrite + Unpin` — the only two signatures that had pinned `TcpStream`, since Level 1 already made `Conn<S>` generic, which is why all seven prior levels run over TLS with no other change; `scheme` threaded into `ForwardContext`, filling the seam L5 left behind; `BodyCopy` + `copy_body_limited` enforcing the body cap mid-stream on decoded payload; 431 on header count and 413 on body, both before routing. `main.rs`: the handshake moved **inside** the spawned task (awaiting it in the accept loop would let a single `ClientHello` byte stall every new connection process-wide — a one-attacker total DoS that passes every functional test), ten new CLI flags, and TLS built before `bind`. **Two decisions reversed from the design during implementation, both recorded rather than quietly applied:** a denied CIDR closes the connection instead of answering 403 (on a TLS listener a 403 would require completing a handshake for an address already refused — spending an RSA/ECDHE operation on the attacker's behalf, turning the cheapest rejection into one of the most expensive), and the two dead-code warnings the level introduced were resolved by making `in_flight`/`is_empty` genuinely used rather than by `#[allow(dead_code)]`. 214 tests pass (168 from L7 kept green, +46); release build holds the exact 4-warning baseline. Live-verified all 15 checks incl. mTLS reject/admit, 413/431 with zero backend hits for rejections, both CIDR semantics, the per-IP cap with slot reuse proving `Drop` released, the 10.0s handshake deadline firing, backward compatibility for the L1 shorthand and a combined L4+L5+L6+L7 invocation, and — the level's central claim, unreachable by unit test — **three deliberately stalled handshakes while a real client was served in 0.03s**. **Process cost of skipping the plan-first flow, recorded because it is the point:** the design/code divergence on the 403 went uncaught until live verification, where a subagent-driven level would have had a reviewer read the plan against the diff. Two harness bugs also found: a first guardrail run that reported four passes but was worthless because **unquoted `$args` in zsh does not word-split** (each flag pair fell through to the route-spec arm and exited 1 for the wrong reason — caught by reading the error text, not the exit status), and a unit test that deadlocked the suite by writing 200 KB into a 64 KB duplex. Both were the harness's bugs, not the proxy's; L7 hit the same class twice, and the standing lesson is that a passing test harness is itself untested code. Background processes cleaned (`pgrep` clean). Commits `baff59b` (name correction) and `ead48a2` (the WIP push, made before verification at Vessey's request) pushed to `github.com/Vasant18/Ferrum` main as Vasant18 via the `switching-gh-accounts` skill, gh credential switched back to the personal account afterwards.

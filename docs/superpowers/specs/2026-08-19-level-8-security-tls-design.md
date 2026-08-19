@@ -140,7 +140,24 @@ reason. A prefix match on 4 or 16 bytes is smaller than any of those.
 
 Matching is against the **socket peer address only**, never `X-Forwarded-For`.
 Level 5 took this stance for `X-Real-IP` and Level 6 for the rate-limit key; a
-deny list keyed on a client-supplied header is not a deny list. Denied → 403.
+deny list keyed on a client-supplied header is not a deny list.
+
+**A denied connection is closed without a response** — no 403.
+
+This reverses what an earlier draft of this document said, and the reversal is
+the interesting part. nginx's `deny` does answer 403, so 403 was the obvious
+default. But on a TLS listener the proxy cannot send *any* HTTP status without
+first completing a handshake, and completing a handshake for an address we have
+already decided to refuse means spending an RSA/ECDHE operation on behalf of the
+attacker — turning the cheapest rejection in the system into one of the most
+expensive. The alternatives were both worse: answer 403 on the plaintext
+listener but drop on the TLS one (the same config behaving differently depending
+on a flag, which is how operators get surprised), or handshake-then-403
+everywhere (a DoS amplifier).
+
+So the check sits before the handshake and before the task spawn, and the
+connection simply closes. Level 8's connection limits shed load the same way for
+the same reason, which makes the two gates consistent with each other.
 
 ### 8. Secure defaults
 
@@ -155,7 +172,7 @@ a private key file is group- or world-readable.
 ```
 accept()
   |
-  +-- CIDR deny/allow check ......... 403, before any allocation
+  +-- CIDR deny/allow check ......... close, before any allocation
   +-- connection limits ............ close, before spawn
   |
   spawn task

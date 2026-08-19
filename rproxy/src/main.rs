@@ -209,7 +209,13 @@ async fn main() -> std::io::Result<()> {
          max-body={} max-headers={}",
         limits.max_body, limits.max_headers
     );
-    println!("  access: {}", cidrs.describe());
+    // Only print the access line when a policy actually exists. An unconditional
+    // "access: none" trains the operator to skim past the line, which is the
+    // opposite of what you want from the one banner entry that says who can
+    // reach this listener.
+    if !cidrs.is_empty() {
+        println!("  access: {}", cidrs.describe());
+    }
     for line in routes.describe() {
         println!("  route: {line}");
     }
@@ -250,7 +256,17 @@ async fn main() -> std::io::Result<()> {
                 let guard = match limiter.try_acquire(ip) {
                     Ok(g) => g,
                     Err(why) => {
-                        eprintln!("[{peer}] refused: {why}");
+                        // Report the in-flight count alongside the reason. On a
+                        // `GlobalLimit` refusal this is the number that explains
+                        // it, and on a `PerIpLimit` refusal it is the context an
+                        // operator needs to tell "one abusive source" from "we
+                        // are genuinely at capacity" — two situations with
+                        // opposite responses that otherwise look identical in
+                        // the log.
+                        eprintln!(
+                            "[{peer}] refused: {why} ({} connections in flight)",
+                            limiter.in_flight()
+                        );
                         continue;
                     }
                 };
