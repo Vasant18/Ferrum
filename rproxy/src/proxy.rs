@@ -83,6 +83,25 @@ pub struct Conn<S> {
     filled: usize,
 }
 
+/// How a body copy ended.
+///
+/// A three-state outcome rather than `io::Result<bool>` because "the body was
+/// too large" is not an I/O error and must not be handled like one: the socket
+/// is healthy, the client is well-behaved by TCP's standards, and the correct
+/// response is a specific HTTP status (413), not a dropped connection with a
+/// logged errno. Making it a distinct variant means the caller has to decide
+/// what to do about it, which is exactly the property we want at a security
+/// boundary — a `?` cannot silently swallow it into the generic error path.
+#[derive(Debug, PartialEq, Eq)]
+enum BodyCopy {
+    /// The whole body was relayed. `reusable` carries the existing keep-alive
+    /// meaning (false for until-close framing, which consumes the connection).
+    Done { reusable: bool },
+    /// The configured cap was hit. For chunked framing this means part of the
+    /// body was already forwarded and BOTH connections are desynced.
+    TooLarge,
+}
+
 impl<S: AsyncRead + AsyncWrite + Unpin> Conn<S> {
     pub fn new(stream: S) -> Self {
         Conn { stream, buf: vec![0; BUF_SIZE], filled: 0 }
@@ -139,24 +158,77 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Conn<S> {
     where
         W: AsyncWrite + Unpin,
     {
+        match self.copy_body_limited(dst, framing, None).await? {
+            BodyCopy::Done { reusable } => Ok(reusable),
+            // Unreachable with `None`, but expressed as an error rather than
+            // `unreachable!()` so a future caller that passes a cap here cannot
+            // turn a limit breach into a panic.
+            BodyCopy::TooLarge => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "body exceeded limit",
+            )),
+        }
+    }
+
+    /// Stream a body, optionally aborting once `max` decoded bytes have passed.
+    ///
+    /// The cap is enforced **during** the copy, never by buffering the body and
+    /// checking afterwards. That ordering is this level's named mistake #1 —
+    /// "reading the whole body then checking the size limit: the damage is
+    /// done." Level 1's windowed copy loop is what makes the correct version
+    /// cheap: there is already a loop that sees every byte, so enforcement is a
+    /// running total and a comparison, not a new mechanism.
+    ///
+    /// Note the asymmetry between framings, which is the interesting part:
+    ///
+    /// - `Length(n)` is knowable **before** any byte moves, so `serve_one`
+    ///   rejects an over-cap request up front and this path never sees it. That
+    ///   is strictly better than streaming-and-aborting: the client gets a clean
+    ///   413 and the backend is never contacted at all.
+    /// - `Chunked` has no declared size — that is the whole point of chunked —
+    ///   so the only possible enforcement is mid-stream, and by then the request
+    ///   head is already at the backend. The exchange is therefore *unsalvageable*:
+    ///   we stop mid-body, which leaves the backend connection desynced (it is
+    ///   still expecting chunks) and the client connection desynced (it is still
+    ///   sending them). Both must close. `TooLarge` says so rather than pretending
+    ///   the connection can be reused.
+    async fn copy_body_limited<W>(
+        &mut self,
+        dst: &mut W,
+        framing: BodyFraming,
+        max: Option<u64>,
+    ) -> io::Result<BodyCopy>
+    where
+        W: AsyncWrite + Unpin,
+    {
         match framing {
-            BodyFraming::None => Ok(true),
+            BodyFraming::None => Ok(BodyCopy::Done { reusable: true }),
             BodyFraming::Length(len) => {
+                if max.is_some_and(|m| len > m) {
+                    return Ok(BodyCopy::TooLarge);
+                }
                 self.copy_exact(dst, len).await?;
-                Ok(true)
+                Ok(BodyCopy::Done { reusable: true })
             }
-            BodyFraming::Chunked => {
-                self.copy_chunked(dst).await?;
-                Ok(true)
-            }
+            BodyFraming::Chunked => self.copy_chunked(dst, max).await,
             BodyFraming::UntilClose => {
                 // Relay whatever is buffered, then pump until EOF.
                 if self.filled > 0 {
                     dst.write_all(&self.buf[..self.filled]).await?;
                     self.filled = 0;
                 }
-                tokio::io::copy(&mut self.stream, dst).await?;
-                Ok(false)
+                // `copy` returns the byte count, which makes the cap checkable
+                // here too — but only after the fact, so an over-cap
+                // until-close body has already been forwarded. That is
+                // acceptable because a request can never legitimately use
+                // until-close framing (a client cannot signal "body ends at
+                // EOF" and still read a response), so this arm is
+                // response-side only, where the cap is `None`.
+                let n = tokio::io::copy(&mut self.stream, dst).await?;
+                if max.is_some_and(|m| n > m) {
+                    return Ok(BodyCopy::TooLarge);
+                }
+                Ok(BodyCopy::Done { reusable: false })
             }
         }
     }
@@ -214,10 +286,19 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Conn<S> {
     /// Relay a chunked body, re-encoding the framing verbatim:
     /// `<hex-size>\r\n<data>\r\n` repeated, then `0\r\n`, optional trailers,
     /// and the final blank line.
-    async fn copy_chunked<W>(&mut self, dst: &mut W) -> io::Result<()>
+    ///
+    /// `max` bounds the total *decoded* payload — the sum of the chunk sizes,
+    /// not the wire bytes. Counting decoded payload is the right choice: chunk
+    /// framing overhead is attacker-controlled (a million 1-byte chunks carry a
+    /// megabyte of framing around a megabyte of data), so a wire-byte cap would
+    /// reject honest large-chunk requests and admit pathological small-chunk
+    /// ones. The framing overhead is separately bounded by `read_line`'s
+    /// buffer-size check.
+    async fn copy_chunked<W>(&mut self, dst: &mut W, max: Option<u64>) -> io::Result<BodyCopy>
     where
         W: AsyncWrite + Unpin,
     {
+        let mut decoded: u64 = 0;
         loop {
             let size_line = self.read_line().await?;
             // Chunk extensions (";ext=val") are allowed after the size;
@@ -230,6 +311,16 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Conn<S> {
                 )
             })?;
 
+            // Enforce the cap BEFORE forwarding this chunk's header, so we stop
+            // on a clean chunk boundary rather than emitting a size line and
+            // then refusing to supply its bytes (which would desync the backend
+            // parser in a second, avoidable way on top of the truncation).
+            // `saturating_add` because both operands are attacker-controlled and
+            // a wrap would turn "absurdly large" into "under the limit."
+            if max.is_some_and(|m| decoded.saturating_add(size) > m) {
+                return Ok(BodyCopy::TooLarge);
+            }
+
             dst.write_all(format!("{size_hex}\r\n").as_bytes()).await?;
 
             if size == 0 {
@@ -239,12 +330,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Conn<S> {
                     dst.write_all(trailer.as_bytes()).await?;
                     dst.write_all(b"\r\n").await?;
                     if trailer.is_empty() {
-                        return Ok(());
+                        return Ok(BodyCopy::Done { reusable: true });
                     }
                 }
             }
 
             self.copy_exact(dst, size).await?;
+            decoded = decoded.saturating_add(size);
 
             // Each chunk's data is followed by its own CRLF.
             let sep = self.read_line().await?;
@@ -424,19 +516,36 @@ fn is_poolable(
 /// CLI value), passed alongside `routes` because — like the route table — it
 /// is fixed for the life of the process, not per request. It rides down into
 /// every `serve_one` on this connection.
-pub async fn handle_client(
-    client: TcpStream,
+/// `scheme` is what the *client* spoke to reach us — `"http"` on the plaintext
+/// listener, `"https"` once Level 8 has terminated TLS. It exists because after
+/// termination the backend receives plain HTTP and has no other way to learn
+/// that the original hop was encrypted; it rides down into `X-Forwarded-Proto`.
+///
+/// Generic over `S` rather than concrete over `TcpStream` so the same code path
+/// serves both listeners: `S` is `TcpStream` for plaintext and
+/// `tokio_rustls::server::TlsStream<TcpStream>` for TLS. `Conn<S>` was already
+/// generic (Level 1); these two signatures were the only things pinning the
+/// concrete type. Generics rather than an `enum Stream { Plain, Tls }` because
+/// this is the hottest loop in the program and an enum would cost a match on
+/// every single read and write; the price is two monomorphized copies in the
+/// binary, which is the right trade for a proxy.
+pub async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
+    client: S,
     routes: &RouteTable,
     peer: std::net::SocketAddr,
     backend_timeout: Duration,
+    scheme: &'static str,
+    limits: crate::security::Limits,
 ) {
-    // Small writes (our serialized heads) should not sit in Nagle's buffer
-    // waiting for a coalescing timer; proxies universally disable it.
-    let _ = client.set_nodelay(true);
+    // NOTE: `set_nodelay` used to live here, but it is a `TcpStream` inherent
+    // method and this function no longer knows it has one. It moved to the
+    // accept loop in `main.rs`, applied to the raw socket *before* any TLS
+    // wrap — which is also the only place it can go, since the TLS stream owns
+    // the `TcpStream` afterwards.
     let mut client = Conn::new(client);
 
     loop {
-        match serve_one(&mut client, routes, peer, backend_timeout).await {
+        match serve_one(&mut client, routes, peer, backend_timeout, scheme, limits).await {
             Ok(true) => continue,          // keep-alive: next request, same socket
             Ok(false) => return,           // clean close
             Err(e) => {
@@ -451,11 +560,13 @@ pub async fn handle_client(
 
 /// Serve exactly one exchange. Returns Ok(true) if the client connection
 /// should be kept open for another request.
-async fn serve_one(
-    client: &mut Conn<TcpStream>,
+async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
+    client: &mut Conn<S>,
     routes: &RouteTable,
     peer: std::net::SocketAddr,
     backend_timeout: Duration,
+    scheme: &'static str,
+    limits: crate::security::Limits,
 ) -> io::Result<bool> {
     // ---- 1. Read + parse the request head (with slowloris deadline) ----
     let head_bytes =
@@ -481,6 +592,25 @@ async fn serve_one(
         }
     };
 
+    // ---- 1a. Level 8: header-count cap -> 431 ----
+    // Level 1's MAX_HEAD_BYTES already bounds total head *size* at 16 KB, but
+    // not field *count*: ~8,000 one-byte header lines fit inside that budget,
+    // and every one of them multiplies the linear header scans this proxy does
+    // per request (routing, hop-by-hop stripping, rewriting, framing, the
+    // middleware chain). 431 is the status RFC 6585 defines for exactly this,
+    // and it is checked before routing so the work is refused before it starts.
+    if req.headers.len() > limits.max_headers {
+        println!(
+            "[{peer}] {} {} -> 431 ({} headers, limit {})",
+            req.method,
+            req.target,
+            req.headers.len(),
+            limits.max_headers
+        );
+        respond_error(client, 431, "Request Header Fields Too Large").await?;
+        return Ok(false);
+    }
+
     let req_framing = match http::request_body_framing(&req) {
         Ok(f) => f,
         Err(e) => {
@@ -488,6 +618,32 @@ async fn serve_one(
             return Err(e);
         }
     };
+
+    // ---- 1b. Level 8: declared-body-size cap -> 413 ----
+    // A Content-Length body announces its size before a single byte of it
+    // arrives, so this is the one case where the limit can be enforced with
+    // *zero* cost to anyone: no body read, no backend connection, no backend
+    // load at all. Chunked bodies cannot be checked here (no declared size) and
+    // are enforced mid-stream in `copy_body_limited` instead.
+    //
+    // Deliberately placed BEFORE routing and the middleware chain: an oversized
+    // request should not consume a rate-limit token or run an auth comparison,
+    // and it certainly should not open a backend socket.
+    if let BodyFraming::Length(n) = req_framing {
+        if n > limits.max_body {
+            println!(
+                "[{peer}] {} {} -> 413 (body {n} bytes, limit {})",
+                req.method, req.target, limits.max_body
+            );
+            // No drain: the point is that we never read those bytes. Sending
+            // `Connection: close` (which respond_error does) is what makes that
+            // safe — the unread body cannot desync a connection we are closing,
+            // and Level 6's drain-before-reuse rule only binds when we intend to
+            // reuse.
+            respond_error(client, 413, "Payload Too Large").await?;
+            return Ok(false);
+        }
+    }
 
     let client_keep_alive = http::wants_keep_alive(req.version, &req.headers);
     let method = req.method.clone();
@@ -587,7 +743,16 @@ async fn serve_one(
     let fwd_ctx = crate::rewrite::ForwardContext {
         client_ip: peer.ip(),
         original_host: original_host.as_deref(),
-        scheme: "http", // Level 8 sets "https" after TLS termination
+        // Level 8: this was hardcoded `"http"` with a comment naming this level
+        // as the one that would fill it in. It now reports what the client
+        // actually spoke on *this* listener. Note it is the listener's scheme,
+        // never a client-supplied hint — the same stance Level 5 took when it
+        // chose to overwrite `X-Real-IP` rather than trust it, and Level 6 took
+        // when it keyed the rate limiter on the socket peer instead of XFF. A
+        // backend making an authorization decision on `X-Forwarded-Proto`
+        // (redirect-to-HTTPS logic, secure-cookie gating) must be reading an
+        // observation, not an assertion.
+        scheme,
     };
     route.rules.apply_request(&mut req, &fwd_ctx);
     // Diagnostics for the rewrite, emitted right where the rewrite happens.
@@ -782,7 +947,35 @@ async fn serve_one(
     // reaches a backend, part of a possibly non-idempotent request is committed,
     // so a `?` from here on feeds the breaker (via the pessimistic
     // mark_failure() above) and surfaces to the client rather than replaying.
-    client.copy_body_to(&mut backend.stream_mut(), req_framing).await?;
+    //
+    // Level 8: the body cap rides along here. For `Length` framing this is
+    // already decided (an over-cap request was refused with 413 before we ever
+    // routed it), so in practice the cap only bites on `Chunked` — where no
+    // declared size exists and mid-stream is the only place enforcement is
+    // possible.
+    match client
+        .copy_body_limited(&mut backend.stream_mut(), req_framing, Some(limits.max_body))
+        .await?
+    {
+        BodyCopy::Done { .. } => {}
+        BodyCopy::TooLarge => {
+            // A chunked body that outgrew the cap after we had already forwarded
+            // part of it. Both connections are now unsalvageable: the backend is
+            // mid-body waiting for chunks it will never get, and the client is
+            // still sending them. There is no version of this where either
+            // socket can be reused, so we send a final 413 (respond_error sets
+            // `Connection: close`) and return `false` to close the client leg.
+            // `backend` drops here; the pessimistic `mark_failure()` above stays
+            // in force, which is correct — from the backend's point of view this
+            // exchange really did fail, and it never sees a poolable connection.
+            println!(
+                "[{peer}] {} {} -> 413 (chunked body exceeded {} bytes mid-stream)",
+                method, original_target, limits.max_body
+            );
+            respond_error(client, 413, "Payload Too Large").await?;
+            return Ok(false);
+        }
+    }
     backend.flush().await?;
 
     // ---- 5. Read the backend's response head, with a deadline ----
@@ -995,6 +1188,120 @@ mod tests {
         tx.write_all(data).await.unwrap();
         drop(tx); // EOF after the data
         Conn::new(rx)
+    }
+
+    // ---- Level 8: body size caps ----
+
+    /// A declared Content-Length over the cap is refused without reading the
+    /// body. Cheapest possible enforcement: the bytes never move.
+    #[tokio::test]
+    async fn length_body_over_cap_is_refused_without_copying() {
+        let mut conn = conn_with(b"0123456789").await;
+        let mut out = Vec::new();
+        let r = conn
+            .copy_body_limited(&mut out, BodyFraming::Length(10), Some(4))
+            .await
+            .unwrap();
+        assert_eq!(r, BodyCopy::TooLarge);
+        assert!(out.is_empty(), "no body byte may be forwarded when over cap");
+    }
+
+    #[tokio::test]
+    async fn length_body_at_the_cap_is_allowed() {
+        let mut conn = conn_with(b"01234").await;
+        let mut out = Vec::new();
+        // Exactly at the limit must pass — the check is `>`, not `>=`. An
+        // off-by-one here would reject a request of precisely the documented
+        // maximum size.
+        let r = conn
+            .copy_body_limited(&mut out, BodyFraming::Length(5), Some(5))
+            .await
+            .unwrap();
+        assert_eq!(r, BodyCopy::Done { reusable: true });
+        assert_eq!(out, b"01234");
+    }
+
+    /// Chunked has no declared size, so the cap can only be enforced mid-stream.
+    /// The cumulative decoded total is what counts, not any single chunk.
+    #[tokio::test]
+    async fn chunked_body_over_cap_stops_mid_stream() {
+        // Three 4-byte chunks = 12 decoded bytes, cap of 10.
+        let body = b"4\r\naaaa\r\n4\r\nbbbb\r\n4\r\ncccc\r\n0\r\n\r\n";
+        let mut conn = conn_with(body).await;
+        let mut out = Vec::new();
+        let r = conn
+            .copy_body_limited(&mut out, BodyFraming::Chunked, Some(10))
+            .await
+            .unwrap();
+        assert_eq!(r, BodyCopy::TooLarge);
+        // The first two chunks (8 bytes) were under the cap and did go through;
+        // the third would have crossed it and must not have been started. This
+        // is the documented, unavoidable consequence of chunked framing — and
+        // the reason TooLarge forces both connections closed.
+        let sent = String::from_utf8_lossy(&out);
+        assert!(sent.contains("aaaa") && sent.contains("bbbb"), "got {sent:?}");
+        assert!(!sent.contains("cccc"), "chunk crossing the cap leaked: {sent:?}");
+    }
+
+    /// A single chunk larger than the entire cap must be caught before its
+    /// header is forwarded, not after its bytes are.
+    #[tokio::test]
+    async fn single_oversized_chunk_is_caught_before_its_header() {
+        let body = b"20\r\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n0\r\n\r\n";
+        let mut conn = conn_with(body).await;
+        let mut out = Vec::new();
+        let r = conn
+            .copy_body_limited(&mut out, BodyFraming::Chunked, Some(10))
+            .await
+            .unwrap();
+        assert_eq!(r, BodyCopy::TooLarge);
+        assert!(out.is_empty(), "oversized chunk emitted framing: {out:?}");
+    }
+
+    #[tokio::test]
+    async fn chunked_body_under_cap_passes_through_whole() {
+        let body = b"4\r\naaaa\r\n4\r\nbbbb\r\n0\r\n\r\n";
+        let mut conn = conn_with(body).await;
+        let mut out = Vec::new();
+        let r = conn
+            .copy_body_limited(&mut out, BodyFraming::Chunked, Some(1024))
+            .await
+            .unwrap();
+        assert_eq!(r, BodyCopy::Done { reusable: true });
+        assert_eq!(String::from_utf8_lossy(&out), "4\r\naaaa\r\n4\r\nbbbb\r\n0\r\n\r\n");
+    }
+
+    /// `None` means uncapped, which is what the response leg passes. A large
+    /// body must not be affected by the request-side limit.
+    #[tokio::test]
+    async fn no_cap_allows_any_size() {
+        // 32 KiB: two full BUF_SIZE windows, so the multi-window path is
+        // exercised, while still fitting inside `conn_with`'s 64 KiB duplex
+        // buffer. A larger body would deadlock the *test*, not the proxy —
+        // `conn_with` writes everything before returning a reader, so anything
+        // over the pipe's capacity blocks with nobody draining it.
+        let big = vec![b'x'; 32 * 1024];
+        let mut conn = conn_with(&big).await;
+        let mut out = Vec::new();
+        let r = conn
+            .copy_body_limited(&mut out, BodyFraming::Length(big.len() as u64), None)
+            .await
+            .unwrap();
+        assert_eq!(r, BodyCopy::Done { reusable: true });
+        assert_eq!(out.len(), big.len());
+    }
+
+    /// A zero-length body is not "over" a zero cap, and `None` framing must not
+    /// consult the cap at all.
+    #[tokio::test]
+    async fn empty_body_passes_any_cap() {
+        let mut conn = conn_with(b"").await;
+        let mut out = Vec::new();
+        let r = conn
+            .copy_body_limited(&mut out, BodyFraming::None, Some(0))
+            .await
+            .unwrap();
+        assert_eq!(r, BodyCopy::Done { reusable: true });
     }
 
     #[tokio::test]

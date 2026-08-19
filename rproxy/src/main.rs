@@ -22,6 +22,8 @@ mod middleware;
 mod proxy;
 mod rewrite;
 mod router;
+mod security;
+mod tls;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -69,6 +71,16 @@ async fn main() -> std::io::Result<()> {
     // into `handle_client`, not part of pool construction.
     let mut pool_cfg = balancer::PoolConfig::default();
     let mut backend_timeout = proxy::DEFAULT_BACKEND_RESPONSE_TIMEOUT;
+    // Level 8 security surface. TLS is entirely opt-in (no flags = the same
+    // plaintext listener Levels 1-7 had), but everything in the armoring half is
+    // ON by default with safe values — this level's stated theme is that the
+    // config a lazy user gets must be the safe one, and an unbounded listener is
+    // a memory-exhaustion primitive rather than a neutral default.
+    let mut tls_args = tls::TlsArgs::default();
+    let mut max_conns = security::DEFAULT_MAX_CONNS;
+    let mut max_conns_per_ip = security::DEFAULT_MAX_CONNS_PER_IP;
+    let mut cidrs = security::CidrList::default();
+    let mut limits = security::Limits::default();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--upstream" => upstream_specs.push(next_val(&mut args, "--upstream")?),
@@ -101,6 +113,50 @@ async fn main() -> std::io::Result<()> {
             "--backend-timeout" => {
                 backend_timeout = parse_duration(&next_val(&mut args, "--backend-timeout")?)?
             }
+            // ---- Level 8: TLS termination + mTLS ----
+            "--tls-cert" => tls_args.cert = Some(next_val(&mut args, "--tls-cert")?.into()),
+            "--tls-key" => tls_args.key = Some(next_val(&mut args, "--tls-key")?.into()),
+            "--tls-client-ca" => {
+                tls_args.client_ca = Some(next_val(&mut args, "--tls-client-ca")?.into())
+            }
+            "--tls-client-auth" => {
+                tls_args.client_auth =
+                    tls::ClientAuth::parse(&next_val(&mut args, "--tls-client-auth")?)?
+            }
+            // ---- Level 8: armoring ----
+            "--max-conns" => {
+                max_conns = next_val(&mut args, "--max-conns")?
+                    .parse()
+                    .map_err(|_| bad_arg("--max-conns expects a number"))?
+            }
+            "--max-conns-per-ip" => {
+                max_conns_per_ip = next_val(&mut args, "--max-conns-per-ip")?
+                    .parse()
+                    .map_err(|_| bad_arg("--max-conns-per-ip expects a number"))?
+            }
+            "--max-body" => {
+                limits.max_body = security::parse_size(&next_val(&mut args, "--max-body")?)
+                    .map_err(|e| bad_arg(&e))?
+            }
+            "--max-headers" => {
+                limits.max_headers = next_val(&mut args, "--max-headers")?
+                    .parse()
+                    .map_err(|_| bad_arg("--max-headers expects a number"))?
+            }
+            // Repeatable: each occurrence adds one range, so an operator can
+            // write several `--deny-cidr` flags rather than inventing a
+            // comma-separated sub-grammar. A comma-separated value is also
+            // accepted for convenience.
+            "--allow-cidr" => {
+                for part in next_val(&mut args, "--allow-cidr")?.split(',') {
+                    cidrs.push_allow(security::Cidr::parse(part).map_err(|e| bad_arg(&e))?);
+                }
+            }
+            "--deny-cidr" => {
+                for part in next_val(&mut args, "--deny-cidr")?.split(',') {
+                    cidrs.push_deny(security::Cidr::parse(part).map_err(|e| bad_arg(&e))?);
+                }
+            }
             "--no-forwarded" => forwarded = false,
             "--no-request-id" => request_id = false,
             "--no-access-log" => access_log = false,
@@ -120,8 +176,40 @@ async fn main() -> std::io::Result<()> {
     )?;
     let routes = Arc::new(routes);
 
+    // Build the TLS config BEFORE binding the listener. A bad cert path, an
+    // unreadable key, or an incoherent mTLS combination should fail with exit 1
+    // and no socket ever opened — not after the process has announced itself as
+    // listening. Same startup-guardrail discipline as Level 5's protected
+    // headers and Level 6's `require-user` check.
+    let tls_config = tls_args.build()?;
+    let tls_acceptor = tls_config.map(tokio_rustls::TlsAcceptor::from);
+
+    // `sanity`: a per-IP cap above the global ceiling can never bind, which
+    // means the operator wrote one of the two numbers wrong. Warn rather than
+    // fail — the config is safe, just pointless.
+    if max_conns_per_ip > max_conns {
+        eprintln!(
+            "ferrum: WARNING --max-conns-per-ip {max_conns_per_ip} exceeds --max-conns \
+             {max_conns}; the per-IP cap can never be reached"
+        );
+    }
+    let limiter = security::ConnLimiter::new(max_conns, max_conns_per_ip);
+
     let listener = TcpListener::bind(&listen_addr).await?;
-    println!("ferrum: listening on {listen_addr}");
+    let scheme = if tls_acceptor.is_some() { "https" } else { "http" };
+    println!("ferrum: listening on {listen_addr} ({scheme})");
+    if tls_acceptor.is_some() {
+        println!(
+            "  tls: TLS1.3+1.2, client-auth={:?}",
+            tls_args.client_auth
+        );
+    }
+    println!(
+        "  limits: max-conns={max_conns} per-ip={max_conns_per_ip} \
+         max-body={} max-headers={}",
+        limits.max_body, limits.max_headers
+    );
+    println!("  access: {}", cidrs.describe());
     for line in routes.describe() {
         println!("  route: {line}");
     }
@@ -138,14 +226,115 @@ async fn main() -> std::io::Result<()> {
     loop {
         match listener.accept().await {
             Ok((stream, peer)) => {
+                // ---- Level 8 gate 1: CIDR policy ----
+                // Checked first, and on the *socket* peer address only. This is
+                // the cheapest possible rejection: no allocation, no task
+                // spawn, no TLS handshake, nothing the caller can make
+                // expensive. `normalize_peer` collapses `::ffff:a.b.c.d` to
+                // plain v4 so a dual-stack listener does not silently defeat an
+                // operator's IPv4 rules.
+                let ip = security::normalize_peer(peer);
+                if !cidrs.permits(ip) {
+                    // Dropped without a response, for the same reason as the
+                    // connection limits below: a denied source does not get to
+                    // make us do work. `stream` drops here, closing the socket.
+                    eprintln!("[{peer}] refused: address not permitted");
+                    continue;
+                }
+
+                // ---- Level 8 gate 2: connection limits ----
+                // Also before the spawn. The guard is *moved into* the task, so
+                // the slot is held for exactly the connection's lifetime and
+                // released by `Drop` on every exit path — including a failed
+                // TLS handshake and a panicking task.
+                let guard = match limiter.try_acquire(ip) {
+                    Ok(g) => g,
+                    Err(why) => {
+                        eprintln!("[{peer}] refused: {why}");
+                        continue;
+                    }
+                };
+
+                // Small writes (our serialized heads) should not sit in Nagle's
+                // buffer waiting for a coalescing timer; proxies universally
+                // disable it. This moved here from `handle_client` in Level 8:
+                // it is a `TcpStream` inherent method, and once TLS wraps the
+                // socket the generic proxy core no longer knows it has one.
+                // Setting it on the raw socket first is both necessary and
+                // correct — the option lives on the file descriptor, which the
+                // TLS stream goes on to own.
+                let _ = stream.set_nodelay(true);
+
                 // Cloning the Arc is a cheap refcount bump; every task
                 // shares one immutable route table with no locking.
                 let routes = Arc::clone(&routes);
                 // `backend_timeout` is `Copy` (a `Duration`), so the spawned
                 // task takes its own copy the same way it clones the `routes`
                 // Arc — no shared state, no locking.
+                let acceptor = tls_acceptor.clone();
                 tokio::spawn(async move {
-                    proxy::handle_client(stream, &routes, peer, backend_timeout).await;
+                    // Hold the limiter slot for the whole connection. Named
+                    // `_guard` rather than `_` because `let _ = guard;` would
+                    // drop it immediately and release the slot before the
+                    // connection had even started.
+                    let _guard = guard;
+                    match acceptor {
+                        // ---- TLS listener ----
+                        Some(acceptor) => {
+                            // THE handshake ordering decision of this level.
+                            //
+                            // This `.await` is inside the spawned task, NOT in
+                            // the accept loop above. Awaiting a handshake in the
+                            // accept loop would mean one client that connects
+                            // and sends a single ClientHello byte stalls *every*
+                            // new connection process-wide — a one-attacker,
+                            // one-line total denial of service that would pass
+                            // every functional test, because a proxy with one
+                            // client at a time still works perfectly.
+                            //
+                            // The deadline is the TLS-layer analogue of Level
+                            // 1's HEAD_READ_TIMEOUT, and it is not optional:
+                            // without it slowloris just moves one layer down. A
+                            // connection stuck mid-handshake never produces a
+                            // request head, so the head deadline never arms and
+                            // would never fire.
+                            let tls = match tokio::time::timeout(
+                                tls::TLS_HANDSHAKE_TIMEOUT,
+                                acceptor.accept(stream),
+                            )
+                            .await
+                            {
+                                Ok(Ok(s)) => s,
+                                Ok(Err(e)) => {
+                                    // A failed handshake is routine, not
+                                    // exceptional: a probe, a client that does
+                                    // not trust our cert, or — with mTLS
+                                    // `required` — a client with no certificate.
+                                    // Logged at connection level and dropped;
+                                    // there is no HTTP layer yet to answer on.
+                                    eprintln!("[{peer}] tls handshake failed: {e}");
+                                    return;
+                                }
+                                Err(_) => {
+                                    eprintln!(
+                                        "[{peer}] tls handshake timed out after {:?}",
+                                        tls::TLS_HANDSHAKE_TIMEOUT
+                                    );
+                                    return;
+                                }
+                            };
+                            // "https" is what makes X-Forwarded-Proto honest,
+                            // filling the seam Level 5 left at proxy.rs's
+                            // ForwardContext.
+                            proxy::handle_client(tls, &routes, peer, backend_timeout, "https", limits)
+                                .await;
+                        }
+                        // ---- plaintext listener (Levels 1-7, unchanged) ----
+                        None => {
+                            proxy::handle_client(stream, &routes, peer, backend_timeout, "http", limits)
+                                .await;
+                        }
+                    }
                 });
             }
             Err(e) => {
