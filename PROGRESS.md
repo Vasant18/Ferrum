@@ -16,7 +16,7 @@ Course defined in [Build.md](Build.md). Theory reference: [Reverse-Proxy-Knowled
 | 6 | Middleware (pipeline, auth, rate limiting) | 🟢 **Implemented** (2026-08-09) | `middleware/` dir: sync two-phase `Middleware` trait (`on_request` fwd / `on_response` reverse) + `Chain` + `ReqCtx` + `Decision`/`Rejection`; five middleware — request-id, access-log (`observe.rs`), Basic/Bearer auth + require-user authz (`auth.rs`, constant-time + own base64), token-bucket rate limit (`ratelimit.rs`, 16-shard `std::sync::Mutex`, lazy refill, socket-IP key); fixed order log→request-id→ratelimit→auth→authz; per-route `;auth=/rate=/burst=/realm=/require-user=` via an option partition in `router.rs`; `--no-request-id`/`--no-access-log`; bounded 64 KB rejection drain in `proxy.rs`. 152 unit tests. Live-verified the ordering proof (`401×5 then 429×5` on an unauth flood), 403≠401, drain+keep-alive, and that rejections never hit the backend. Quiz pending. |
 | 7 | Performance (pooling, buffers, timeouts) | 🟢 **Implemented** (2026-08-10/11) | `balancer.rs`: per-`Server` bounded LIFO idle-connection pool (`std::sync::Mutex<Vec<PooledConn>>`, lazy idle-timeout eviction, max-size cap dropping the newest on overflow) + `Lease::take_conn`/`return_conn`; `proxy.rs`: five-condition `is_poolable` predicate (framing, backend `Connection: close`, HTTP/1.1, no I/O error, drained buffer) + `Conn::buffer_is_empty`, `BACKEND_RESPONSE_TIMEOUT` around the response-head read; wired into `serve_one` (pool-hit skips connect entirely, backend leg asks for `keep-alive`, poolability captured *before* the client-leg rewrite touches the response head); `--pool-max-idle`/`--pool-idle-timeout`/`--backend-timeout` CLI flags, global only. 168 unit tests. Live-verified connection reuse (`[pooled]` tag + backend accept counts), honoring a backend's own `Connection: close`, pipelining unaffected, idle-timeout eviction, and a hung backend producing a 504 + breaker ejection. Quiz pending. |
 | 8 | Security & TLS (termination, mTLS, slowloris) | 🟢 **Implemented** (2026-08-19/20) | `tls.rs`: rustls + tokio-rustls (`ring` provider), PEM loading, TLS1.3+1.2 with no path to anything older, ALPN pinned to `http/1.1`, mTLS as `off`/`optional`/`required` via `WebPkiClientVerifier`, 4 startup guardrails, `TLS_HANDSHAKE_TIMEOUT`; `security.rs`: `ConnLimiter` (global + per-IP, `Drop`-released) + hand-rolled `Cidr`/`CidrList` (deny-beats-allow, allow-list is default-deny, IPv4-mapped normalized) + `Limits`/`parse_size`; `proxy.rs`: `handle_client`/`serve_one` now generic over `S: AsyncRead + AsyncWrite + Unpin`, `scheme` threaded into `ForwardContext` (fills the L5 seam), `BodyCopy` + `copy_body_limited` enforcing the body cap mid-stream, 431 on header count, 413 on body; `main.rs`: handshake moved INSIDE the spawned task, 10 CLI flags. 214 unit tests. Live-verified TLS, mTLS reject/admit, 413/431, CIDR, connection cap, slot reuse, and that 3 stalled handshakes don't block the accept loop. Quiz pending. |
-| 9 | OS Internals (epoll/kqueue, Tokio internals) — theory | ⚪ Not started | |
+| 9 | OS Internals (epoll/kqueue, Tokio internals) — theory | 🔵 **Studied** (2026-08-21) | Theory level, no production code. [`docs/level-9-os-internals.md`](docs/level-9-os-internals.md): the `read()`-blocks problem and C10K; `select`→`poll`→`epoll`/`kqueue`→`io_uring` and why O(n)→O(ready) is the whole ballgame; the full `.await`→`Waker`→reactor→`kevent` path traced through Ferrum's own `Conn::read_head`; this machine's actual stack (Darwin arm64 → **kqueue** not epoll, `mio 1.2.2`, 8 worker threads from `#[tokio::main]`); Ferrum's 3 production spawn sites and its await map (**only 3 of 13 files hold a production `.await`**; `balancer.rs` has zero); a blocking-the-executor audit that found the no-lock-across-await guarantee is **compiler-enforced**, not conventional; and nginx read back as the same architecture. Turned up 2 real findings, recorded not fixed. Quiz pending. |
 | 10 | Observability (logs, metrics, tracing) | ⚪ Not started | Currently println/eprintln placeholders |
 | 11 | Caching (LRU, TTL, ETag, revalidation) | ⚪ Not started | |
 | 12 | Production Features (graceful shutdown, config, hot reload) | ⚪ Not started | Listen/backend addrs via CLI args for now |
@@ -840,6 +840,194 @@ certificate (SAN `DNS:localhost,IP:127.0.0.1`) and a separate test CA issuing a
     the failure an operator would see if `normalize_peer` did not exist, and why
     it is more dangerous than an outright error.
 
+## Level 9 — what was studied
+
+Theory level. **No production code changed** — that is the correct outcome, not a
+shortfall: Levels 1–8 already run on this machinery, so the work was reading the
+existing code through a lower lens rather than adding to it. Full write-up in
+[`docs/level-9-os-internals.md`](docs/level-9-os-internals.md).
+
+- [x] **The problem, precisely stated.** A blocking `read()` parks the calling
+      thread, so thread-per-connection at 10k connections means 10k stacks and a
+      scheduler that does nothing but context-switch — the C10K problem. The fix
+      is to change the question from "give me data on THIS socket, I'll wait" to
+      "here are 10,000 sockets, wake me when ANY has data." Two ingredients:
+      `O_NONBLOCK` sockets and a kernel readiness API. **Ferrum never sets
+      `O_NONBLOCK` itself** — Tokio does it for every `TcpStream`/`TcpListener`,
+      which is the first thing the abstraction hides.
+- [x] **The readiness-API evolution, and why one line of it matters.**
+      `select()` (1983, O(n) scan, ~1024 FD cap) → `poll()` (1986, O(n), no cap)
+      → `epoll`/`kqueue` (2002/2000, **O(ready)**) → `IOCP`/`io_uring`
+      (completion-based: "tell me when it's DONE" rather than "tell me when I
+      may read"). The O(n)→O(ready) transition is the entire ballgame: with
+      `select`, 9,999 idle connections cost work on *every* wait; with `epoll`,
+      they cost nothing until they have data. That single property is why 10k
+      idle connections are cheap and why C10K dissolved.
+- [x] **What is actually running on this machine**, verified rather than assumed:
+      `Darwin 25.6.0 arm64` → **`kqueue`, not `epoll`**. Every mental model in
+      the knowledge base is written around epoll because Linux is where proxies
+      deploy, but the code exercised locally is the BSD path. Reactor is
+      **`mio 1.2.2`** — a *transitive* dependency, present in `Cargo.lock` and
+      never named in `Cargo.toml`. Runtime is `tokio 1.53.1` with
+      `features = ["full"]`, hence the **multi-threaded** scheduler and **8
+      worker threads** (`hw.ncpu = 8`).
+- [x] **The full path from `.await` to `kevent`**, traced through this proxy's
+      own code rather than a toy example: `serve_one` → `client.read_head()` →
+      `self.stream.read(&mut self.buf[self.filled..])` → non-blocking `read()`
+      **attempted immediately** (the fast path — data already in the kernel
+      returns with no reactor involvement at all, so async is not "always slower
+      by a scheduler hop") → on `EWOULDBLOCK`, register a `Waker` and return
+      `Pending` → executor runs other tasks and steals across workers → kernel
+      delivers bytes → `kevent()` returns → `waker.wake()` → re-poll, and **the
+      state machine resumes exactly at the await point** with every local intact,
+      because those locals are fields of the compiler-generated struct.
+- [x] **The load-bearing consequence:** an `async fn` is inert until polled.
+      There is no thread behind an un-awaited future; constructing one does no
+      work whatsoever. This is the single point that most often survives eight
+      levels of async programming as a misconception.
+- [x] **Ferrum's whole concurrency structure is three `tokio::spawn` sites:**
+      `main.rs:291` (one task per connection), `health.rs:25` (one prober per
+      upstream), `health.rs:70` (one task per concurrent probe). Task-per-
+      connection is what sidesteps C10K here — a task is a heap state machine
+      scheduled onto one of 8 workers, not a thread, so 10k connections means
+      10k parked state machines and not 10k stacks. Level 1 made that choice
+      before the project had any vocabulary to justify it; this level supplies
+      the vocabulary.
+- [x] **The await map, and the design decision hiding in it.** Counting `.await`
+      in code (excluding the comment mentions that inflate a naive `grep` here by
+      ~5%): **72 production, 61 test.** Only **three of thirteen files** contain a
+      production `.await` — `proxy.rs` (57), `health.rs` (10), `main.rs` (5).
+      Everything else is synchronous code merely *called from* async contexts.
+      `balancer.rs` is the sharpest case: 1,750+ lines of seven balancing
+      algorithms, a three-state breaker, and a LIFO connection pool with **zero**
+      production await points (its 13 are tests building real `TcpStream` pairs).
+- [x] **Four levels independently made the same optimization without naming it.**
+      L1 put parsing in `http.rs` as functions over byte slices; L5 made
+      `rewrite.rs` pure transforms over head structs ("no sockets, no async, no
+      I/O"); L6 deliberately rejected the textbook `async fn handle(req, next)`
+      middleware trait; L8 kept `tls.rs` to config construction with the
+      handshake `.await` in `main.rs`. Read through this level's lens all four are
+      one decision: **keep the generated state machine small.** Every `.await` in
+      a function makes every live local a field of its future, which is why
+      `serve_one` being long is tolerable but an async `rewrite.rs` would not
+      have been.
+- [x] **The cardinal sin, audited rather than asserted.** Blocking a worker costs
+      12.5% of capacity here and shows up as an unexplained p99 spike; blocking
+      all 8 is a hang. Three classic causes, each checked against the tree:
+      **(1) Locks across `.await` — structurally impossible.** Every production
+      function that takes a lock (`take_conn`, `return_conn`, `try_acquire`,
+      `release`, `RateLimiter::allow`) is a plain `fn`, not an `async fn`. Since
+      `.await` cannot appear in a non-async fn, **the compiler enforces this**
+      rather than a review convention. L6, L7, and L8 each wrote a comment
+      explaining their `std::sync::Mutex` choice; that signature list is the proof
+      those comments are still true. Corroborating: `tokio::sync` appears in this
+      codebase **only inside comments explaining why it is not used**, and
+      `spawn_blocking` and `thread::sleep` appear zero times.
+      **(2) Synchronous `std::fs` — present but harmless:** `tls.rs` reads
+      certificates in `TlsArgs::build()`, which `main.rs` calls *before*
+      `TcpListener::bind`, so it runs once at startup with no request work to
+      starve. L8 ordered it that way to fail before announcing a listener; the
+      async-hygiene benefit is a coincidence, and is recorded as one rather than
+      claimed as foresight.
+      **(3) CPU-bound work — one real instance, safe for a non-obvious reason:**
+      `router.rs:53` runs `re.is_match(path)` on the worker for every `~regex`
+      route. In nginx or any PCRE-based proxy this is a live DoS vector, since
+      catastrophic backtracking turns one crafted path into seconds of frozen
+      worker. It is safe here only because Rust's `regex` crate has **no
+      backtracking and guarantees linear time** — the blowup is not expressible.
+      The safety comes from a Level 2 dependency choice, and swapping that crate
+      for a backtracking engine would silently reintroduce the vulnerability.
+- [x] **nginx, read back fluently.** One master process forks N single-threaded
+      workers; each runs `epoll_wait` in a loop; connection state lives in
+      hand-written C structs; `SO_REUSEPORT` spreads accepts. **Tokio and nginx
+      are the same architecture wearing different clothes** — the difference is
+      who writes the state machines, nginx's authors by hand or Rust's compiler
+      for free. One asymmetry worth naming: nginx is process-per-core with no
+      shared mutable state, so it has no lock-contention problem at all, while
+      Tokio's threads-per-core model is exactly why L6, L7, and L8 each needed a
+      sharding decision. Ferrum pays a cost nginx does not, and buys a route
+      table and connection pool shared across all cores with no IPC.
+- [ ] **Level 9 quiz — Vessey to answer before Level 10** (questions below)
+
+### Two findings this reading turned up — recorded, not fixed
+
+1. **Backend addresses are re-resolved on every connect.** `Server.addr` is a
+   `String` (`balancer.rs:402`), and startup validation (`balancer.rs:973`) checks
+   only the *shape* — non-empty host, port parsing as `u16` ≥ 1 — then keeps the
+   string. So `TcpStream::connect(&addr)` (`proxy.rs:853`) goes through
+   `ToSocketAddrs` on every pool miss. For `127.0.0.1:9001` that parse is trivial;
+   for a DNS name like `api.internal:8080`, which the shape check happily accepts,
+   it is a `getaddrinfo`. Tokio routes that onto its blocking pool rather than a
+   worker, so no core freezes — but it consumes a blocking-pool thread per connect
+   with **no DNS caching and no TTL awareness**. Level 7's pooling hides most of
+   it (a pool hit skips `connect` entirely), which is why it has never surfaced.
+   Not fixed because the obvious fix is wrong: resolving once at startup breaks
+   DNS-named backends that move, and the correct answer is a TTL-aware resolver
+   cache — real work that deserves its own level, not a theory-chapter aside.
+2. **The runtime's shape is entirely implicit.** 8 workers, a work-stealing
+   multi-threaded scheduler, and a blocking pool all exist purely because
+   `#[tokio::main]` defaults to them. Nothing in the codebase mentions any of it,
+   and `features = ["full"]` points the wrong way — it reads as "give me
+   everything" rather than "select the multi-threaded scheduler." This matters the
+   first time anyone tunes the proxy, because worker count is a real dial and it
+   is currently invisible. Not changed, because changing a default with no
+   benchmark behind it is precisely the "measure, don't guess" mistake Level 7
+   warned about — and there is still no benchmark.
+
+**Explicitly not done:** no `io_uring` experiment (Linux-only; this machine is
+kqueue), no runtime tuning (no benchmark to justify it), no DNS caching (a
+feature, not a theory aside), no `spawn_blocking` added for symmetry, and no
+benchmarks — the missing `wrk`/`oha` baseline stays Level 7's recorded debt
+rather than being quietly reassigned here.
+
+### Level 9 quiz — Vessey to answer before Level 10
+
+1. `select()` and `epoll` both let one thread watch many sockets. State the
+   complexity difference precisely, and explain why it is the reason 10,000
+   *idle* connections are cheap under one and ruinous under the other.
+2. `epoll` is readiness-based and `io_uring` is completion-based. Give the
+   question each one answers, and say why the completion model needs fewer
+   syscalls.
+3. This proxy runs on `kqueue`, not `epoll`. What in the codebase had to change
+   to make that true?
+4. A future is "inert until polled." Someone writes
+   `let f = fetch_backend(); do_other_work().await; f.await;` expecting the fetch
+   to overlap with `do_other_work`. What actually happens, and what would they
+   need instead?
+5. When a task parks at an `.await`, its local variables survive. Where do they
+   physically live, and why does that make a 500-line `async fn` with 100 await
+   points more expensive than ten 50-line ones?
+6. Tokio attempts the non-blocking `read()` syscall *before* involving the
+   reactor at all. Why is that fast path important, and what would the
+   latency profile look like without it?
+7. Only three files in this crate hold a production `.await`, and `balancer.rs`
+   holds none despite implementing seven algorithms, a circuit breaker, and a
+   connection pool. Explain why that is a design achievement rather than a
+   coincidence.
+8. Level 6 rejected the textbook `async fn handle(req, next) -> Response`
+   middleware signature. Name the two things that trait would have forced, and
+   which later level it would have broken before it was written.
+9. Every production function in this codebase that takes a lock is a plain `fn`.
+   Explain why that makes "never hold a lock across `.await`" a *compiler-
+   enforced* property rather than a convention — and why that is stronger than
+   the comments in `ratelimit.rs`, `balancer.rs`, and `security.rs` that argue
+   for it.
+10. `router.rs:53` runs a regex on a worker thread for every request on a
+    `~regex` route. Explain why this is safe in Ferrum but would be a denial-of-
+    service vector in nginx, and name the single change that would make it
+    dangerous here.
+11. `tls.rs` performs synchronous `std::fs` I/O. Why is that not a
+    blocking-the-executor bug, and what would have to move for it to become one?
+12. nginx forks single-threaded workers; Tokio runs 8 threads with work stealing.
+    Name one problem nginx's model does not have, and the corresponding
+    capability Ferrum gets in exchange — citing a specific decision from Levels
+    6, 7, or 8.
+13. `TcpStream::connect(&addr)` takes a `String` here. Describe what happens on
+    each pool miss when that string is a DNS name, why it does not freeze a
+    worker, and why "just resolve once at startup" is the wrong fix.
+14. This proxy runs 8 worker threads and nothing in the source says so. Where
+    does that number come from, and what would you need before changing it?
+
 ## Session log
 
 - **2026-07-26** — Course kickoff. Knowledge base built (all 14 levels). `rproxy` crate created. Module 1.1 taught & assigned. Repo pushed to github.com/Vasant18/Ferrum.
@@ -853,3 +1041,4 @@ certificate (SAN `DNS:localhost,IP:127.0.0.1`) and a separate test CA issuing a
 - **2026-08-10/11** — Level 7 (Performance) implemented via subagent-driven development across the plan's 7 tasks (`docs/superpowers/plans/2026-08-10-level-7-performance.md`, design at `docs/superpowers/specs/2026-08-10-level-7-performance-design.md`). Per-`Server` bounded LIFO idle-connection pool (`balancer.rs`: `PooledConn`, `Server.idle`, `Lease::take_conn`/`return_conn`) with lazy idle-timeout eviction and no background sweeper; a five-condition `is_poolable` predicate and `Conn::buffer_is_empty` (`proxy.rs`); a `BACKEND_RESPONSE_TIMEOUT` closing a real gap (a hung backend previously blocked forever with no client-visible error and no breaker signal); all wired into `serve_one` (pool-hit skips the connect+timeout entirely, backend leg now asks for `Connection: keep-alive`, poolability captured immediately after the response head is parsed — before the client-leg framing block rewrites the same fields); three global CLI flags (`--pool-max-idle`, `--pool-idle-timeout`, `--backend-timeout`) following the `--hc-*` pattern. 168 tests pass; release build holds the 4-warning baseline throughout every task. **Plan quality note:** during Task 1, the first implementer caught two real bugs in the plan text itself before writing any final code — a test whose push order couldn't produce the behavior its own comment claimed, and a missing `#[allow(dead_code)]` that would have broken the warning-baseline constraint — both fixed at the plan source (not just the dispatch message) so every downstream task's brief was already correct. During Task 6, a second implementer found and self-resolved an unanticipated consequence (`Server::new` becoming production-dead once its callers moved to a pool-config-aware constructor) using the exact same `from_spec` precedent, independently confirmed by that task's reviewer. **The task the whole level's design most worried about — Task 5's wiring — reviewed clean**, with the reviewer independently tracing (not trusting the report) that the two ordering-sensitive fields are captured before the client-leg rewrite and consumed correctly at the final call site, confirming the exact bug caught during planning did not creep back into the implementation. Live verification (done inline, not by subagent, since it needed real background processes and iterative debugging) hit two of its own bugs — a test backend defaulting to HTTP/1.0 (Python's `BaseHTTPRequestHandler`) and a hung-backend test script whose `accept()` loop let the health prober's connection garbage-collect and RST the client's in-flight one — both diagnosed to their actual cause and fixed in the harness, not the proxy, before re-confirming all six verification checks: connection reuse, per-request `Connection: close` honored, pipelining unaffected, idle-timeout eviction, and hung-backend 504 + breaker ejection. Every task's diff was independently re-verified (test counts, exact warning sets) rather than trusting subagent-reported numbers. All 6 code-task commits pushed to `github.com/Vasant18/Ferrum` main (`7809e8e` through `3064163`) via the `switching-gh-accounts` skill, each authored solely as Vasant18 with no co-author, gh credential switched back to the personal account after every push. Background test processes cleaned (`pgrep` clean).
 - **2026-08-11 (later)** — Final whole-branch review of Level 7 (most capable model, looking at the six task-diffs as one composed feature rather than task-by-task) found one **critical cross-task interaction bug** that no individual task review could see: a pooled connection that dies between the idle-check and the first write (a genuine TOCTOU race — the backend closes it during its idle window) was neither retried nor answered. The connect-retry loop only covered `TcpStream::connect`; a pool hit broke out of that loop immediately, so the first write's failure hit a bare `?` that propagated past the already-exited retry logic straight to `handle_client`'s generic handler, which just logs and drops the connection — **no HTTP response at all**, not even a 502, for a case that should have retried on another server exactly like a failed connect already did. Confirmed independently by re-reading the actual source before dispatching a fix (not just trusting the reviewer's report). The review also caught four stale "dead until Task 5" comments that should have been removed when Task 5 removed the `#[allow(dead_code)]` attributes they were justifying. **Fix:** the non-idempotent request rewrite (`route.rules.apply_request` — appends `X-Forwarded-For`, etc.) now runs exactly once, before any connection attempt, producing a serialized `head_bytes` once; the connection-acquisition loop was extended so a write failure on either a pooled or freshly-dialed connection is handled identically to a connect failure (`mark_failure`, log, retry-or-502) — scoped *only* to the head-write, never to body-streaming or flush, since a body byte reaching a backend commits a possibly non-idempotent side effect and can never be safely replayed. Live-verified with a deliberately-poisoned pooled socket (TCP RST via `SO_LINGER`): an idempotent GET drawing the dead connection produces a `write failed` log line and a transparent retry to a healthy backend (client sees 200); a non-idempotent POST in the same situation correctly gets 502 with no replay. Fix dispatch took three attempts — two lost to transient infrastructure errors (API stream timeouts), not design problems; the correct design (serialize once, retry only the write) was worked out on the first attempt and carried forward via resume, then via a fresh self-contained brief once resume itself hit the same class of error. One agent's mid-edit had left a coherent-but-incomplete intermediate state (a duplicate rewrite block, two extra transient warnings); the next dispatch correctly detected and finished it rather than compounding it — verified by the coordinator reading the final source directly, not by trusting either report. Scoped re-review (most capable model) verdict: **ADDRESSED, no new findings**, independently re-confirmed. 168 tests pass; release build holds the exact 4-warning baseline throughout. This finding and its fix are the reason a whole-branch final review is worth the cost even after every task passed its own scoped review — cross-task composition bugs are structurally invisible to a reviewer who only ever sees one task's diff at a time.
 - **2026-08-19/20** — Level 8 (Security & TLS) implemented inline **in one pass, straight from the design to code**, at Vessey's explicit instruction to skip the approval ceremony and execute in "auto mode" — the first level built without either a subagent-driven task sequence (L4/L5/L7) or a pre-written plan reviewed before coding (L6). Design at `docs/superpowers/specs/2026-08-19-level-8-security-tls-design.md`; the plan (`docs/superpowers/plans/2026-08-19-level-8-security-tls.md`) was written *after* the code, as a record rather than a brief. New `tls.rs`: rustls + tokio-rustls with the crypto provider pinned to `ring` rather than the `aws-lc-rs` default (far lighter build, no cmake/NASM), PEM chain/key loading, TLS1.3+1.2 with no reachable path to anything older, ALPN pinned to `http/1.1`, mTLS as `off`/`optional`/`required` via `WebPkiClientVerifier`, four startup guardrails covering both directions of the config trap, and `TLS_HANDSHAKE_TIMEOUT`. New `security.rs`: `ConnLimiter` (global ceiling + per-IP cap, `Drop`-released via the L3 `Lease` pattern, `fetch_update` for the global claim, rollback on per-IP refusal, map-entry removal on last close) plus hand-rolled `Cidr`/`CidrList` (deny-beats-allow, non-empty allow list is default-deny, socket-peer only, IPv4-mapped normalized at the edge) plus `Limits`/`parse_size`. `proxy.rs`: `handle_client`/`serve_one` made generic over `S: AsyncRead + AsyncWrite + Unpin` — the only two signatures that had pinned `TcpStream`, since Level 1 already made `Conn<S>` generic, which is why all seven prior levels run over TLS with no other change; `scheme` threaded into `ForwardContext`, filling the seam L5 left behind; `BodyCopy` + `copy_body_limited` enforcing the body cap mid-stream on decoded payload; 431 on header count and 413 on body, both before routing. `main.rs`: the handshake moved **inside** the spawned task (awaiting it in the accept loop would let a single `ClientHello` byte stall every new connection process-wide — a one-attacker total DoS that passes every functional test), ten new CLI flags, and TLS built before `bind`. **Two decisions reversed from the design during implementation, both recorded rather than quietly applied:** a denied CIDR closes the connection instead of answering 403 (on a TLS listener a 403 would require completing a handshake for an address already refused — spending an RSA/ECDHE operation on the attacker's behalf, turning the cheapest rejection into one of the most expensive), and the two dead-code warnings the level introduced were resolved by making `in_flight`/`is_empty` genuinely used rather than by `#[allow(dead_code)]`. 214 tests pass (168 from L7 kept green, +46); release build holds the exact 4-warning baseline. Live-verified all 15 checks incl. mTLS reject/admit, 413/431 with zero backend hits for rejections, both CIDR semantics, the per-IP cap with slot reuse proving `Drop` released, the 10.0s handshake deadline firing, backward compatibility for the L1 shorthand and a combined L4+L5+L6+L7 invocation, and — the level's central claim, unreachable by unit test — **three deliberately stalled handshakes while a real client was served in 0.03s**. **Process cost of skipping the plan-first flow, recorded because it is the point:** the design/code divergence on the 403 went uncaught until live verification, where a subagent-driven level would have had a reviewer read the plan against the diff. Two harness bugs also found: a first guardrail run that reported four passes but was worthless because **unquoted `$args` in zsh does not word-split** (each flag pair fell through to the route-spec arm and exited 1 for the wrong reason — caught by reading the error text, not the exit status), and a unit test that deadlocked the suite by writing 200 KB into a 64 KB duplex. Both were the harness's bugs, not the proxy's; L7 hit the same class twice, and the standing lesson is that a passing test harness is itself untested code. Background processes cleaned (`pgrep` clean). Commits `baff59b` (name correction) and `ead48a2` (the WIP push, made before verification at Vessey's request) pushed to `github.com/Vasant18/Ferrum` main as Vasant18 via the `switching-gh-accounts` skill, gh credential switched back to the personal account afterwards.
+- **2026-08-21** — Level 9 (OS Internals) studied. **Theory level, zero production code changed** — the correct outcome rather than a shortfall, since Levels 1–8 already run on this machinery; the work was reading the existing code through a lower lens. Write-up at `docs/level-9-os-internals.md`: the `read()`-blocks problem and C10K; the readiness-API evolution (`select`→`poll`→`epoll`/`kqueue`→`IOCP`/`io_uring`) with the O(n)→O(ready) transition identified as the single property that makes 10k idle connections cheap; the full `.await`→`Poll::Pending`→`Waker`→reactor→`kevent`→re-poll path traced through Ferrum's own `Conn::read_head` rather than a toy example, including the non-blocking-read fast path that bypasses the reactor entirely; and nginx re-read as the same epoll architecture, differing only in who writes the state machines. **Facts verified against the tree rather than recalled:** this machine is `Darwin arm64` so the reactor is **`kqueue`, not `epoll`** (every KB mental model is epoll-shaped because that is where proxies deploy); the reactor crate is `mio 1.2.2`, a transitive dependency never named in `Cargo.toml`; `features = ["full"]` silently selects the multi-threaded scheduler with **8 worker threads**. **The award for most interesting measurement goes to the await map:** counting `.await` in code and excluding the comment mentions that inflate a naive `grep` by ~5% gives **72 production / 61 test**, with only **three of thirteen files** holding a production await (`proxy.rs` 57, `health.rs` 10, `main.rs` 5). `balancer.rs` has **zero** — 1,750+ lines of seven balancing algorithms, a three-state breaker, and a LIFO pool, entirely synchronous. Read through this lens, four separate levels (L1 `http.rs`, L5 `rewrite.rs`, L6's rejection of the async middleware trait, L8 `tls.rs`) independently made one unnamed optimization: keep the compiler-generated state machine small. **The blocking-the-executor audit produced a genuinely stronger result than expected:** every production function that takes a lock (`take_conn`, `return_conn`, `try_acquire`, `release`, `RateLimiter::allow`) is a plain `fn`, not `async fn` — so "never hold a lock across `.await`" is **compiler-enforced**, not a review convention, since `.await` cannot appear in a non-async fn. Corroborated by `tokio::sync` appearing *only* inside comments explaining why it is unused, and `spawn_blocking`/`thread::sleep` appearing zero times. Two lesser audit results: `tls.rs`'s synchronous `std::fs` is harmless because L8 ordered it before `bind` (recorded as a coincidence, not claimed as foresight), and `router.rs:53`'s per-request regex is safe **only** because Rust's `regex` crate guarantees linear time with no backtracking — the same line in a PCRE-based proxy is a DoS vector, so this is a Level 2 dependency choice quietly holding up a Level 9 safety property. **Two findings recorded, deliberately not fixed:** (1) `Server.addr` is a `String` shape-validated at startup but never resolved, so `TcpStream::connect` re-resolves on every pool miss with no DNS caching or TTL awareness — invisible so far because L7's pooling skips `connect` on a hit, and not fixed because resolving once at startup is the *wrong* fix for backends that move, with a TTL-aware resolver cache deserving its own level; (2) the runtime's whole shape (8 workers, work stealing, blocking pool) is implicit in `#[tokio::main]` and stated nowhere, which matters the first time anyone tunes it — not changed, because changing a default with no benchmark is exactly the "measure, don't guess" mistake L7 warned about, and the missing `wrk`/`oha` baseline stays L7's recorded debt rather than being reassigned here. 14-question quiz added. Two corrections made during the write-up, both caught by re-verifying rather than trusting the first number: an initial `.await` count of 137 was wrong because it counted prose mentions inside doc comments, and a claimed "7,000-line proxy" was stale (8,793 lines after L8's `tls.rs` + `security.rs`).
