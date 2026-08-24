@@ -18,6 +18,7 @@
 mod balancer;
 mod health;
 mod http;
+mod metrics;
 mod middleware;
 mod proxy;
 mod rewrite;
