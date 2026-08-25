@@ -110,7 +110,7 @@ pub fn apply_probe_result(server: &Server, ok: bool, now: Instant) {
         server.record_failure(now)
     };
     if let Some((from, to)) = transition {
-        println!(
+        crate::info!(
             "health: {} {from:?}->{to:?} (active probe, cooldown {:?})",
             server.addr(),
             server.breaker().cooldown()

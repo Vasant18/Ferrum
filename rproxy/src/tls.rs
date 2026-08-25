@@ -318,8 +318,8 @@ fn warn_if_key_is_readable(path: &Path) {
     if let Ok(meta) = std::fs::metadata(path) {
         let mode = meta.permissions().mode() & 0o077;
         if mode != 0 {
-            eprintln!(
-                "ferrum: WARNING private key {} is mode {:o} — readable beyond its owner; \
+            crate::warn!(
+                "private key {} is mode {:o} — readable beyond its owner; \
                  chmod 600 it",
                 path.display(),
                 meta.permissions().mode() & 0o777

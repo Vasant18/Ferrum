@@ -321,6 +321,29 @@ impl Metrics {
     }
 }
 
+/// RAII guard for the `active_connections` gauge: inc on construction, dec on
+/// `Drop`. The same discipline as Level 8's `ConnLimiter` slot and Level 3's
+/// `Lease`, for the same reason: a connection task has many exit paths (clean
+/// close, I/O error, failed TLS handshake, panic) and a manual `conn_closed()`
+/// call would eventually miss one, leaving the gauge drifting upward forever —
+/// the classic gauge-leak bug this type makes unrepresentable.
+pub struct ConnGauge<'a> {
+    metrics: &'a Metrics,
+}
+
+impl<'a> ConnGauge<'a> {
+    pub fn open(metrics: &'a Metrics) -> ConnGauge<'a> {
+        metrics.conn_opened();
+        ConnGauge { metrics }
+    }
+}
+
+impl Drop for ConnGauge<'_> {
+    fn drop(&mut self) {
+        self.metrics.conn_closed();
+    }
+}
+
 fn render_histogram(out: &mut String, upstream: &str, h: &Histogram) {
     let (cumulative, sum, count) = h.snapshot();
     let up = escape_label(upstream);

@@ -850,7 +850,7 @@ impl Drop for Lease<'_> {
             }
             Some(false) => {
                 if let Some((from, to)) = self.server.record_failure(Instant::now()) {
-                    eprintln!(
+                    crate::info!(
                         "health: {} {from:?}->{to:?} (passive, cooldown {:?})",
                         self.server.addr(),
                         self.server.breaker().cooldown()
@@ -946,8 +946,8 @@ fn parse_server(token: &str, algorithm: Algorithm, err: &impl Fn(&str) -> io::Er
             if !algorithm.uses_weight() {
                 // Accept-but-warn: a no-op misconfiguration should not stop the
                 // proxy from starting. Only weighted RR consumes the weight.
-                eprintln!(
-                    "ferrum: warning: weight on {addr:?} ignored (algorithm {} is not weighted)",
+                crate::warn!(
+                    "weight on {addr:?} ignored (algorithm {} is not weighted)",
                     algorithm.tag()
                 );
             }

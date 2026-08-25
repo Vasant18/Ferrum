@@ -7,8 +7,23 @@
 //! is deliberately a single `key=value` line.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Process-wide access-log format toggle (`--log-plain`). A global for the
+/// same reason `logging::LEVEL` is: format is an operator decision about the
+/// whole process's output stream, not a per-route behavior — a stdout that
+/// mixes JSON and prose lines is worse than either alone. Set once in `main`
+/// before any traffic; chains built afterwards read it.
+static PLAIN: AtomicBool = AtomicBool::new(false);
+
+pub fn set_plain(plain: bool) {
+    PLAIN.store(plain, Ordering::Relaxed);
+}
+
+pub fn plain_mode() -> bool {
+    PLAIN.load(Ordering::Relaxed)
+}
 
 use super::{Decision, Middleware, ReqCtx};
 use crate::http::{self, RequestHead, ResponseHead};
@@ -79,10 +94,51 @@ impl Middleware for RequestId {
     }
 }
 
+/// Escape a string for placement inside a JSON string literal. The Level 6
+/// lesson about log injection, upgraded for Level 10's format change: the
+/// request target is attacker-controlled, and in a JSON log the attack is no
+/// longer just a forged line — an unescaped `",` breaks out of the string and
+/// forges *fields*, and a raw control byte makes the line unparseable, which
+/// silently drops it from every `jq` query (an attacker's favorite outcome).
+/// Escapes per RFC 8259: quote, backslash, and all controls < 0x20.
+pub fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// A millisecond duration with one decimal, or JSON `null` when the request
+/// never reached the stage. `null` rather than 0 or -1: zero is a legitimate
+/// measurement (a pool hit really can connect in ~0 ms), and a sentinel
+/// number would poison any aggregation that forgot to filter it.
+fn opt_ms(d: Option<std::time::Duration>) -> String {
+    match d {
+        Some(d) => format!("{:.1}", d.as_secs_f64() * 1000.0),
+        None => "null".to_string(),
+    }
+}
+
 /// Emits one access-log line per request, from `on_response` so it sees the
 /// final status and the full duration (it is the outermost layer, so its
 /// `on_response` runs last).
-pub struct AccessLog;
+///
+/// Level 10 upgraded the line from `key=value` prose to one JSON object per
+/// line (the structured-events pillar): machines aggregate it —
+/// `jq 'select(.status>=500)'` replaces regex archaeology. The `plain` flag
+/// (`--log-plain`) keeps the old human-readable line for eyeball debugging.
+pub struct AccessLog {
+    pub plain: bool,
+}
 
 impl Middleware for AccessLog {
     fn name(&self) -> &'static str {
@@ -100,22 +156,57 @@ impl Middleware for AccessLog {
         let user = ctx.identity.as_deref().unwrap_or("-");
         let upstream = ctx.upstream.as_deref().unwrap_or("-");
         let backend = ctx.backend.as_deref().unwrap_or("-");
-        let rejected = ctx
-            .rejected_by
-            .map(|r| format!(" rejected_by={r}"))
-            .unwrap_or_default();
+        if self.plain {
+            let rejected = ctx
+                .rejected_by
+                .map(|r| format!(" rejected_by={r}"))
+                .unwrap_or_default();
+            println!(
+                "id={} peer={} method={} target={} status={} dur={:.1}ms upstream={} backend={} user={}{}",
+                ctx.request_id,
+                ctx.peer,
+                ctx.method,
+                ctx.target,
+                resp.status,
+                dur.as_secs_f64() * 1000.0,
+                upstream,
+                backend,
+                user,
+                rejected,
+            );
+            return;
+        }
+        // One JSON object, one line, one write. Assembled by a single
+        // `println!` because stdout is shared by every worker thread — the
+        // macro locks stdout per call, so one call per line is what keeps
+        // concurrent requests from interleaving mid-object. Keys are static,
+        // so only VALUES pass through the escaper. `ts` is wall-clock for
+        // cross-system correlation; every duration is monotonic-derived —
+        // the two-clocks rule from the design doc.
+        let rejected = match ctx.rejected_by {
+            Some(r) => format!("\"{}\"", json_escape(r)),
+            None => "null".to_string(),
+        };
         println!(
-            "id={} peer={} method={} target={} status={} dur={:.1}ms upstream={} backend={} user={}{}",
-            ctx.request_id,
-            ctx.peer,
-            ctx.method,
-            ctx.target,
-            resp.status,
-            dur.as_secs_f64() * 1000.0,
-            upstream,
-            backend,
-            user,
-            rejected,
+            "{{\"ts\":\"{ts}\",\"id\":\"{id}\",\"peer\":\"{peer}\",\"method\":\"{method}\",\
+             \"target\":\"{target}\",\"status\":{status},\"dur_ms\":{dur_ms},\
+             \"route_ms\":{route_ms},\"connect_ms\":{connect_ms},\"ttfb_ms\":{ttfb_ms},\
+             \"upstream\":\"{upstream}\",\"backend\":\"{backend}\",\"user\":\"{user}\",\
+             \"pooled\":{pooled},\"rejected_by\":{rejected}}}",
+            ts = crate::logging::rfc3339_now(),
+            id = json_escape(&ctx.request_id),
+            peer = ctx.peer,
+            method = json_escape(&ctx.method),
+            target = json_escape(&ctx.target),
+            status = resp.status,
+            dur_ms = format!("{:.1}", dur.as_secs_f64() * 1000.0),
+            route_ms = opt_ms(ctx.t_route),
+            connect_ms = opt_ms(ctx.t_connect),
+            ttfb_ms = opt_ms(ctx.t_first_byte),
+            upstream = json_escape(upstream),
+            backend = json_escape(backend),
+            user = json_escape(user),
+            pooled = ctx.pooled,
         );
     }
 }
@@ -210,5 +301,29 @@ mod tests {
         assert!(!valid_request_id(&"x".repeat(65)));
         assert!(!valid_request_id("has space"));
         assert!(!valid_request_id("has\nnewline"));
+    }
+
+    #[test]
+    fn json_escape_hostile_target() {
+        // The attack the escaper exists for: a request target that tries to
+        // break out of the JSON string and forge fields.
+        assert_eq!(
+            json_escape(r#"/x","status":200,"forged":"y"#),
+            r#"/x\",\"status\":200,\"forged\":\"y"#
+        );
+        assert_eq!(json_escape("a\r\nb"), r"a\r\nb");
+        assert_eq!(json_escape("tab\there"), r"tab\there");
+        assert_eq!(json_escape("\x01"), "\\u0001");
+        assert_eq!(json_escape("clean/path?q=1"), "clean/path?q=1");
+        // UTF-8 passes through untouched (JSON strings are Unicode).
+        assert_eq!(json_escape("héllo/世界"), "héllo/世界");
+    }
+
+    #[test]
+    fn opt_ms_null_vs_zero() {
+        use std::time::Duration;
+        assert_eq!(opt_ms(None), "null");
+        assert_eq!(opt_ms(Some(Duration::ZERO)), "0.0");
+        assert_eq!(opt_ms(Some(Duration::from_micros(12_340))), "12.3");
     }
 }

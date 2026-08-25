@@ -536,6 +536,7 @@ pub async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
     backend_timeout: Duration,
     scheme: &'static str,
     limits: crate::security::Limits,
+    metrics: &crate::metrics::Metrics,
 ) {
     // NOTE: `set_nodelay` used to live here, but it is a `TcpStream` inherent
     // method and this function no longer knows it has one. It moved to the
@@ -545,13 +546,14 @@ pub async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
     let mut client = Conn::new(client);
 
     loop {
-        match serve_one(&mut client, routes, peer, backend_timeout, scheme, limits).await {
+        match serve_one(&mut client, routes, peer, backend_timeout, scheme, limits, metrics).await
+        {
             Ok(true) => continue,          // keep-alive: next request, same socket
             Ok(false) => return,           // clean close
             Err(e) => {
                 // One connection's failure is that connection's problem —
                 // log and drop it; the accept loop is unaffected.
-                eprintln!("[{peer}] connection ended: {e}");
+                crate::warn!("[{peer}] connection ended: {e}");
                 return;
             }
         }
@@ -567,6 +569,7 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
     backend_timeout: Duration,
     scheme: &'static str,
     limits: crate::security::Limits,
+    metrics: &crate::metrics::Metrics,
 ) -> io::Result<bool> {
     // ---- 1. Read + parse the request head (with slowloris deadline) ----
     let head_bytes =
@@ -584,10 +587,20 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
             }
         };
 
+    // Level 10: the clock for this exchange starts HERE — after the head has
+    // arrived, not at the top of this function. On a keep-alive connection the
+    // `read_head` above spends most of its life idle, waiting for the client
+    // to *decide* to send another request; folding that think-time into the
+    // request duration would make every keep-alive connection look slow. The
+    // gap this deliberately excludes (time for the head's bytes to trickle in)
+    // is bounded by HEAD_READ_TIMEOUT and belongs to the client, not to us.
+    let t_start = std::time::Instant::now();
+
     let mut req = match http::parse_request_head(&head_bytes) {
         Ok(r) => r,
         Err(e) => {
             let _ = respond_error(client, 400, "Bad Request").await;
+            metrics.record_request(metrics.unrouted_id(), 400, t_start.elapsed());
             return Err(e);
         }
     };
@@ -600,7 +613,7 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
     // middleware chain). 431 is the status RFC 6585 defines for exactly this,
     // and it is checked before routing so the work is refused before it starts.
     if req.headers.len() > limits.max_headers {
-        println!(
+        crate::debug!(
             "[{peer}] {} {} -> 431 ({} headers, limit {})",
             req.method,
             req.target,
@@ -608,6 +621,7 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
             limits.max_headers
         );
         respond_error(client, 431, "Request Header Fields Too Large").await?;
+        metrics.record_request(metrics.unrouted_id(), 431, t_start.elapsed());
         return Ok(false);
     }
 
@@ -615,6 +629,7 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
         Ok(f) => f,
         Err(e) => {
             let _ = respond_error(client, 400, "Bad Request").await;
+            metrics.record_request(metrics.unrouted_id(), 400, t_start.elapsed());
             return Err(e);
         }
     };
@@ -631,10 +646,11 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
     // and it certainly should not open a backend socket.
     if let BodyFraming::Length(n) = req_framing {
         if n > limits.max_body {
-            println!(
+            crate::debug!(
                 "[{peer}] {} {} -> 413 (body {n} bytes, limit {})",
                 req.method, req.target, limits.max_body
             );
+            metrics.record_request(metrics.unrouted_id(), 413, t_start.elapsed());
             // No drain: the point is that we never read those bytes. Sending
             // `Connection: close` (which respond_error does) is what makes that
             // safe — the unread body cannot desync a connection we are closing,
@@ -658,7 +674,7 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
         None => {
             // No route matched. This is a routing decision, not a client
             // error — the request was well-formed, we just don't serve it.
-            println!(
+            crate::debug!(
                 "[{peer}] {} {} {} -> 404 (no route)",
                 req.method,
                 req.target,
@@ -666,10 +682,15 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
             );
             // respond_error sends Connection: close, so we honestly close.
             respond_error(client, 404, "Not Found").await?;
+            metrics.record_request(metrics.unrouted_id(), 404, t_start.elapsed());
             return Ok(false);
         }
     };
     let upstream = &route.upstream;
+    // Level 10: route decided. Resolve the upstream's metrics slot once here;
+    // every record below goes through the pre-resolved id (the string
+    // comparison happens once per request, not once per instrument).
+    let m_id = metrics.upstream_id(upstream.name());
 
     // Capture the client's original request target, version, and Host BEFORE
     // any rewriting. The original target feeds the "rewrite:" log line below,
@@ -698,6 +719,11 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
         original_target.clone(),
         original_host.clone(),
     );
+    // Level 10: parse+route cost, measured from head-in-hand. `ctx.started`
+    // is stamped inside ReqCtx::new just above — a hair later than `t_start`
+    // — so all deltas the log emits are computed against ONE clock
+    // (`t_start`-based durations stored in ctx) rather than mixing the two.
+    ctx.t_route = Some(t_start.elapsed());
     if let Err((entered, rej)) = route.chain.run_request(&mut req, &mut ctx) {
         // Drain the request body so closing (or keeping) the connection is safe
         // — see Conn::drain_body for the TCP-RST reasoning. Within the cap the
@@ -721,6 +747,12 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
         };
         route.chain.run_response(&ctx, &mut resp, entered);
         send_rejection(client, &resp, &rej.body, reusable && client_keep_alive).await?;
+        // Rejections count twice, deliberately: once in requests_total (the
+        // client did get a status) and once in rejected_total attributed to
+        // the middleware that said no — because "how many 429s" and "which
+        // layer is rejecting" are different 3 a.m. questions.
+        metrics.record_rejection(ctx.rejected_by.unwrap_or("other"));
+        metrics.record_request(m_id, rej.status, t_start.elapsed());
         return Ok(reusable && client_keep_alive);
     }
 
@@ -759,13 +791,13 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
     // (These moved up with the rewrite block; the pick log lines below now read
     // the captured pre-rewrite originals instead of the live, rewritten `req`.)
     if req.target != original_target {
-        println!("[{peer}]   rewrite: {original_target} -> {}", req.target);
+        crate::debug!("[{peer}]   rewrite: {original_target} -> {}", req.target);
     }
     if let (Some(before), Some(after)) =
         (original_host.as_deref(), http::header(&req.headers, "host"))
     {
         if before != after {
-            println!("[{peer}]   host: {before} -> {after}");
+            crate::debug!("[{peer}]   host: {before} -> {after}");
         }
     }
     // Take exclusive control of the body-framing header. strip_hop_by_hop
@@ -805,15 +837,16 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
     // until the exchange ends, so the loop yields it outward.
     let retryable = is_idempotent(&method);
     let mut attempt = 0usize;
-    let (mut lease, mut backend, _from_pool) = loop {
+    let (mut lease, mut backend, from_pool) = loop {
         let mut lease = match upstream.pick(peer.ip()) {
             Some(l) => l,
             None => {
-                eprintln!(
+                crate::error!(
                     "[{peer}] no healthy server in upstream {:?}",
                     upstream.name()
                 );
                 respond_error(client, 502, "Bad Gateway").await?;
+                metrics.record_request(m_id, 502, t_start.elapsed());
                 return Ok(false);
             }
         };
@@ -828,7 +861,7 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
         // above the loop and force-set `req.version = Http11`, so reading it
         // here would change today's log output for an HTTP/1.0 client.
         let (mut conn, from_pool) = if let Some(conn) = lease.take_conn() {
-            println!(
+            crate::debug!(
                 "[{peer}] {} {} {} -> {}[{}] {addr} (inflight={}) [pooled]",
                 req.method,
                 original_target,
@@ -839,7 +872,7 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
             );
             (conn, true)
         } else {
-            println!(
+            crate::debug!(
                 "[{peer}] {} {} {} -> {}[{}] {addr} (inflight={}){}",
                 req.method,
                 original_target,
@@ -857,24 +890,28 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
                 }
                 Ok(Err(e)) => {
                     lease.mark_failure();
-                    eprintln!("[{peer}] backend {addr} connect failed: {e}");
+                    metrics.record_connect_error(m_id);
+                    crate::warn!("[{peer}] backend {addr} connect failed: {e}");
                     drop(lease);
                     if retryable && attempt < MAX_RETRIES {
                         attempt += 1;
                         continue;
                     }
                     respond_error(client, 502, "Bad Gateway").await?;
+                    metrics.record_request(m_id, 502, t_start.elapsed());
                     return Ok(false);
                 }
                 Err(_) => {
                     lease.mark_failure();
-                    eprintln!("[{peer}] backend {addr} connect timed out");
+                    metrics.record_connect_error(m_id);
+                    crate::warn!("[{peer}] backend {addr} connect timed out");
                     drop(lease);
                     if retryable && attempt < MAX_RETRIES {
                         attempt += 1;
                         continue;
                     }
                     respond_error(client, 504, "Gateway Timeout").await?;
+                    metrics.record_request(m_id, 504, t_start.elapsed());
                     return Ok(false);
                 }
             }
@@ -901,17 +938,21 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
             Ok(()) => break (lease, conn, from_pool),
             Err(e) => {
                 lease.mark_failure();
-                eprintln!("[{peer}] backend {addr} write failed: {e}");
+                crate::warn!("[{peer}] backend {addr} write failed: {e}");
                 drop(lease);
                 if retryable && attempt < MAX_RETRIES {
                     attempt += 1;
                     continue;
                 }
                 respond_error(client, 502, "Bad Gateway").await?;
+                metrics.record_request(m_id, 502, t_start.elapsed());
                 return Ok(false);
             }
         }
     };
+    // Level 10: backend leg in hand (dialed or pooled) and the head written.
+    ctx.t_connect = Some(t_start.elapsed());
+    ctx.pooled = from_pool;
     // The exchange is now underway; a completed exchange should feed the
     // server's response-time average, so arm the lease's RTT recording.
     lease.mark_served();
@@ -968,11 +1009,12 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
             // `backend` drops here; the pessimistic `mark_failure()` above stays
             // in force, which is correct — from the backend's point of view this
             // exchange really did fail, and it never sees a poolable connection.
-            println!(
+            crate::debug!(
                 "[{peer}] {} {} -> 413 (chunked body exceeded {} bytes mid-stream)",
                 method, original_target, limits.max_body
             );
             respond_error(client, 413, "Payload Too Large").await?;
+            metrics.record_request(m_id, 413, t_start.elapsed());
             return Ok(false);
         }
     }
@@ -985,8 +1027,9 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
             // so this is exactly as real a failure as a refused connect —
             // indict the server the same way.
             lease.mark_failure();
-            eprintln!("[{peer}] backend {} response timed out", lease.addr());
+            crate::warn!("[{peer}] backend {} response timed out", lease.addr());
             respond_error(client, 504, "Gateway Timeout").await?;
+            metrics.record_request(m_id, 504, t_start.elapsed());
             return Ok(false);
         }
         Ok(Ok(None)) => {
@@ -999,6 +1042,11 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
         Ok(Err(e)) => return Err(e),
     };
     let mut resp = http::parse_response_head(&resp_bytes)?;
+    // Level 10: TTFB — the backend's response head is in hand. Strictly this
+    // stamp is "first *head* fully read" rather than "first byte on the wire",
+    // which is the honest, observable version of TTFB from where we sit: the
+    // read above returns whole heads, not bytes.
+    ctx.t_first_byte = Some(t_start.elapsed());
     let resp_framing = http::response_body_framing(&method, &resp)?;
     // Level 7: capture the backend's ORIGINAL Connection header and version
     // right now. Later in this function, resp.headers goes through
@@ -1071,6 +1119,16 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
     client.write_all(&http::write_response_head(&resp)).await?;
     backend.copy_body_to(client.stream_mut(), resp_framing).await?;
     client.flush().await?;
+
+    // Level 10: the exchange completed — the client has the last byte. This is
+    // the one success-path record, and it deliberately sits AFTER the body
+    // streams: a duration that stopped at the response *head* would hide the
+    // transfer time of a slow client or a huge body, and those are real
+    // seconds a caller waited. Requests that died mid-exchange (`?` paths
+    // above) never reach here and are NOT counted in requests_total — that
+    // series means "the client got an answer", and the error log + breaker
+    // carry the deaths. `metrics.rs` explains the status-class labeling.
+    metrics.record_request(m_id, resp.status, t_start.elapsed());
 
     // Level 7: decide whether this backend connection can be reused. The
     // exchange already fully completed by this point (both bodies streamed,

@@ -15,9 +15,11 @@
 //! Backwards-compatible shorthand: `rproxy LISTEN BACKEND` (a bare host:port
 //! second argument) is treated as the catch-all route `/=BACKEND`.
 
+mod admin;
 mod balancer;
 mod health;
 mod http;
+mod logging;
 mod metrics;
 mod middleware;
 mod proxy;
@@ -64,6 +66,9 @@ async fn main() -> std::io::Result<()> {
     // a proxy on day one, and neither can reject traffic. `--no-*` opts out.
     let mut request_id = true;
     let mut access_log = true;
+    // Level 10: the admin plane (`/metrics` + `/health`). `None` = no admin
+    // listener at all — exposing it is an explicit choice (see admin.rs).
+    let mut admin_addr: Option<String> = None;
     // Level 7 pool tunables, seeded with the same defaults the hardcoded
     // constants carried. Each flag overrides one field; every declared upstream
     // (and the default catch-all) inherits the result — these are GLOBAL, with
@@ -161,6 +166,14 @@ async fn main() -> std::io::Result<()> {
             "--no-forwarded" => forwarded = false,
             "--no-request-id" => request_id = false,
             "--no-access-log" => access_log = false,
+            // ---- Level 10: observability ----
+            "--log-level" => {
+                let l = logging::Level::parse(&next_val(&mut args, "--log-level")?)
+                    .map_err(|e| bad_arg(&e))?;
+                logging::set_level(l);
+            }
+            "--log-plain" => middleware::observe::set_plain(true),
+            "--admin" => admin_addr = Some(next_val(&mut args, "--admin")?),
             // Anything else is a route spec (bare host:port or path=BACKEND).
             _ => route_specs.push(arg),
         }
@@ -177,6 +190,18 @@ async fn main() -> std::io::Result<()> {
     )?;
     let routes = Arc::new(routes);
 
+    // Level 10: the metrics registry. Built AFTER the route table because its
+    // label slots are the declared upstream names — the registry is shaped by
+    // config, never by traffic (see metrics.rs on cardinality). Shared with
+    // every connection task and the admin listener exactly like `routes`.
+    let metrics = Arc::new(metrics::Metrics::new(
+        &routes
+            .upstreams()
+            .iter()
+            .map(|u| u.name().to_string())
+            .collect::<Vec<_>>(),
+    ));
+
     // Build the TLS config BEFORE binding the listener. A bad cert path, an
     // unreadable key, or an incoherent mTLS combination should fail with exit 1
     // and no socket ever opened — not after the process has announced itself as
@@ -189,8 +214,8 @@ async fn main() -> std::io::Result<()> {
     // means the operator wrote one of the two numbers wrong. Warn rather than
     // fail — the config is safe, just pointless.
     if max_conns_per_ip > max_conns {
-        eprintln!(
-            "ferrum: WARNING --max-conns-per-ip {max_conns_per_ip} exceeds --max-conns \
+        crate::warn!(
+            "--max-conns-per-ip {max_conns_per_ip} exceeds --max-conns \
              {max_conns}; the per-IP cap can never be reached"
         );
     }
@@ -221,6 +246,22 @@ async fn main() -> std::io::Result<()> {
         println!("  route: {line}");
     }
 
+    // Level 10: the admin plane. Bound HERE, not inside admin::serve, so a bad
+    // or taken `--admin` address fails startup with exit 1 — same posture as
+    // the TLS guardrails above: fail before announcing service. No flag, no
+    // socket: the plane doesn't exist unless asked for.
+    if let Some(addr) = &admin_addr {
+        let admin_listener = TcpListener::bind(addr).await.map_err(|e| {
+            std::io::Error::new(e.kind(), format!("--admin {addr}: {e}"))
+        })?;
+        println!("  admin: {addr} (/metrics, /health)");
+        let metrics = Arc::clone(&metrics);
+        let upstreams = routes.upstreams();
+        tokio::spawn(async move {
+            admin::serve(admin_listener, metrics, upstreams).await;
+        });
+    }
+
     // Start active health checking. Probers run for the life of the process,
     // one task per pool, independent of client traffic. This must happen inside
     // the tokio runtime (we are already in `async fn main`, after binding), as
@@ -245,7 +286,7 @@ async fn main() -> std::io::Result<()> {
                     // Dropped without a response, for the same reason as the
                     // connection limits below: a denied source does not get to
                     // make us do work. `stream` drops here, closing the socket.
-                    eprintln!("[{peer}] refused: address not permitted");
+                    crate::debug!("[{peer}] refused: address not permitted");
                     continue;
                 }
 
@@ -264,7 +305,7 @@ async fn main() -> std::io::Result<()> {
                         // are genuinely at capacity" — two situations with
                         // opposite responses that otherwise look identical in
                         // the log.
-                        eprintln!(
+                        crate::warn!(
                             "[{peer}] refused: {why} ({} connections in flight)",
                             limiter.in_flight()
                         );
@@ -289,12 +330,19 @@ async fn main() -> std::io::Result<()> {
                 // task takes its own copy the same way it clones the `routes`
                 // Arc — no shared state, no locking.
                 let acceptor = tls_acceptor.clone();
+                let metrics = Arc::clone(&metrics);
                 tokio::spawn(async move {
                     // Hold the limiter slot for the whole connection. Named
                     // `_guard` rather than `_` because `let _ = guard;` would
                     // drop it immediately and release the slot before the
                     // connection had even started.
                     let _guard = guard;
+                    // Level 10: the active_connections gauge. Wrapped in a
+                    // Drop guard for the same reason `_guard` is — the dec
+                    // must fire on every exit path out of this task (clean
+                    // close, error, failed TLS handshake), and RAII is the
+                    // only construct that promises that.
+                    let _conn_gauge = metrics::ConnGauge::open(&metrics);
                     match acceptor {
                         // ---- TLS listener ----
                         Some(acceptor) => {
@@ -329,11 +377,11 @@ async fn main() -> std::io::Result<()> {
                                     // `required` — a client with no certificate.
                                     // Logged at connection level and dropped;
                                     // there is no HTTP layer yet to answer on.
-                                    eprintln!("[{peer}] tls handshake failed: {e}");
+                                    crate::debug!("[{peer}] tls handshake failed: {e}");
                                     return;
                                 }
                                 Err(_) => {
-                                    eprintln!(
+                                    crate::debug!(
                                         "[{peer}] tls handshake timed out after {:?}",
                                         tls::TLS_HANDSHAKE_TIMEOUT
                                     );
@@ -343,12 +391,12 @@ async fn main() -> std::io::Result<()> {
                             // "https" is what makes X-Forwarded-Proto honest,
                             // filling the seam Level 5 left at proxy.rs's
                             // ForwardContext.
-                            proxy::handle_client(tls, &routes, peer, backend_timeout, "https", limits)
+                            proxy::handle_client(tls, &routes, peer, backend_timeout, "https", limits, &metrics)
                                 .await;
                         }
                         // ---- plaintext listener (Levels 1-7, unchanged) ----
                         None => {
-                            proxy::handle_client(stream, &routes, peer, backend_timeout, "http", limits)
+                            proxy::handle_client(stream, &routes, peer, backend_timeout, "http", limits, &metrics)
                                 .await;
                         }
                     }
@@ -357,7 +405,7 @@ async fn main() -> std::io::Result<()> {
             Err(e) => {
                 // Transient accept errors (e.g. EMFILE when out of file
                 // descriptors) must not kill the proxy; log and continue.
-                eprintln!("accept error: {e}");
+                crate::error!("accept error: {e}");
             }
         }
     }

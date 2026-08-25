@@ -117,6 +117,25 @@ pub struct ReqCtx {
     pub upstream: Option<String>,
     /// Name of the middleware that rejected, if any. Log attribution.
     pub rejected_by: Option<&'static str>,
+    /// Level 10: per-stage timing stamps, written by `proxy.rs` at the moments
+    /// it passes each milestone, read by the access log (as deltas) and the
+    /// duration histogram. All are measured from `started`, as `Option` because
+    /// a request can end at any stage (a 404 never connects; a rejection never
+    /// routes) and the log must distinguish "never happened" from "took 0ms".
+    /// Durations-from-start rather than raw `Instant`s so the log's subtraction
+    /// can never underflow if a future edit reorders two stamps.
+    pub t_route: Option<std::time::Duration>,
+    /// Backend connection in hand — freshly dialed or a pool hit. The delta
+    /// `t_connect - t_route` is the queue+dial cost; a pool hit shows ~0.
+    pub t_connect: Option<std::time::Duration>,
+    /// First byte of the backend's response head observed (TTFB). The delta
+    /// against `t_connect` is the backend's own think time — the number that
+    /// answers "is it us or is it them" at 3 a.m.
+    pub t_first_byte: Option<std::time::Duration>,
+    /// Whether the backend leg came from the Level 7 idle pool. The access log
+    /// carries it because a latency regression that only affects pool *misses*
+    /// looks identical to a slow backend unless the log can split the two.
+    pub pooled: bool,
 }
 
 impl ReqCtx {
@@ -134,6 +153,10 @@ impl ReqCtx {
             backend: None,
             upstream: None,
             rejected_by: None,
+            t_route: None,
+            t_connect: None,
+            t_first_byte: None,
+            pooled: false,
         }
     }
 }
@@ -307,7 +330,11 @@ impl MiddlewareConfig {
         let mut mws: Vec<Box<dyn Middleware>> = Vec::new();
 
         if self.access_log {
-            mws.push(Box::new(AccessLog));
+            // Format comes from the process-wide `--log-plain` toggle (see
+            // observe.rs) captured at chain-build time, which is startup.
+            mws.push(Box::new(AccessLog {
+                plain: observe::plain_mode(),
+            }));
         }
         if self.request_id {
             mws.push(Box::new(RequestId::new()));
