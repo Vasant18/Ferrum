@@ -17,7 +17,7 @@ Course defined in [Build.md](Build.md). Theory reference: [Reverse-Proxy-Knowled
 | 7 | Performance (pooling, buffers, timeouts) | 🟢 **Implemented** (2026-08-10/11) | `balancer.rs`: per-`Server` bounded LIFO idle-connection pool (`std::sync::Mutex<Vec<PooledConn>>`, lazy idle-timeout eviction, max-size cap dropping the newest on overflow) + `Lease::take_conn`/`return_conn`; `proxy.rs`: five-condition `is_poolable` predicate (framing, backend `Connection: close`, HTTP/1.1, no I/O error, drained buffer) + `Conn::buffer_is_empty`, `BACKEND_RESPONSE_TIMEOUT` around the response-head read; wired into `serve_one` (pool-hit skips connect entirely, backend leg asks for `keep-alive`, poolability captured *before* the client-leg rewrite touches the response head); `--pool-max-idle`/`--pool-idle-timeout`/`--backend-timeout` CLI flags, global only. 168 unit tests. Live-verified connection reuse (`[pooled]` tag + backend accept counts), honoring a backend's own `Connection: close`, pipelining unaffected, idle-timeout eviction, and a hung backend producing a 504 + breaker ejection. Quiz pending. |
 | 8 | Security & TLS (termination, mTLS, slowloris) | 🟢 **Implemented** (2026-08-19/20) | `tls.rs`: rustls + tokio-rustls (`ring` provider), PEM loading, TLS1.3+1.2 with no path to anything older, ALPN pinned to `http/1.1`, mTLS as `off`/`optional`/`required` via `WebPkiClientVerifier`, 4 startup guardrails, `TLS_HANDSHAKE_TIMEOUT`; `security.rs`: `ConnLimiter` (global + per-IP, `Drop`-released) + hand-rolled `Cidr`/`CidrList` (deny-beats-allow, allow-list is default-deny, IPv4-mapped normalized) + `Limits`/`parse_size`; `proxy.rs`: `handle_client`/`serve_one` now generic over `S: AsyncRead + AsyncWrite + Unpin`, `scheme` threaded into `ForwardContext` (fills the L5 seam), `BodyCopy` + `copy_body_limited` enforcing the body cap mid-stream, 431 on header count, 413 on body; `main.rs`: handshake moved INSIDE the spawned task, 10 CLI flags. 214 unit tests. Live-verified TLS, mTLS reject/admit, 413/431, CIDR, connection cap, slot reuse, and that 3 stalled handshakes don't block the accept loop. Quiz pending. |
 | 9 | OS Internals (epoll/kqueue, Tokio internals) — theory | 🔵 **Studied** (2026-08-21) | Theory level, no production code. [`docs/level-9-os-internals.md`](docs/level-9-os-internals.md): the `read()`-blocks problem and C10K; `select`→`poll`→`epoll`/`kqueue`→`io_uring` and why O(n)→O(ready) is the whole ballgame; the full `.await`→`Waker`→reactor→`kevent` path traced through Ferrum's own `Conn::read_head`; this machine's actual stack (Darwin arm64 → **kqueue** not epoll, `mio 1.2.2`, 8 worker threads from `#[tokio::main]`); Ferrum's 3 production spawn sites and its await map (**only 3 of 13 files hold a production `.await`**; `balancer.rs` has zero); a blocking-the-executor audit that found the no-lock-across-await guarantee is **compiler-enforced**, not conventional; and nginx read back as the same architecture. Turned up 2 real findings, recorded not fixed. Quiz pending. |
-| 10 | Observability (logs, metrics, tracing) | ⚪ Not started | Currently println/eprintln placeholders |
+| 10 | Observability (logs, metrics, tracing) | 🟢 **Implemented** (2026-08-24/25) | `metrics.rs`: from-scratch registry — status-class counters, `active_connections` gauge (RAII `ConnGauge`), fixed-bucket duration histograms (cumulative `le` computed at scrape time), hand-rolled Prometheus text renderer, zero locks/allocations at record time; `logging.rs`: leveled error log (`error!`..`debug!` macros, `--log-level`, hand-rolled RFC 3339) — per-request diagnostics demoted to `debug`, silent by default; `observe.rs`: access log upgraded to one JSON object per line (RFC 8259 escaping of attacker-controlled values, stage timings, `--log-plain` escape hatch); `proxy.rs`: per-stage `Instant` stamps (route/connect/TTFB) + metrics recorded at every exit path; `admin.rs`: separate admin listener (`--admin`, off by default) serving `/metrics` + `/health` JSON with a 5 s deadline. 230 unit tests. Live-verified JSON log via `jq`, counters/histogram/gauge movement, rejection attribution, `/health` ok→degraded→recovered, admin-plane isolation, `--log-plain` + `--log-level debug`. Quiz pending. |
 | 11 | Caching (LRU, TTL, ETag, revalidation) | ⚪ Not started | |
 | 12 | Production Features (graceful shutdown, config, hot reload) | ⚪ Not started | Listen/backend addrs via CLI args for now |
 | 13 | Basic WAF (SQLi/XSS/traversal detection, reputation) | ⚪ Not started | CL+TE smuggling vector already rejected in L1 parser |
@@ -1028,6 +1028,187 @@ rather than being quietly reassigned here.
 14. This proxy runs 8 worker threads and nothing in the source says so. Where
     does that number come from, and what would you need before changing it?
 
+## Level 10 — what was built
+
+Observability: the three pillars (logs, metrics, traces), from scratch. Design
+at [`docs/superpowers/specs/2026-08-24-level-10-observability-design.md`](docs/superpowers/specs/2026-08-24-level-10-observability-design.md).
+The knowledge base frames the level as the 3 a.m. question — "the site is slow"
+must resolve to *which backend, which route, which percentile* in 30 seconds.
+
+- [x] **Zero new dependencies, and that was the design's first decision.** The
+      lessons of this level ARE the internals — the Prometheus text format, why
+      histograms are pre-allocated buckets rather than stored samples, why
+      counters must be atomics — and the `metrics`/`tracing` crates make
+      exactly those invisible. Unlike L8's crypto, nothing here is dangerous to
+      hand-roll: a wrong bucket is a wrong number on a graph, not a hole. The
+      KB recommends the `tracing` crate because spans follow tasks across await
+      points; that solves a problem Ferrum does not have — L9 established the
+      whole request lifecycle lives in ONE task, so a timing struct passed down
+      the call path does the same job with zero magic. `Cargo.toml` still
+      reads: regex (L2), rustls family (L8), everything else ours.
+- [x] **`metrics.rs` — the registry, built like the pool it instruments.** The
+      L7 rule applied to our own instrumentation: no mutex, no allocation at
+      record time. Counters are `AtomicU64` labeled by status *class*
+      (`code="2xx"`, 5 values) × upstream — label sets fixed at startup from
+      declared config, never from the request, because a path label would be
+      an attacker-controlled cardinality bomb (`curl /$(uuidgen)` allocating
+      series forever). `UpstreamId` pre-resolves the name→slot lookup once per
+      request so recording is pure index+`fetch_add`. The histogram stores each
+      observation in exactly ONE of 9 fixed buckets; the cumulative `le`
+      semantics Prometheus requires are computed at *scrape* time (`snapshot`),
+      because scrapes are ~1/15 s and observations are thousands/s — do the
+      O(buckets) work on the rare path. `sum` is integer micros because there
+      is no atomic f64. `Ordering::Relaxed` everywhere, with the "why that
+      never loses an increment" argument in the module docs — and a 8-thread ×
+      10k-increment hammer test backing the claim, same pattern as L6's
+      sharded limiter test. Never-touched series are elided from `render()`
+      rather than emitted as zeros.
+- [x] **`logging.rs` — the error log, and the access/error split.** One
+      stdout stream for machines (JSON access log), one stderr stream for
+      humans (leveled error log) — independently redirectable, which is the
+      entire reason the split exists. Hand-rolled `error!`/`warn!`/`info!`/
+      `debug!` macros over a global `AtomicU8` level (`--log-level`, default
+      info): the macro checks the level BEFORE evaluating its arguments, so a
+      suppressed `debug!` costs one atomic load, not a thrown-away `format!` —
+      that gating IS the performance story of log levels. The per-request
+      routing/rewrite/pick diagnostics that previously printed unconditionally
+      on every request (priceless while building L2–L8, noise in operation)
+      are now `debug!` and silent by default. RFC 3339 UTC timestamps via
+      Howard Hinnant's `civil_from_days` (~15 lines, verified against Python
+      at three fixed points including a century non-leap boundary) rather than
+      a `chrono` dependency.
+- [x] **`observe.rs` — the access log goes JSON.** One object per line, emitted
+      by the same outermost-middleware `on_response` as before:
+      `ts` (wall-clock, for cross-system correlation) + `dur_ms`/`route_ms`/
+      `connect_ms`/`ttfb_ms` (monotonic-derived — never mix the two clocks'
+      jobs), status, upstream/backend, user, `pooled`, `rejected_by`. The L6
+      log-injection lesson upgraded for the format change: in a JSON log an
+      unescaped `"` in the attacker-controlled target doesn't just forge a
+      line, it forges *fields* — and a raw control byte makes the line
+      unparseable, silently dropping it from every `jq` query, which is an
+      attacker's favorite outcome. RFC 8259 escaper on every dynamic value;
+      keys are static. Stage timings are `null` (not 0, not -1) when the
+      request died before the stage — zero is a legitimate measurement (a pool
+      hit connects in ~0 ms) and a sentinel would poison aggregation.
+      `--log-plain` keeps the old `key=value` line for eyeball debugging.
+- [x] **`proxy.rs` — timing capture + the recording discipline.** The clock
+      starts AFTER `read_head` returns, not before: on a keep-alive connection
+      the head-read spends its life waiting for the client to *decide* to send
+      another request, and folding that think-time in would make every
+      keep-alive connection look slow. Stamps at route-matched,
+      backend-in-hand (dialed or pooled), response-head-parsed (the honest
+      TTFB from where we sit), and completion. `requests_total` is recorded at
+      **every** exit path — 431/413/400 pre-route (as `upstream="-"`), 404,
+      middleware rejections (double-counted into `rejected_total{by=...}`
+      deliberately: "how many 429s" and "which layer is rejecting" are
+      different questions), 502/504 connect failures, and the one success-path
+      record placed AFTER the last body byte flushes — a duration that stopped
+      at the response head would hide the transfer time of a slow client or a
+      huge body. Requests that die mid-exchange via `?` are NOT in
+      `requests_total` (that series means "the client got an answer"); the
+      error log and breaker carry the deaths.
+- [x] **`admin.rs` — the admin plane is a different socket.** `/metrics` and
+      `/health` on their own listener (`--admin ADDR`, no default, docs say
+      `127.0.0.1:9100`): `/metrics` leaks route names, backend addresses, and
+      error rates — reconnaissance gold — so exposure is an explicit operator
+      choice, a backend legitimately serving `/metrics` is never shadowed, and
+      the main listener's routing is untouched. This is Envoy's admin port and
+      HAProxy's stats socket. Deliberately tiny: reuses the battle-tested
+      L1 parser (a second hand-written one is a second bug surface) and
+      nothing else — no routing, no middleware, no keep-alive, one request per
+      connection, `Connection: close`, a whole-exchange 5 s deadline (not
+      exempt from slowloris thinking), 404 with no path echo. Bound in `main`
+      before the banner so a bad `--admin` address fails startup with exit 1,
+      same posture as the L8 TLS guardrails. `/health` reports the PROXY's
+      own liveness with an upstream summary — and stays HTTP 200 even when
+      `"status":"degraded"` (some upstream has zero healthy servers), because
+      a supervisor that restarts Ferrum when a *backend* dies makes the outage
+      worse; L4's breaker owns backend health.
+- [x] **`main.rs` — wiring.** Registry built from declared upstream names
+      (config-shaped, the L12 hot-reload seam recorded in `metrics.rs` docs);
+      `ConnGauge` RAII guard on every connection task (inc on accept, dec on
+      `Drop` through every exit path incl. failed TLS handshakes — the gauge
+      cannot leak upward, same discipline as L8's limiter slot); three new
+      flags (`--log-level`, `--log-plain`, `--admin`) plus the banner line.
+- [x] **230 unit tests** (214 from L8 kept green, +16): histogram bucket
+      boundaries (a value exactly on an edge), cumulative render + `+Inf` ==
+      `_count`, status-class clamping (0 and 999 don't panic — metrics must
+      never take the process down), rejection attribution incl. the `other`
+      fallback for a future middleware nobody registered, label escaping, the
+      concurrency hammer, level gating, RFC 3339 fixed points, JSON escaping
+      of a field-forging target, `null`-vs-`0.0` stage timing, `/health` JSON
+      shape ok + degraded (breaker tripped the L4 way).
+- [x] **Live verification, all green:** JSON log parses under `jq` (`select(.status==401)`
+      filter works); stage timings show `connect_ms:0.0` + `"pooled":true` on
+      keep-alive reuse and `null`s on an auth rejection that never routed;
+      `/metrics` shows correct 2xx/4xx/5xx class counts, `rejected_total{by="auth"}`,
+      cumulative buckets, and elided zero-series; `/health` walked
+      ok(2/2) → ok(1/2) → degraded(0/2, still HTTP 200) → recovered as backends
+      were killed and revived, matching WARN connect-failures and INFO breaker
+      transitions in the error log; admin 404/405 behave; `/metrics` on the
+      MAIN listener proxies to the backend (isolation proof); `--log-plain`
+      emits the old line; `--log-level debug` brings back the per-request
+      diagnostics. One harness bug (not the proxy's): a `pkill -f` pattern of
+      `127.0.0.1.*9002` matched the *proxy's own command line* (its args
+      contain the backend list) and killed it mid-test — killed by listening
+      port via `lsof -sTCP:LISTEN` thereafter; the L7/L8 "the harness is
+      untested code" lesson strikes a third time.
+- [ ] **Level 10 quiz — Vessey to answer before Level 11** (questions below)
+
+### Level 10 quiz — Vessey to answer before Level 11
+
+1. The access log went from `key=value` prose to JSON. What concrete operation
+   does the structured version enable that the prose version made painful, and
+   what NEW attack surface did the format change open that `json_escape`
+   closes? Describe what an attacker's request target would look like and what
+   it would accomplish against a naive logger.
+2. `requests_total` is labeled `code="2xx"` (status class) and `upstream`, but
+   never by path or raw status code. What goes wrong — mechanically, in memory
+   and in Prometheus — if you label by path? Why is the rule "labels come from
+   config, never from the request"?
+3. A histogram here is 9 atomics per series, and each observation increments
+   exactly ONE bucket. Prometheus requires cumulative `le` buckets. Where does
+   the cumulative sum happen, and why there? What would be wrong with storing
+   cumulative counts at record time?
+4. Why does an average hide what a histogram shows? Give the concrete example
+   from the knowledge base (the 40 ms average) and name which bucket boundary
+   in `BUCKET_BOUNDS` would expose it.
+5. The duration clock starts after `read_head` returns, not when `serve_one`
+   is entered. What specific keep-alive behavior would corrupt the metric the
+   other way, and which timeout bounds the gap the current placement excludes?
+6. The success-path `record_request` sits after `client.flush()`, not after
+   the response head is parsed. What real slowness does that ordering capture
+   that the earlier placement would hide? And why are mid-exchange `?` deaths
+   deliberately NOT in `requests_total`?
+7. `ttfb_ms` is `null` for a request rejected by auth, but `0.0` is a possible
+   value for a pooled connect. Why is `null`-vs-`0` a load-bearing distinction
+   and not pedantry? What breaks if you use `-1` as "didn't happen"?
+8. Rejections increment BOTH `requests_total` and `rejected_total{by=...}`.
+   Defend the double-count: what two different questions do the two series
+   answer, and what would you lose folding them into one?
+9. Why do `/metrics` and `/health` live on a separate listener instead of
+   reserved paths on :8080? Give all three reasons from the design, and name
+   which production proxies made the same choice.
+10. `/health` returns HTTP 200 even when `"status":"degraded"`. Why is 503
+    the wrong status for "an upstream has zero healthy backends"? What
+    component already owns backend health, and what would a supervisor
+    restarting Ferrum on backend death actually accomplish?
+11. The `active_connections` gauge is maintained by a `Drop` guard rather
+    than paired `conn_opened()`/`conn_closed()` calls. Name the failure mode
+    this makes unrepresentable, the two prior levels that used the same
+    pattern, and what a leaked gauge looks like on a dashboard a week later.
+12. A suppressed `debug!` costs one atomic load and a compare. Walk through
+    what the macro does BEFORE calling `emit`, and explain why putting the
+    level check inside `emit` instead would still allocate. Where else in
+    this level does the same "do the work on the rare path" principle appear?
+13. `metrics.rs` says the fix for two threads bumping a counter losing an
+    increment is NOT `Ordering::SeqCst`. What actually guarantees no lost
+    increments under `Relaxed`, and what DOESN'T Relaxed guarantee here that
+    a scrape can observe? Why is that acceptable for metrics?
+14. The registry's label slots are fixed at startup from declared upstreams.
+    Which future level breaks that assumption, and where is the seam
+    recorded? What would have to change in `Metrics` to survive it?
+
 ## Session log
 
 - **2026-07-26** — Course kickoff. Knowledge base built (all 14 levels). `rproxy` crate created. Module 1.1 taught & assigned. Repo pushed to github.com/Vasant18/Ferrum.
@@ -1042,3 +1223,4 @@ rather than being quietly reassigned here.
 - **2026-08-11 (later)** — Final whole-branch review of Level 7 (most capable model, looking at the six task-diffs as one composed feature rather than task-by-task) found one **critical cross-task interaction bug** that no individual task review could see: a pooled connection that dies between the idle-check and the first write (a genuine TOCTOU race — the backend closes it during its idle window) was neither retried nor answered. The connect-retry loop only covered `TcpStream::connect`; a pool hit broke out of that loop immediately, so the first write's failure hit a bare `?` that propagated past the already-exited retry logic straight to `handle_client`'s generic handler, which just logs and drops the connection — **no HTTP response at all**, not even a 502, for a case that should have retried on another server exactly like a failed connect already did. Confirmed independently by re-reading the actual source before dispatching a fix (not just trusting the reviewer's report). The review also caught four stale "dead until Task 5" comments that should have been removed when Task 5 removed the `#[allow(dead_code)]` attributes they were justifying. **Fix:** the non-idempotent request rewrite (`route.rules.apply_request` — appends `X-Forwarded-For`, etc.) now runs exactly once, before any connection attempt, producing a serialized `head_bytes` once; the connection-acquisition loop was extended so a write failure on either a pooled or freshly-dialed connection is handled identically to a connect failure (`mark_failure`, log, retry-or-502) — scoped *only* to the head-write, never to body-streaming or flush, since a body byte reaching a backend commits a possibly non-idempotent side effect and can never be safely replayed. Live-verified with a deliberately-poisoned pooled socket (TCP RST via `SO_LINGER`): an idempotent GET drawing the dead connection produces a `write failed` log line and a transparent retry to a healthy backend (client sees 200); a non-idempotent POST in the same situation correctly gets 502 with no replay. Fix dispatch took three attempts — two lost to transient infrastructure errors (API stream timeouts), not design problems; the correct design (serialize once, retry only the write) was worked out on the first attempt and carried forward via resume, then via a fresh self-contained brief once resume itself hit the same class of error. One agent's mid-edit had left a coherent-but-incomplete intermediate state (a duplicate rewrite block, two extra transient warnings); the next dispatch correctly detected and finished it rather than compounding it — verified by the coordinator reading the final source directly, not by trusting either report. Scoped re-review (most capable model) verdict: **ADDRESSED, no new findings**, independently re-confirmed. 168 tests pass; release build holds the exact 4-warning baseline throughout. This finding and its fix are the reason a whole-branch final review is worth the cost even after every task passed its own scoped review — cross-task composition bugs are structurally invisible to a reviewer who only ever sees one task's diff at a time.
 - **2026-08-19/20** — Level 8 (Security & TLS) implemented inline **in one pass, straight from the design to code**, at Vessey's explicit instruction to skip the approval ceremony and execute in "auto mode" — the first level built without either a subagent-driven task sequence (L4/L5/L7) or a pre-written plan reviewed before coding (L6). Design at `docs/superpowers/specs/2026-08-19-level-8-security-tls-design.md`; the plan (`docs/superpowers/plans/2026-08-19-level-8-security-tls.md`) was written *after* the code, as a record rather than a brief. New `tls.rs`: rustls + tokio-rustls with the crypto provider pinned to `ring` rather than the `aws-lc-rs` default (far lighter build, no cmake/NASM), PEM chain/key loading, TLS1.3+1.2 with no reachable path to anything older, ALPN pinned to `http/1.1`, mTLS as `off`/`optional`/`required` via `WebPkiClientVerifier`, four startup guardrails covering both directions of the config trap, and `TLS_HANDSHAKE_TIMEOUT`. New `security.rs`: `ConnLimiter` (global ceiling + per-IP cap, `Drop`-released via the L3 `Lease` pattern, `fetch_update` for the global claim, rollback on per-IP refusal, map-entry removal on last close) plus hand-rolled `Cidr`/`CidrList` (deny-beats-allow, non-empty allow list is default-deny, socket-peer only, IPv4-mapped normalized at the edge) plus `Limits`/`parse_size`. `proxy.rs`: `handle_client`/`serve_one` made generic over `S: AsyncRead + AsyncWrite + Unpin` — the only two signatures that had pinned `TcpStream`, since Level 1 already made `Conn<S>` generic, which is why all seven prior levels run over TLS with no other change; `scheme` threaded into `ForwardContext`, filling the seam L5 left behind; `BodyCopy` + `copy_body_limited` enforcing the body cap mid-stream on decoded payload; 431 on header count and 413 on body, both before routing. `main.rs`: the handshake moved **inside** the spawned task (awaiting it in the accept loop would let a single `ClientHello` byte stall every new connection process-wide — a one-attacker total DoS that passes every functional test), ten new CLI flags, and TLS built before `bind`. **Two decisions reversed from the design during implementation, both recorded rather than quietly applied:** a denied CIDR closes the connection instead of answering 403 (on a TLS listener a 403 would require completing a handshake for an address already refused — spending an RSA/ECDHE operation on the attacker's behalf, turning the cheapest rejection into one of the most expensive), and the two dead-code warnings the level introduced were resolved by making `in_flight`/`is_empty` genuinely used rather than by `#[allow(dead_code)]`. 214 tests pass (168 from L7 kept green, +46); release build holds the exact 4-warning baseline. Live-verified all 15 checks incl. mTLS reject/admit, 413/431 with zero backend hits for rejections, both CIDR semantics, the per-IP cap with slot reuse proving `Drop` released, the 10.0s handshake deadline firing, backward compatibility for the L1 shorthand and a combined L4+L5+L6+L7 invocation, and — the level's central claim, unreachable by unit test — **three deliberately stalled handshakes while a real client was served in 0.03s**. **Process cost of skipping the plan-first flow, recorded because it is the point:** the design/code divergence on the 403 went uncaught until live verification, where a subagent-driven level would have had a reviewer read the plan against the diff. Two harness bugs also found: a first guardrail run that reported four passes but was worthless because **unquoted `$args` in zsh does not word-split** (each flag pair fell through to the route-spec arm and exited 1 for the wrong reason — caught by reading the error text, not the exit status), and a unit test that deadlocked the suite by writing 200 KB into a 64 KB duplex. Both were the harness's bugs, not the proxy's; L7 hit the same class twice, and the standing lesson is that a passing test harness is itself untested code. Background processes cleaned (`pgrep` clean). Commits `baff59b` (name correction) and `ead48a2` (the WIP push, made before verification at Vessey's request) pushed to `github.com/Vasant18/Ferrum` main as Vasant18 via the `switching-gh-accounts` skill, gh credential switched back to the personal account afterwards.
 - **2026-08-21** — Level 9 (OS Internals) studied. **Theory level, zero production code changed** — the correct outcome rather than a shortfall, since Levels 1–8 already run on this machinery; the work was reading the existing code through a lower lens. Write-up at `docs/level-9-os-internals.md`: the `read()`-blocks problem and C10K; the readiness-API evolution (`select`→`poll`→`epoll`/`kqueue`→`IOCP`/`io_uring`) with the O(n)→O(ready) transition identified as the single property that makes 10k idle connections cheap; the full `.await`→`Poll::Pending`→`Waker`→reactor→`kevent`→re-poll path traced through Ferrum's own `Conn::read_head` rather than a toy example, including the non-blocking-read fast path that bypasses the reactor entirely; and nginx re-read as the same epoll architecture, differing only in who writes the state machines. **Facts verified against the tree rather than recalled:** this machine is `Darwin arm64` so the reactor is **`kqueue`, not `epoll`** (every KB mental model is epoll-shaped because that is where proxies deploy); the reactor crate is `mio 1.2.2`, a transitive dependency never named in `Cargo.toml`; `features = ["full"]` silently selects the multi-threaded scheduler with **8 worker threads**. **The award for most interesting measurement goes to the await map:** counting `.await` in code and excluding the comment mentions that inflate a naive `grep` by ~5% gives **72 production / 61 test**, with only **three of thirteen files** holding a production await (`proxy.rs` 57, `health.rs` 10, `main.rs` 5). `balancer.rs` has **zero** — 1,750+ lines of seven balancing algorithms, a three-state breaker, and a LIFO pool, entirely synchronous. Read through this lens, four separate levels (L1 `http.rs`, L5 `rewrite.rs`, L6's rejection of the async middleware trait, L8 `tls.rs`) independently made one unnamed optimization: keep the compiler-generated state machine small. **The blocking-the-executor audit produced a genuinely stronger result than expected:** every production function that takes a lock (`take_conn`, `return_conn`, `try_acquire`, `release`, `RateLimiter::allow`) is a plain `fn`, not `async fn` — so "never hold a lock across `.await`" is **compiler-enforced**, not a review convention, since `.await` cannot appear in a non-async fn. Corroborated by `tokio::sync` appearing *only* inside comments explaining why it is unused, and `spawn_blocking`/`thread::sleep` appearing zero times. Two lesser audit results: `tls.rs`'s synchronous `std::fs` is harmless because L8 ordered it before `bind` (recorded as a coincidence, not claimed as foresight), and `router.rs:53`'s per-request regex is safe **only** because Rust's `regex` crate guarantees linear time with no backtracking — the same line in a PCRE-based proxy is a DoS vector, so this is a Level 2 dependency choice quietly holding up a Level 9 safety property. **Two findings recorded, deliberately not fixed:** (1) `Server.addr` is a `String` shape-validated at startup but never resolved, so `TcpStream::connect` re-resolves on every pool miss with no DNS caching or TTL awareness — invisible so far because L7's pooling skips `connect` on a hit, and not fixed because resolving once at startup is the *wrong* fix for backends that move, with a TTL-aware resolver cache deserving its own level; (2) the runtime's whole shape (8 workers, work stealing, blocking pool) is implicit in `#[tokio::main]` and stated nowhere, which matters the first time anyone tunes it — not changed, because changing a default with no benchmark is exactly the "measure, don't guess" mistake L7 warned about, and the missing `wrk`/`oha` baseline stays L7's recorded debt rather than being reassigned here. 14-question quiz added. Two corrections made during the write-up, both caught by re-verifying rather than trusting the first number: an initial `.await` count of 137 was wrong because it counted prose mentions inside doc comments, and a claimed "7,000-line proxy" was stale (8,793 lines after L8's `tls.rs` + `security.rs`).
+- **2026-08-24/25** — Level 10 (Observability) implemented inline across two sessions in "auto mode" (Vessey approved the recommended decisions and asked for direct execution), per the approved design (`docs/superpowers/specs/2026-08-24-level-10-observability-design.md`). Session 1 (08-24): design brainstormed (three decision points resolved — from-scratch over the `tracing`/`metrics` crates since L9 proved the request lifecycle lives in one task; per-stage timing in the access log over W3C traceparent for a single-hop proxy; a separate off-by-default admin listener over reserved paths since `/metrics` is reconnaissance gold), spec written and committed, `metrics.rs` built (atomic registry, fixed-bucket histograms with scrape-time cumulation, Prometheus text renderer, 9 tests) — then work paused mid-level at Vessey's request with a WIP push. Session 2 (08-25): the rest — `logging.rs` (leveled stderr macros, hand-rolled RFC 3339 with the `civil_from_days` calendar math cross-checked against Python at three fixed points, catching a first hardcoded test timestamp that was off by 4 days), `ReqCtx` timing fields + `Instant` stamps and every-exit-path metrics recording in `proxy.rs`, JSON access log with RFC 8259 escaping + `--log-plain`, per-request diagnostics demoted to `debug!` across five files, `admin.rs` (`/metrics` + `/health`, 5 s deadline, startup-fatal bind), `ConnGauge` RAII wiring, three CLI flags. 230 tests pass (214 kept green, +16). Live-verified the full checklist: `jq`-parseable log with stage timings (`null` on a rejection that never routed, `connect_ms:0.0`+`pooled:true` on reuse), status-class counters + `rejected_total{by="auth"}` attribution, cumulative buckets with `+Inf`==`_count`, `/health` walked ok(2/2)→ok(1/2)→degraded(0/2, still HTTP 200)→recovered against live backend kills with matching WARN/INFO breaker lines in the error log, admin-plane isolation (`/metrics` on :8080 proxies to the backend), 404/405 on the admin socket, and both escape hatches. One harness bug, third strike for the "the harness is untested code" lesson: a `pkill -f '127.0.0.1.*9002'` aimed at a backend matched the proxy's own command line (its args contain the backend list) and killed it mid-test — switched to killing by listening port (`lsof -sTCP:LISTEN`). Commits `22a4629` (spec), `83a9400` (metrics WIP, pushed 08-24), `9ebf1c6` (the rest) pushed to `github.com/Vasant18/Ferrum` main via the `switching-gh-accounts` skill, gh switched back to the personal account after each push.
