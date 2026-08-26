@@ -1235,6 +1235,12 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
     } else {
         Vec::new()
     };
+    // The header goes on AFTER the cache snapshot (X-Cache describes this
+    // exchange, not the resource — a future hit must be free to say HIT) and
+    // BEFORE the chain/L5 passes, so an operator rule keeps the last word.
+    if let Some(outcome) = ctx.cache {
+        http::set_header(&mut resp.headers, "X-Cache", &outcome.to_ascii_uppercase());
+    }
 
     route.chain.run_response_all(&ctx, &mut resp);
     // Level 5 response rewriting (explicit set-/remove-resp-header rules).
