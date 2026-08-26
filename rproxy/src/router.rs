@@ -100,6 +100,10 @@ pub struct Route {
     pub rules: RewriteRules,
     /// Level 6 middleware pipeline for requests matched by this route.
     pub chain: crate::middleware::Chain,
+    /// Level 11: `Some(default_ttl)` when `;cache[=SECS]` was given. Caching
+    /// is opt-in per route; the TTL is the fallback for responses carrying a
+    /// validator but no explicit freshness. `None` = this route never caches.
+    pub cache_ttl: Option<std::time::Duration>,
 }
 
 impl Route {
@@ -118,6 +122,7 @@ impl Route {
             // `--no-request-id` / `--no-access-log` are set, mirroring how it
             // already overrides `rules.forwarded`.
             chain: default_chain(true, true),
+            cache_ttl: None,
         }
     }
 
@@ -175,11 +180,30 @@ impl RouteTable {
     /// (`route.rules`). Both share this one selection logic so a Level 3/4
     /// caller reading `find` and a Level 5 caller reading `find_route` can
     /// never disagree about which route won.
+    /// `#[allow(dead_code)]`: production callers moved to
+    /// `find_route_indexed` when Level 11's cache key needed the route index,
+    /// but this is the API a non-caching caller should keep reaching for —
+    /// same documented-seam stance as `find` above it.
+    #[allow(dead_code)]
     pub fn find_route(&self, method: &str, host: Option<&str>, path: &str) -> Option<&Route> {
+        self.find_route_indexed(method, host, path).map(|(_, r)| r)
+    }
+
+    /// Level 11 variant: also yields the route's table index. The cache key
+    /// includes that index so two routes that rewrite the same client target
+    /// differently can never share an entry — indices are stable for the
+    /// process lifetime because the table is immutable after startup.
+    pub fn find_route_indexed(
+        &self,
+        method: &str,
+        host: Option<&str>,
+        path: &str,
+    ) -> Option<(usize, &Route)> {
         self.routes
             .iter()
-            .filter(|r| r.matches(method, host, path))
-            .max_by_key(|r| r.specificity())
+            .enumerate()
+            .filter(|(_, r)| r.matches(method, host, path))
+            .max_by_key(|(_, r)| r.specificity())
     }
 
     /// Every distinct pool referenced by the table, for the health prober to
@@ -332,7 +356,7 @@ pub fn resolve_route(
     // `MiddlewareConfig::from_options` each see only their own keys, so neither
     // has to know about the other, and a typo is rejected here — once — with a
     // message that names the offending key.
-    let (l5_opts, l6_opts) = partition_options(&m.options)?;
+    let (l5_opts, l6_opts, l11_opts) = partition_options(&m.options)?;
 
     // An empty L5 string yields defaults (forwarded on unless `--no-forwarded`
     // cleared it), so a route with no `;` behaves exactly as before Level 5.
@@ -351,7 +375,9 @@ pub fn resolve_route(
         ));
     };
 
-    Ok(Route { host: m.host, method: m.method, path: m.path, upstream, rules, chain })
+    let cache_ttl = parse_cache_option(&l11_opts)?;
+
+    Ok(Route { host: m.host, method: m.method, path: m.path, upstream, rules, chain, cache_ttl })
 }
 
 /// The default middleware chain (access log + request id, both toggleable),
@@ -362,13 +388,19 @@ pub fn default_chain(request_id: bool, access_log: bool) -> crate::middleware::C
         .build()
 }
 
+/// Level 11's option keys. One key; the value grammar (`cache` bare or
+/// `cache=SECS`) is parsed in `parse_cache_option`, keeping this partition a
+/// pure router-side concern exactly like the L5/L6 families.
+pub const L11_KEYS: &[&str] = &["cache"];
+
 /// Split a route's raw `;`-separated option string into (Level-5 keys,
-/// Level-6 keys), preserving each segment verbatim so the sub-parsers see
-/// exactly what the operator wrote. A segment whose key is in neither family is
-/// the "unknown option" error — raised here, not in either sub-parser.
-fn partition_options(opts: &str) -> io::Result<(String, String)> {
+/// Level-6 keys, Level-11 keys), preserving each segment verbatim so the
+/// sub-parsers see exactly what the operator wrote. A segment whose key is in
+/// no family is the "unknown option" error — raised here, not in a sub-parser.
+fn partition_options(opts: &str) -> io::Result<(String, String, String)> {
     let mut l5: Vec<&str> = Vec::new();
     let mut l6: Vec<&str> = Vec::new();
+    let mut l11: Vec<&str> = Vec::new();
     for raw in opts.split(';') {
         let seg = raw.trim();
         if seg.is_empty() {
@@ -383,6 +415,8 @@ fn partition_options(opts: &str) -> io::Result<(String, String)> {
             l5.push(seg);
         } else if crate::middleware::L6_KEYS.contains(&key) {
             l6.push(seg);
+        } else if L11_KEYS.contains(&key) {
+            l11.push(seg);
         } else {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -390,8 +424,34 @@ fn partition_options(opts: &str) -> io::Result<(String, String)> {
             ));
         }
     }
-    Ok((l5.join(";"), l6.join(";")))
+    Ok((l5.join(";"), l6.join(";"), l11.join(";")))
 }
+
+/// Parse the L11 segment: empty (option absent) → None; `cache` → the
+/// documented default TTL; `cache=SECS` → that many seconds. A zero TTL is
+/// allowed and means "cache but always revalidate" for validator-less
+/// defaulting — coherent, if eccentric.
+fn parse_cache_option(seg: &str) -> io::Result<Option<std::time::Duration>> {
+    if seg.is_empty() {
+        return Ok(None);
+    }
+    match seg.split_once('=') {
+        None => Ok(Some(DEFAULT_CACHE_TTL)),
+        Some((_, v)) => {
+            let secs: u64 = v.trim().parse().map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("cache= expects seconds, got {v:?}"),
+                )
+            })?;
+            Ok(Some(std::time::Duration::from_secs(secs)))
+        }
+    }
+}
+
+/// Default TTL for `;cache` with no explicit seconds: long enough to absorb a
+/// burst, short enough that a forgotten `;cache` cannot serve day-old data.
+pub const DEFAULT_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
 
 #[cfg(test)]
 mod tests {

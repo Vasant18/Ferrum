@@ -17,6 +17,7 @@
 
 mod admin;
 mod balancer;
+mod cache;
 mod health;
 mod http;
 mod logging;
@@ -69,6 +70,11 @@ async fn main() -> std::io::Result<()> {
     // Level 10: the admin plane (`/metrics` + `/health`). `None` = no admin
     // listener at all — exposing it is an explicit choice (see admin.rs).
     let mut admin_addr: Option<String> = None;
+    // Level 11: cache bounds. The cache itself is per-route opt-in
+    // (`;cache=`), but the store is one shared, process-wide budget.
+    let mut cache_max_bytes = cache::DEFAULT_MAX_BYTES;
+    let mut cache_max_entries = cache::DEFAULT_MAX_ENTRIES;
+    let mut cache_max_body = cache::DEFAULT_MAX_BODY;
     // Level 7 pool tunables, seeded with the same defaults the hardcoded
     // constants carried. Each flag overrides one field; every declared upstream
     // (and the default catch-all) inherits the result — these are GLOBAL, with
@@ -174,6 +180,20 @@ async fn main() -> std::io::Result<()> {
             }
             "--log-plain" => middleware::observe::set_plain(true),
             "--admin" => admin_addr = Some(next_val(&mut args, "--admin")?),
+            // ---- Level 11: cache bounds ----
+            "--cache-max-bytes" => {
+                cache_max_bytes = security::parse_size(&next_val(&mut args, "--cache-max-bytes")?)
+                    .map_err(|e| bad_arg(&e))?
+            }
+            "--cache-max-entries" => {
+                cache_max_entries = next_val(&mut args, "--cache-max-entries")?
+                    .parse()
+                    .map_err(|_| bad_arg("--cache-max-entries expects a number"))?
+            }
+            "--cache-max-body" => {
+                cache_max_body = security::parse_size(&next_val(&mut args, "--cache-max-body")?)
+                    .map_err(|e| bad_arg(&e))?
+            }
             // Anything else is a route spec (bare host:port or path=BACKEND).
             _ => route_specs.push(arg),
         }
@@ -194,6 +214,15 @@ async fn main() -> std::io::Result<()> {
     // label slots are the declared upstream names — the registry is shaped by
     // config, never by traffic (see metrics.rs on cardinality). Shared with
     // every connection task and the admin listener exactly like `routes`.
+    // Level 11: one shared cache for the whole process. Built unconditionally
+    // (it is a few empty shards when no route opts in) so the wiring carries
+    // no Option; routes without `;cache=` never touch it past one `if`.
+    let cache = Arc::new(cache::Cache::new(
+        cache_max_bytes,
+        cache_max_entries,
+        cache_max_body,
+    ));
+
     let metrics = Arc::new(metrics::Metrics::new(
         &routes
             .upstreams()
@@ -256,9 +285,10 @@ async fn main() -> std::io::Result<()> {
         })?;
         println!("  admin: {addr} (/metrics, /health)");
         let metrics = Arc::clone(&metrics);
+        let cache = Arc::clone(&cache);
         let upstreams = routes.upstreams();
         tokio::spawn(async move {
-            admin::serve(admin_listener, metrics, upstreams).await;
+            admin::serve(admin_listener, metrics, cache, upstreams).await;
         });
     }
 
@@ -331,6 +361,7 @@ async fn main() -> std::io::Result<()> {
                 // Arc — no shared state, no locking.
                 let acceptor = tls_acceptor.clone();
                 let metrics = Arc::clone(&metrics);
+                let cache = Arc::clone(&cache);
                 tokio::spawn(async move {
                     // Hold the limiter slot for the whole connection. Named
                     // `_guard` rather than `_` because `let _ = guard;` would
@@ -391,12 +422,12 @@ async fn main() -> std::io::Result<()> {
                             // "https" is what makes X-Forwarded-Proto honest,
                             // filling the seam Level 5 left at proxy.rs's
                             // ForwardContext.
-                            proxy::handle_client(tls, &routes, peer, backend_timeout, "https", limits, &metrics)
+                            proxy::handle_client(tls, &routes, peer, backend_timeout, "https", limits, &metrics, &cache)
                                 .await;
                         }
                         // ---- plaintext listener (Levels 1-7, unchanged) ----
                         None => {
-                            proxy::handle_client(stream, &routes, peer, backend_timeout, "http", limits, &metrics)
+                            proxy::handle_client(stream, &routes, peer, backend_timeout, "http", limits, &metrics, &cache)
                                 .await;
                         }
                     }

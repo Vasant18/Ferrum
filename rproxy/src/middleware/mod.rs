@@ -136,6 +136,10 @@ pub struct ReqCtx {
     /// carries it because a latency regression that only affects pool *misses*
     /// looks identical to a slow backend unless the log can split the two.
     pub pooled: bool,
+    /// Level 11: cache outcome for this exchange — "hit", "miss",
+    /// "revalidated", or None when the route doesn't cache / the request
+    /// wasn't cacheable. The log's version of the `X-Cache` header.
+    pub cache: Option<&'static str>,
 }
 
 impl ReqCtx {
@@ -157,6 +161,7 @@ impl ReqCtx {
             t_connect: None,
             t_first_byte: None,
             pooled: false,
+            cache: None,
         }
     }
 }

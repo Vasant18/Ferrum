@@ -47,15 +47,23 @@ const ADMIN_TIMEOUT: Duration = Duration::from_secs(5);
 /// bind succeeds — the bind itself happens in `main` so a bad `--admin`
 /// address is a startup failure (exit 1, no service announced), the same
 /// guardrail posture as Level 8's TLS config checks.
-pub async fn serve(listener: TcpListener, metrics: Arc<Metrics>, upstreams: Vec<Arc<Upstream>>) {
+pub async fn serve(
+    listener: TcpListener,
+    metrics: Arc<Metrics>,
+    cache: Arc<crate::cache::Cache>,
+    upstreams: Vec<Arc<Upstream>>,
+) {
     loop {
         match listener.accept().await {
             Ok((stream, peer)) => {
                 let metrics = Arc::clone(&metrics);
+                let cache = Arc::clone(&cache);
                 let upstreams = upstreams.clone();
                 tokio::spawn(async move {
-                    if let Err(e) =
-                        tokio::time::timeout(ADMIN_TIMEOUT, serve_one(stream, &metrics, &upstreams))
+                    if let Err(e) = tokio::time::timeout(
+                        ADMIN_TIMEOUT,
+                        serve_one(stream, &metrics, &cache, &upstreams),
+                    )
                             .await
                             .unwrap_or_else(|_| {
                                 Err(std::io::Error::new(
@@ -76,6 +84,7 @@ pub async fn serve(listener: TcpListener, metrics: Arc<Metrics>, upstreams: Vec<
 async fn serve_one(
     stream: TcpStream,
     metrics: &Metrics,
+    cache: &crate::cache::Cache,
     upstreams: &[Arc<Upstream>],
 ) -> std::io::Result<()> {
     let mut conn = Conn::new(stream);
@@ -99,7 +108,13 @@ async fn serve_one(
                 // scrapers are permissive, but saying exactly what we speak
                 // costs nothing.
                 "text/plain; version=0.0.4",
-                metrics.render(),
+                {
+                    // L10's registry plus L11's cache block: one scrape, one
+                    // document — the scraper doesn't care who owns a counter.
+                    let mut m = metrics.render();
+                    m.push_str(&cache.render_prometheus());
+                    m
+                },
             ),
             "/health" => {
                 let (body, degraded) = health_json(metrics, upstreams);

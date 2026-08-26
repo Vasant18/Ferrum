@@ -537,6 +537,7 @@ pub async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
     scheme: &'static str,
     limits: crate::security::Limits,
     metrics: &crate::metrics::Metrics,
+    cache: &crate::cache::Cache,
 ) {
     // NOTE: `set_nodelay` used to live here, but it is a `TcpStream` inherent
     // method and this function no longer knows it has one. It moved to the
@@ -546,7 +547,17 @@ pub async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
     let mut client = Conn::new(client);
 
     loop {
-        match serve_one(&mut client, routes, peer, backend_timeout, scheme, limits, metrics).await
+        match serve_one(
+            &mut client,
+            routes,
+            peer,
+            backend_timeout,
+            scheme,
+            limits,
+            metrics,
+            cache,
+        )
+        .await
         {
             Ok(true) => continue,          // keep-alive: next request, same socket
             Ok(false) => return,           // clean close
@@ -570,6 +581,7 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
     scheme: &'static str,
     limits: crate::security::Limits,
     metrics: &crate::metrics::Metrics,
+    cache: &crate::cache::Cache,
 ) -> io::Result<bool> {
     // ---- 1. Read + parse the request head (with slowloris deadline) ----
     let head_bytes =
@@ -669,7 +681,7 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
     // `upstream` from it to keep the balancing code below unchanged.
     let host = http::header(&req.headers, "host").map(http::host_without_port);
     let path = http::target_path(&req.target);
-    let route = match routes.find_route(&method, host, path) {
+    let (route_idx, route) = match routes.find_route_indexed(&method, host, path) {
         Some(r) => r,
         None => {
             // No route matched. This is a routing decision, not a client
@@ -754,6 +766,82 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
         metrics.record_rejection(ctx.rejected_by.unwrap_or("other"));
         metrics.record_request(m_id, rej.status, t_start.elapsed());
         return Ok(reusable && client_keep_alive);
+    }
+
+    // ---- 2b'. Level 11: consult the cache ----
+    // Placement is the level's second-most-important decision (after the key):
+    // AFTER the middleware chain — a cached response must never bypass auth or
+    // rate limiting, so a 401'd client gets no cache read at all — and BEFORE
+    // the Level 5 rewrite, so the key is built from what the CLIENT asked for.
+    // A fresh hit replaces the entire backend leg: no lease, no socket, no
+    // breaker traffic — the shield the knowledge base describes.
+    //
+    // `cache_plan` carries what the response path needs later: the key input
+    // snapshot (the live `req` is about to be rewritten in place) and the
+    // route's default TTL. `revalidators` carries a stale entry's validators
+    // into the outbound request. All of it is None/empty on non-caching
+    // routes, which therefore pay one `if` and nothing else.
+    let mut cache_plan: Option<(crate::cache::KeyInput, Duration)> = None;
+    // (stale key, default TTL, the client's own If-None-Match) — the third
+    // rides along because the 304 handler lives after this block's scope.
+    let mut revalidate: Option<(crate::cache::Key, Duration, Option<String>)> = None;
+    if let Some(default_ttl) = route.cache_ttl {
+        let client_host = original_host.as_deref().map(http::host_without_port).unwrap_or("");
+        let (req_no_store, req_no_cache) = crate::cache::request_cache_control(&req);
+        // The client's own conditional, snapshotted BEFORE the stale path
+        // overwrites If-None-Match with the cache's validator. A fresh hit
+        // (and a revived stale entry) answers it at the proxy with a 304.
+        let client_inm = http::header(&req.headers, "if-none-match").map(str::to_string);
+        if crate::cache::request_is_cacheable(&req) && !req_no_store {
+            let key_input =
+                crate::cache::KeyInput::from_request(route_idx, &req, client_host);
+            // A client `no-cache` skips the lookup (it demands end-to-end
+            // revalidation) but still allows the response to be stored.
+            if !req_no_cache {
+                match cache.lookup(&key_input) {
+                    crate::cache::Lookup::Hit(cached) => {
+                        ctx.cache = Some("hit");
+                        let reusable = serve_cached(
+                            client,
+                            &cached,
+                            client_inm.as_deref(),
+                            route,
+                            &ctx,
+                            client_keep_alive,
+                            req_framing,
+                        )
+                        .await?;
+                        metrics.record_request(m_id, cached.status, t_start.elapsed());
+                        return Ok(reusable);
+                    }
+                    crate::cache::Lookup::Stale {
+                        key,
+                        etag,
+                        last_modified,
+                    } => {
+                        // Turn the outbound request conditional — OUR
+                        // validators replace the client's (theirs were
+                        // snapshotted into `client_inm` above; serve_cached
+                        // re-applies them after a 304 revives the entry). If
+                        // the origin 304s, the response path re-stamps and
+                        // serves the entry — one tiny round trip, no body.
+                        if let Some(e) = &etag {
+                            http::set_header(&mut req.headers, "If-None-Match", e);
+                        } else if let Some(lm) = &last_modified {
+                            http::set_header(&mut req.headers, "If-Modified-Since", lm);
+                        }
+                        ctx.cache = Some("miss"); // upgraded to "revalidated" on 304
+                        revalidate = Some((key, default_ttl, client_inm.clone()));
+                    }
+                    crate::cache::Lookup::Miss => {
+                        ctx.cache = Some("miss");
+                    }
+                }
+            } else {
+                ctx.cache = Some("miss");
+            }
+            cache_plan = Some((key_input, default_ttl));
+        }
     }
 
     // ---- 2c. Serialize the forwarded request head ONCE, before any connection
@@ -1073,6 +1161,52 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
         lease.mark_success();
     }
 
+    // ---- 5a. Level 11: a 304 answers our revalidation ----
+    // Only OUR conditional can produce this 304: a client conditional never
+    // reaches the backend on a caching route (a fresh hit answers it at the
+    // proxy, and a stale entry replaces the client's validators with ours).
+    // Re-stamp the entry and serve the cached body — the entire payoff of
+    // keeping stale entries around.
+    if resp.status == 304 {
+        if let Some((stale_key, default_ttl, client_inm)) = &revalidate {
+            let ttl = crate::cache::ttl_from_304(&resp.headers, *default_ttl);
+            if let Some(cached) = cache.restamp(stale_key, ttl) {
+                ctx.cache = Some("revalidated");
+                // A 304 has no body by RFC, so the backend connection is
+                // clean — pool it under the same five conditions as ever.
+                let resp_framing = http::response_body_framing(&method, &resp)?;
+                if is_poolable(
+                    resp_framing,
+                    backend_sent_close,
+                    backend_is_http11,
+                    false,
+                    backend.buffer_is_empty(),
+                ) {
+                    lease.return_conn(backend);
+                }
+                let reusable = serve_cached(
+                    client,
+                    &cached,
+                    client_inm.as_deref(),
+                    route,
+                    &ctx,
+                    client_keep_alive,
+                    // The request body was already forwarded above; nothing
+                    // left to drain on the client leg.
+                    BodyFraming::None,
+                )
+                .await?;
+                metrics.record_request(m_id, cached.status, t_start.elapsed());
+                return Ok(reusable);
+            }
+            // Entry evicted between lookup and 304 (rare): we hold a 304 and
+            // no body to attach it to. Pass the 304 through — wrong for an
+            // unconditional client, but re-requesting would replay a request
+            // already committed to a backend. Honest, rare, logged.
+            crate::warn!("[{peer}] 304 for evicted cache entry; passing through");
+        }
+    }
+
     // ---- 6. Relay the response: rewritten head, then streamed body ----
     // Level 6 response phase, in REVERSE chain order, for every layer (the
     // request was not rejected, so all were entered). Runs BEFORE Level 5's
@@ -1080,8 +1214,29 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
     // word over a middleware-injected header (X-Request-Id), matching Level 5's
     // "explicit rules run last" principle — and both stay before the framing
     // block below, so no header rule can displace the framing the proxy owns.
-    route.chain.run_response_all(&ctx, &mut resp);
+    // ---- 5b. Level 11: decide storability BEFORE the client-leg mutations.
+    // What the cache must remember is the ORIGIN's response: hop-by-hop
+    // headers are connection-specific by definition, and everything the
+    // chain/L5/framing block below adds describes THIS client's connection,
+    // not the resource. So: strip hop-by-hop first (the client leg needed it
+    // anyway and it commutes with the middleware response phase), snapshot
+    // the headers for the cache, then let the client-leg pipeline mutate
+    // freely.
     strip_hop_by_hop(&mut resp.headers);
+    let mut store_plan: Option<(crate::cache::Key, crate::cache::Freshness)> = None;
+    if let Some((key_input, default_ttl)) = &cache_plan {
+        let f = crate::cache::freshness_from_headers(resp.status, &resp.headers, *default_ttl);
+        if f.ttl.is_some() {
+            store_plan = Some((crate::cache::Key::build(key_input, &f.vary_names), f));
+        }
+    }
+    let cacheable_headers: Vec<(String, String)> = if store_plan.is_some() {
+        resp.headers.clone()
+    } else {
+        Vec::new()
+    };
+
+    route.chain.run_response_all(&ctx, &mut resp);
     // Level 5 response rewriting (explicit set-/remove-resp-header rules).
     // Placed after hop-by-hop stripping for the same reason as the request
     // leg, and before the framing block so a rule cannot displace the
@@ -1117,8 +1272,55 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
     }
 
     client.write_all(&http::write_response_head(&resp)).await?;
-    backend.copy_body_to(client.stream_mut(), resp_framing).await?;
+    match &store_plan {
+        // Level 11: tee the streamed body into a bounded buffer on the way
+        // to the client. The client sees identical bytes and timing either
+        // way; overflow (body > --cache-max-body) silently cancels the store.
+        Some(_) => {
+            let mut tee = TeeWriter::new(client.stream_mut(), cache.max_body as usize);
+            backend.copy_body_to(&mut tee, resp_framing).await?;
+            if !tee.overflow {
+                let (key, f) = store_plan.take().expect("checked Some above");
+                let (etag, last_modified) = crate::cache::validators(&cacheable_headers);
+                let now = std::time::Instant::now();
+                cache.store(
+                    key,
+                    crate::cache::Entry {
+                        status: resp.status,
+                        reason: resp.reason.clone(),
+                        headers: cacheable_headers,
+                        body: tee.buf.into(),
+                        stored_at: now,
+                        ttl: f.ttl.expect("store_plan only built with Some ttl"),
+                        etag,
+                        last_modified,
+                        vary_names: f.vary_names,
+                        last_used: now,
+                    },
+                );
+            }
+        }
+        None => {
+            backend.copy_body_to(client.stream_mut(), resp_framing).await?;
+        }
+    }
     client.flush().await?;
+
+    // Level 11, RFC 9111 §4.4: a non-error response to an unsafe method
+    // invalidates the cached entry for that URI — write-through correctness
+    // for the plain CRUD shape (update-then-read sees the update). Checked on
+    // caching routes only; GET/HEAD are the safe methods, everything else
+    // (POST/PUT/DELETE/PATCH...) is treated as potentially mutating.
+    if route.cache_ttl.is_some()
+        && !matches!(method.as_str(), "GET" | "HEAD")
+        && matches!(resp.status, 200..=399)
+    {
+        let client_host = original_host
+            .as_deref()
+            .map(http::host_without_port)
+            .unwrap_or("");
+        cache.invalidate(route_idx, &client_host.to_ascii_lowercase(), &original_target);
+    }
 
     // Level 10: the exchange completed — the client has the last byte. This is
     // the one success-path record, and it deliberately sits AFTER the body
@@ -1158,6 +1360,149 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Conn<S> {
     pub fn stream_mut(&mut self) -> &mut S {
         &mut self.stream
     }
+}
+
+/// Level 11: an `AsyncWrite` that relays to the client AND captures a copy
+/// into a bounded buffer — how the cache observes a response body without a
+/// second read of anything. The existing streamed copy loop already touches
+/// every byte exactly once; teeing at the write side reuses it verbatim.
+///
+/// The capture is best-effort by design: outgrowing `cap` sets `overflow`
+/// and stops buffering, but keeps relaying — the CLIENT is never affected
+/// by the cache's limits, the response merely doesn't get stored. Fail open,
+/// like every other cache decision.
+struct TeeWriter<'a, W> {
+    inner: &'a mut W,
+    buf: Vec<u8>,
+    cap: usize,
+    overflow: bool,
+}
+
+impl<'a, W: AsyncWrite + Unpin> TeeWriter<'a, W> {
+    fn new(inner: &'a mut W, cap: usize) -> Self {
+        TeeWriter { inner, buf: Vec::new(), cap, overflow: false }
+    }
+}
+
+impl<W: AsyncWrite + Unpin> AsyncWrite for TeeWriter<'_, W> {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        data: &[u8],
+    ) -> std::task::Poll<io::Result<usize>> {
+        let me = &mut *self;
+        // Relay first; capture only what the inner sink actually accepted —
+        // a short write must not leave the buffer ahead of the wire.
+        match std::pin::Pin::new(&mut *me.inner).poll_write(cx, data) {
+            std::task::Poll::Ready(Ok(n)) => {
+                if !me.overflow {
+                    if me.buf.len() + n > me.cap {
+                        me.overflow = true;
+                        me.buf = Vec::new(); // free eagerly; it will not be used
+                    } else {
+                        me.buf.extend_from_slice(&data[..n]);
+                    }
+                }
+                std::task::Poll::Ready(Ok(n))
+            }
+            other => other,
+        }
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+        std::pin::Pin::new(&mut *self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+        std::pin::Pin::new(&mut *self.inner).poll_shutdown(cx)
+    }
+}
+
+/// Level 11: answer a request straight from the cache — the backend never
+/// hears about it. Drains the request body first (same TCP-RST reasoning as
+/// rejections: unread bytes at close nuke the response we just sent), then
+/// runs the SAME client-leg response pipeline a forwarded response gets —
+/// middleware response phase (request-id, access log), Level 5 response
+/// rules, framing — so a cached response is indistinguishable from a
+/// forwarded one except for the X-Cache header and the missing backend.
+///
+/// If the client sent its own conditional (`If-None-Match`) and it matches
+/// the entry's ETag, the answer is a 304 with no body: the client has the
+/// bytes already; confirming freshness costs a head.
+async fn serve_cached<S>(
+    client: &mut Conn<S>,
+    cached: &crate::cache::CachedResponse,
+    client_inm: Option<&str>,
+    route: &crate::router::Route,
+    ctx: &crate::middleware::ReqCtx,
+    client_keep_alive: bool,
+    req_framing: BodyFraming,
+) -> io::Result<bool>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let reusable = match req_framing {
+        BodyFraming::None => true,
+        f => client.drain_body(f, REJECT_DRAIN_CAP).await.unwrap_or(false),
+    };
+
+    // Client conditional against the cached validator: RFC 9110 §13.1.2
+    // weak comparison. A match sends 304 + caching headers, no body.
+    let client_304 = matches!((client_inm, &cached.etag),
+        (Some(inm), Some(etag)) if crate::cache::etag_matches(inm, etag));
+
+    let mut resp = if client_304 {
+        crate::cache::not_modified_head(cached)
+    } else {
+        ResponseHead {
+            version: Version::Http11,
+            status: cached.status,
+            reason: cached.reason.clone(),
+            headers: cached.headers.clone(),
+        }
+    };
+
+    // The cache's own annotations, BEFORE the shared pipeline so an explicit
+    // L5 `set-resp-header` rule can still override them (same "operator has
+    // the last word" ordering the forwarded path honors).
+    http::set_header(&mut resp.headers, "Age", &cached.age_secs.to_string());
+    http::set_header(
+        &mut resp.headers,
+        "X-Cache",
+        match ctx.cache {
+            Some("revalidated") => "REVALIDATED",
+            _ => "HIT",
+        },
+    );
+
+    route.chain.run_response_all(ctx, &mut resp);
+    route.rules.apply_response(&mut resp);
+
+    // Framing: the body length is known exactly (it is in memory), so the
+    // client leg is always Content-Length — no chunking, no until-close.
+    http::remove_header(&mut resp.headers, "transfer-encoding");
+    let body: &[u8] = if client_304 { &[] } else { &cached.body };
+    if !client_304 {
+        http::set_header(&mut resp.headers, "Content-Length", &body.len().to_string());
+    }
+    let keep = reusable && client_keep_alive;
+    resp.headers.push((
+        "Connection".to_string(),
+        if keep { "keep-alive" } else { "close" }.to_string(),
+    ));
+
+    client.write_all(&http::write_response_head(&resp)).await?;
+    if !body.is_empty() {
+        client.write_all(body).await?;
+    }
+    client.flush().await?;
+    Ok(keep)
 }
 
 /// Send a middleware rejection: the response head (already carrying the
