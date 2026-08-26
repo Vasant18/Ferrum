@@ -18,7 +18,7 @@ Course defined in [Build.md](Build.md). Theory reference: [Reverse-Proxy-Knowled
 | 8 | Security & TLS (termination, mTLS, slowloris) | 🟢 **Implemented** (2026-08-19/20) | `tls.rs`: rustls + tokio-rustls (`ring` provider), PEM loading, TLS1.3+1.2 with no path to anything older, ALPN pinned to `http/1.1`, mTLS as `off`/`optional`/`required` via `WebPkiClientVerifier`, 4 startup guardrails, `TLS_HANDSHAKE_TIMEOUT`; `security.rs`: `ConnLimiter` (global + per-IP, `Drop`-released) + hand-rolled `Cidr`/`CidrList` (deny-beats-allow, allow-list is default-deny, IPv4-mapped normalized) + `Limits`/`parse_size`; `proxy.rs`: `handle_client`/`serve_one` now generic over `S: AsyncRead + AsyncWrite + Unpin`, `scheme` threaded into `ForwardContext` (fills the L5 seam), `BodyCopy` + `copy_body_limited` enforcing the body cap mid-stream, 431 on header count, 413 on body; `main.rs`: handshake moved INSIDE the spawned task, 10 CLI flags. 214 unit tests. Live-verified TLS, mTLS reject/admit, 413/431, CIDR, connection cap, slot reuse, and that 3 stalled handshakes don't block the accept loop. Quiz pending. |
 | 9 | OS Internals (epoll/kqueue, Tokio internals) — theory | 🔵 **Studied** (2026-08-21) | Theory level, no production code. [`docs/level-9-os-internals.md`](docs/level-9-os-internals.md): the `read()`-blocks problem and C10K; `select`→`poll`→`epoll`/`kqueue`→`io_uring` and why O(n)→O(ready) is the whole ballgame; the full `.await`→`Waker`→reactor→`kevent` path traced through Ferrum's own `Conn::read_head`; this machine's actual stack (Darwin arm64 → **kqueue** not epoll, `mio 1.2.2`, 8 worker threads from `#[tokio::main]`); Ferrum's 3 production spawn sites and its await map (**only 3 of 13 files hold a production `.await`**; `balancer.rs` has zero); a blocking-the-executor audit that found the no-lock-across-await guarantee is **compiler-enforced**, not conventional; and nginx read back as the same architecture. Turned up 2 real findings, recorded not fixed. Quiz pending. |
 | 10 | Observability (logs, metrics, tracing) | 🟢 **Implemented** (2026-08-24/25) | `metrics.rs`: from-scratch registry — status-class counters, `active_connections` gauge (RAII `ConnGauge`), fixed-bucket duration histograms (cumulative `le` computed at scrape time), hand-rolled Prometheus text renderer, zero locks/allocations at record time; `logging.rs`: leveled error log (`error!`..`debug!` macros, `--log-level`, hand-rolled RFC 3339) — per-request diagnostics demoted to `debug`, silent by default; `observe.rs`: access log upgraded to one JSON object per line (RFC 8259 escaping of attacker-controlled values, stage timings, `--log-plain` escape hatch); `proxy.rs`: per-stage `Instant` stamps (route/connect/TTFB) + metrics recorded at every exit path; `admin.rs`: separate admin listener (`--admin`, off by default) serving `/metrics` + `/health` JSON with a 5 s deadline. 230 unit tests. Live-verified JSON log via `jq`, counters/histogram/gauge movement, rejection attribution, `/health` ok→degraded→recovered, admin-plane isolation, `--log-plain` + `--log-level debug`. Quiz pending. |
-| 11 | Caching (LRU, TTL, ETag, revalidation) | ⚪ Not started | |
+| 11 | Caching (LRU, TTL, ETag, revalidation) | 🟢 **Implemented** (2026-08-26/27) | `cache.rs`: sharded approximately-LRU store (16 `std::sync::Mutex` shards, per-shard byte+entry budgets, lazy TTL, `Arc<[u8]>` bodies) + pure RFC 9111 semantics (GET-only, 200/301/404, `Authorization`/`Set-Cookie`/`no-store`/`private` gates, `s-maxage`>`max-age`, `no-cache`=store-but-always-revalidate, `Vary` two-step keying, full-key equality so hash collisions miss); `proxy.rs`: lookup after middleware (auth before cache), fresh hit skips the balancer lease entirely, stale entries send `If-None-Match` and a 304 re-stamps+serves (`X-Cache: REVALIDATED`), `TeeWriter` captures streamed bodies with zero extra reads, RFC 9111 §4.4 unsafe-method invalidation, client `If-None-Match` answered 304 at the proxy; `;cache[=SECS]` route option (third partition family), `--cache-max-*` flags, `cache_events_total` metrics, `"cache"` access-log field, `X-Cache`+`Age` headers. 250 unit tests. Live-verified all 13 checks incl. both revalidation legs, Vary variants, POST invalidation, LRU eviction under a 16 KB budget. Quiz pending. |
 | 12 | Production Features (graceful shutdown, config, hot reload) | ⚪ Not started | Listen/backend addrs via CLI args for now |
 | 13 | Basic WAF (SQLi/XSS/traversal detection, reputation) | ⚪ Not started | CL+TE smuggling vector already rejected in L1 parser |
 | 14 | Scalability (clusters, HA, anycast) — theory | ⚪ Not started | |
@@ -1209,6 +1209,180 @@ must resolve to *which backend, which route, which percentile* in 30 seconds.
     Which future level breaks that assumption, and where is the seam
     recorded? What would have to change in `Metrics` to survive it?
 
+## Level 11 — what was built
+
+Caching: the proxy becomes a shared RFC 9111 cache. Design at
+[`docs/superpowers/specs/2026-08-26-level-11-caching-design.md`](docs/superpowers/specs/2026-08-26-level-11-caching-design.md).
+The KB's framing: the fastest backend request is the one you never make —
+and the job is to *honor* HTTP's caching contract, not invent one.
+
+- [x] **Zero new dependencies, again — and the KB blessed the shape.** The
+      classic O(1) LRU (hash map into a doubly-linked recency list) is
+      "famously miserable" in safe Rust because aliasing+mutation is exactly
+      what the borrow checker rejects — and it is right; LRU aliasing bugs
+      are real CVEs in C. The KB's own listed alternative is what concurrent
+      production caches do anyway: **a sharded map with approximate LRU**.
+      That is L6's 16-shard rate limiter idiom with a bigger value type.
+      Eviction scans one shard for the oldest `last_used` — O(shard) on the
+      insert-when-full path only; the hit path pays a hash, a short lock, an
+      `Instant` store. A true recency list would optimize nanoseconds at the
+      cost of `unsafe` or an arena.
+- [x] **`cache.rs`, two sections in one file.** Storage (`Cache`/`Shard`/
+      `Entry`) knows nothing about HTTP; semantics (`freshness_from_headers`,
+      `etag_matches`, `Key::build`) are pure functions that know nothing
+      about locking; `proxy.rs` composes them. Doubly bounded per shard
+      (bytes = the real bound, entries = a metadata bound). TTL is lazy — no
+      sweeper task (L9 counted three spawn sites; a fourth would buy memory
+      reclamation seconds earlier), and an expired entry with a validator is
+      not garbage but a *revalidation candidate*. Bodies are `Arc<[u8]>`: a
+      hit is a refcount bump, eviction racing a streaming hit is deferred by
+      the refcount, no lock anywhere near an `.await`.
+- [x] **The cache key — the level's one dangerous decision.** The KB: getting
+      the key wrong is how caches leak one user's data to another, the worst
+      bug class in the level. Key = route index + method + ORIGINAL
+      (pre-rewrite) host + target + each `Vary`-named header's value from
+      THIS request (absent = empty string, its own variant per RFC 9111
+      §4.1), names lowercased and sorted. The hash only picks the shard —
+      **full struct equality decides the lookup**, so a collision degrades to
+      a miss, never to the colliding entry. `KeyInput` snapshots the
+      pre-rewrite request because the cache is consulted twice per exchange
+      (lookup before the L5 rewrite, store after the response) and `req` is
+      mutated in place between the two.
+- [x] **Vary needs two probes, and the second is the point.** The caller
+      cannot know which request headers belong in the key until a stored
+      response says so. Probe 1 uses the vary-less key; for varying resources
+      that slot holds a tiny *index entry* recording WHICH headers matter
+      (`vary_names`); probe 2 rebuilds the key with this request's values for
+      those names. Live-verified: `Vary: Accept-Encoding` stored gzip and
+      plain variants separately and served each requester its own.
+- [x] **Semantics, the confusables handled by name.** `no-store` = never
+      write; `no-cache` = store but revalidate before EVERY use (zero TTL +
+      validator — without a validator, don't store); `private` = the browser
+      may cache, a SHARED cache must not, and we are the shared cache the
+      directive was written for; `s-maxage` beats `max-age` because
+      shared-cache-specific TTL is its entire purpose. Status gate 200/301/
+      404 (absence is an answer; caching it shields against retry storms on
+      dead links). `Set-Cookie` = user-specific, full stop. Request
+      `Authorization` bypasses the cache entirely (no read, no write, not
+      even an X-Cache header). Route default TTL applies ONLY when the
+      response carries a validator — invented freshness must at least be
+      checkable.
+- [x] **Placement in `serve_one`: after middleware, instead of the lease.**
+      A cached response must never bypass auth or rate limiting — a 401'd
+      client gets no cache read at all. A fresh hit skips the balancer lease
+      entirely: no socket, no breaker traffic, no inflight count. The hit
+      then runs the SAME client-leg pipeline as a forwarded response
+      (middleware response phase, L5 rules, framing), so cached and forwarded
+      responses are indistinguishable except for `X-Cache` and `Age` — both
+      set BEFORE the chain/L5 passes so an operator's explicit rule keeps the
+      last word (L5's ordering principle, third appearance).
+- [x] **Revalidation, both legs.** Proxy→origin: a stale entry turns the
+      outbound request conditional (`If-None-Match`, else
+      `If-Modified-Since`); a 304 re-stamps the entry (TTL from the 304's own
+      Cache-Control, else route default) and serves the cached body —
+      live-verified as `X-Cache: REVALIDATED` with the origin hit count
+      frozen at 1. Client→proxy: a client `If-None-Match` matching the
+      entry's ETag gets **304 with no body** straight from the proxy (weak
+      comparison: strip `W/`, octet-exact, honor `*`). Client-side
+      `If-Modified-Since` is a recorded scope cut — it needs HTTP-date
+      parsing and the ETag path answers the same question better wherever an
+      ETag exists; `Entry` still keeps Last-Modified for the origin leg,
+      where the ORIGIN does the comparing.
+- [x] **The body tee.** The cache must capture streamed bodies without
+      breaking L1's flat-memory guarantee. `TeeWriter` wraps the client-side
+      sink inside the existing `copy_body_to` loop — every byte is touched
+      exactly once, the capture buffers only what the wire accepted, and
+      outgrowing `--cache-max-body` sets an overflow flag that silently
+      cancels the store while the client keeps streaming unaffected. Every
+      cache decision fails open: full, oversized, poisoned lock — the request
+      proceeds uncached and only the metrics see it.
+- [x] **Invalidation (RFC 9111 §4.4).** A non-error (2xx/3xx) response to a
+      non-GET/HEAD method through a caching route removes every variant of
+      that URI's entry. Write-through correctness for plain CRUD:
+      live-verified update-then-read saw the update (`HIT` → POST → `MISS`
+      with a fresh origin hit).
+- [x] **Observability pays forward.** `ferrum_cache_events_total{result=
+      hit|miss|revalidated|stored|evicted|invalidated}` rendered by
+      `cache.rs` itself and appended to the L10 exposition by the admin
+      listener (one scrape, one document); `"cache"` field in the JSON access
+      log; `X-Cache: HIT|MISS|REVALIDATED` + `Age` headers.
+- [x] **Recorded debt, deliberate:** no stampede defenses (request
+      coalescing/singleflight, stale-while-revalidate, TTL jitter — the KB's
+      "lovely exercise" is a second synchronization design and its own
+      lesson), no disk persistence, no `stale-if-error`, no purge API (L12's
+      config story owns that).
+- [x] **250 unit tests** (230 kept green, +20): key isolation by route/host,
+      collision-degrades-to-miss (by construction: full equality), lazy
+      expiry, stale-with-validator → restamp revives, Vary variants, LRU
+      eviction under tight budgets, oversized-body rejection, invalidation
+      across variants, 8-thread hammer staying within bounds, all the
+      directive parsing edge cases (case-insensitivity, quoted values), weak
+      ETag comparison, 304-head header subset.
+- [x] **Live verification, 13 checks all green:** miss→hit with origin
+      frozen; TTL expiry; both revalidation legs (`REVALIDATED` + origin 304
+      + frozen hit count; client conditional → 304 no body with caching
+      headers only); `no-store`/`private` never stored; `Authorization`
+      bypass (no X-Cache at all); Vary variants; POST invalidation;
+      eviction under `--cache-max-bytes 16k` (30 evictions); metrics
+      counters; access-log field; uncached route untouched; keep-alive
+      across hits. **One gap found live and fixed:** misses on caching
+      routes carried no `X-Cache` header at all, making a caching route's
+      miss indistinguishable from an uncached route — `X-Cache: MISS` now
+      set on the forwarded path, after the cache snapshot (the stored entry
+      must stay free of per-exchange annotations), before the chain/L5
+      passes.
+- [ ] **Level 11 quiz — Vessey to answer before Level 12** (questions below)
+
+### Level 11 quiz — Vessey to answer before Level 12
+
+1. The KB calls the cache key "the worst bug class in this level." Walk
+   through what happens, request by request, if the key omits (a) the Vary
+   values, (b) the route index, (c) the original pre-rewrite target. Which
+   of the three leaks one user's data to another?
+2. Why does the lookup compare full key structs when the hash already picked
+   the shard? What exactly goes wrong if two different keys hash identically
+   and the code trusts the hash?
+3. `no-cache` and `no-store` differ by one word and by everything. What does
+   each direct this cache to do, and how does the code express "store but
+   revalidate before every use" without a special case in the lookup path?
+4. Why does `s-maxage` override `max-age` for Ferrum but not for a browser?
+   What kind of cache is each directive addressed to?
+5. The route's `;cache=SECS` default TTL applies only when the response
+   carries a validator. What could a validator-less response with invented
+   freshness do that a validated one cannot, and why is that asymmetry worth
+   a rule?
+6. Vary lookup takes two probes. What does the first probe's entry store for
+   a varying resource, why can't the caller build the right key in one step,
+   and what happens to a request whose named header is absent?
+7. A fresh hit skips the balancer lease entirely. Name three distinct pieces
+   of L3/L4 machinery that consequently never see the request, and argue in
+   each case whether that blindness is correct.
+8. The cache lookup runs AFTER the middleware chain. What specific attack
+   works if it runs before? Which L6 middleware would it neuter, and how is
+   that different from the `Authorization` request-header gate?
+9. Proxy→origin revalidation replaced the client's own If-None-Match with
+   the cache's validator. Where did the client's conditional go, and how
+   does the client still get its 304 when its validator matches? Trace both
+   the fresh-hit and the revalidated-stale paths.
+10. `TeeWriter` captures "only what the inner sink actually accepted." What
+    corruption does that clause prevent, and why does overflow cancel the
+    store instead of erroring the exchange?
+11. The stored entry snapshots headers after `strip_hop_by_hop` but before
+    the middleware response phase, L5 response rules, and the framing block.
+    For each of the three, give a concrete header that would be wrong in the
+    cache if the snapshot moved after it.
+12. POST-invalidation removes the entry but the next GET is a MISS, not a
+    fresh entry. Why doesn't the POST response itself refresh the cache, and
+    what RFC-shaped assumption would that violate?
+13. Eviction scans the shard for the oldest `last_used` instead of keeping a
+    recency list. State the exact asymptotic costs of both designs on the
+    hit path and the insert-when-full path, and the argument for paying the
+    scan here.
+14. The level ships with no stampede defense. Describe the dog-pile scenario
+    concretely (numbers welcome), then sketch how request coalescing would
+    fit THIS codebase — which type would own the in-flight map, and what
+    Tokio primitive would the 999 waiters block on?
+
 ## Session log
 
 - **2026-07-26** — Course kickoff. Knowledge base built (all 14 levels). `rproxy` crate created. Module 1.1 taught & assigned. Repo pushed to github.com/Vasant18/Ferrum.
@@ -1224,3 +1398,4 @@ must resolve to *which backend, which route, which percentile* in 30 seconds.
 - **2026-08-19/20** — Level 8 (Security & TLS) implemented inline **in one pass, straight from the design to code**, at Vessey's explicit instruction to skip the approval ceremony and execute in "auto mode" — the first level built without either a subagent-driven task sequence (L4/L5/L7) or a pre-written plan reviewed before coding (L6). Design at `docs/superpowers/specs/2026-08-19-level-8-security-tls-design.md`; the plan (`docs/superpowers/plans/2026-08-19-level-8-security-tls.md`) was written *after* the code, as a record rather than a brief. New `tls.rs`: rustls + tokio-rustls with the crypto provider pinned to `ring` rather than the `aws-lc-rs` default (far lighter build, no cmake/NASM), PEM chain/key loading, TLS1.3+1.2 with no reachable path to anything older, ALPN pinned to `http/1.1`, mTLS as `off`/`optional`/`required` via `WebPkiClientVerifier`, four startup guardrails covering both directions of the config trap, and `TLS_HANDSHAKE_TIMEOUT`. New `security.rs`: `ConnLimiter` (global ceiling + per-IP cap, `Drop`-released via the L3 `Lease` pattern, `fetch_update` for the global claim, rollback on per-IP refusal, map-entry removal on last close) plus hand-rolled `Cidr`/`CidrList` (deny-beats-allow, non-empty allow list is default-deny, socket-peer only, IPv4-mapped normalized at the edge) plus `Limits`/`parse_size`. `proxy.rs`: `handle_client`/`serve_one` made generic over `S: AsyncRead + AsyncWrite + Unpin` — the only two signatures that had pinned `TcpStream`, since Level 1 already made `Conn<S>` generic, which is why all seven prior levels run over TLS with no other change; `scheme` threaded into `ForwardContext`, filling the seam L5 left behind; `BodyCopy` + `copy_body_limited` enforcing the body cap mid-stream on decoded payload; 431 on header count and 413 on body, both before routing. `main.rs`: the handshake moved **inside** the spawned task (awaiting it in the accept loop would let a single `ClientHello` byte stall every new connection process-wide — a one-attacker total DoS that passes every functional test), ten new CLI flags, and TLS built before `bind`. **Two decisions reversed from the design during implementation, both recorded rather than quietly applied:** a denied CIDR closes the connection instead of answering 403 (on a TLS listener a 403 would require completing a handshake for an address already refused — spending an RSA/ECDHE operation on the attacker's behalf, turning the cheapest rejection into one of the most expensive), and the two dead-code warnings the level introduced were resolved by making `in_flight`/`is_empty` genuinely used rather than by `#[allow(dead_code)]`. 214 tests pass (168 from L7 kept green, +46); release build holds the exact 4-warning baseline. Live-verified all 15 checks incl. mTLS reject/admit, 413/431 with zero backend hits for rejections, both CIDR semantics, the per-IP cap with slot reuse proving `Drop` released, the 10.0s handshake deadline firing, backward compatibility for the L1 shorthand and a combined L4+L5+L6+L7 invocation, and — the level's central claim, unreachable by unit test — **three deliberately stalled handshakes while a real client was served in 0.03s**. **Process cost of skipping the plan-first flow, recorded because it is the point:** the design/code divergence on the 403 went uncaught until live verification, where a subagent-driven level would have had a reviewer read the plan against the diff. Two harness bugs also found: a first guardrail run that reported four passes but was worthless because **unquoted `$args` in zsh does not word-split** (each flag pair fell through to the route-spec arm and exited 1 for the wrong reason — caught by reading the error text, not the exit status), and a unit test that deadlocked the suite by writing 200 KB into a 64 KB duplex. Both were the harness's bugs, not the proxy's; L7 hit the same class twice, and the standing lesson is that a passing test harness is itself untested code. Background processes cleaned (`pgrep` clean). Commits `baff59b` (name correction) and `ead48a2` (the WIP push, made before verification at Vessey's request) pushed to `github.com/Vasant18/Ferrum` main as Vasant18 via the `switching-gh-accounts` skill, gh credential switched back to the personal account afterwards.
 - **2026-08-21** — Level 9 (OS Internals) studied. **Theory level, zero production code changed** — the correct outcome rather than a shortfall, since Levels 1–8 already run on this machinery; the work was reading the existing code through a lower lens. Write-up at `docs/level-9-os-internals.md`: the `read()`-blocks problem and C10K; the readiness-API evolution (`select`→`poll`→`epoll`/`kqueue`→`IOCP`/`io_uring`) with the O(n)→O(ready) transition identified as the single property that makes 10k idle connections cheap; the full `.await`→`Poll::Pending`→`Waker`→reactor→`kevent`→re-poll path traced through Ferrum's own `Conn::read_head` rather than a toy example, including the non-blocking-read fast path that bypasses the reactor entirely; and nginx re-read as the same epoll architecture, differing only in who writes the state machines. **Facts verified against the tree rather than recalled:** this machine is `Darwin arm64` so the reactor is **`kqueue`, not `epoll`** (every KB mental model is epoll-shaped because that is where proxies deploy); the reactor crate is `mio 1.2.2`, a transitive dependency never named in `Cargo.toml`; `features = ["full"]` silently selects the multi-threaded scheduler with **8 worker threads**. **The award for most interesting measurement goes to the await map:** counting `.await` in code and excluding the comment mentions that inflate a naive `grep` by ~5% gives **72 production / 61 test**, with only **three of thirteen files** holding a production await (`proxy.rs` 57, `health.rs` 10, `main.rs` 5). `balancer.rs` has **zero** — 1,750+ lines of seven balancing algorithms, a three-state breaker, and a LIFO pool, entirely synchronous. Read through this lens, four separate levels (L1 `http.rs`, L5 `rewrite.rs`, L6's rejection of the async middleware trait, L8 `tls.rs`) independently made one unnamed optimization: keep the compiler-generated state machine small. **The blocking-the-executor audit produced a genuinely stronger result than expected:** every production function that takes a lock (`take_conn`, `return_conn`, `try_acquire`, `release`, `RateLimiter::allow`) is a plain `fn`, not `async fn` — so "never hold a lock across `.await`" is **compiler-enforced**, not a review convention, since `.await` cannot appear in a non-async fn. Corroborated by `tokio::sync` appearing *only* inside comments explaining why it is unused, and `spawn_blocking`/`thread::sleep` appearing zero times. Two lesser audit results: `tls.rs`'s synchronous `std::fs` is harmless because L8 ordered it before `bind` (recorded as a coincidence, not claimed as foresight), and `router.rs:53`'s per-request regex is safe **only** because Rust's `regex` crate guarantees linear time with no backtracking — the same line in a PCRE-based proxy is a DoS vector, so this is a Level 2 dependency choice quietly holding up a Level 9 safety property. **Two findings recorded, deliberately not fixed:** (1) `Server.addr` is a `String` shape-validated at startup but never resolved, so `TcpStream::connect` re-resolves on every pool miss with no DNS caching or TTL awareness — invisible so far because L7's pooling skips `connect` on a hit, and not fixed because resolving once at startup is the *wrong* fix for backends that move, with a TTL-aware resolver cache deserving its own level; (2) the runtime's whole shape (8 workers, work stealing, blocking pool) is implicit in `#[tokio::main]` and stated nowhere, which matters the first time anyone tunes it — not changed, because changing a default with no benchmark is exactly the "measure, don't guess" mistake L7 warned about, and the missing `wrk`/`oha` baseline stays L7's recorded debt rather than being reassigned here. 14-question quiz added. Two corrections made during the write-up, both caught by re-verifying rather than trusting the first number: an initial `.await` count of 137 was wrong because it counted prose mentions inside doc comments, and a claimed "7,000-line proxy" was stale (8,793 lines after L8's `tls.rs` + `security.rs`).
 - **2026-08-24/25** — Level 10 (Observability) implemented inline across two sessions in "auto mode" (Vessey approved the recommended decisions and asked for direct execution), per the approved design (`docs/superpowers/specs/2026-08-24-level-10-observability-design.md`). Session 1 (08-24): design brainstormed (three decision points resolved — from-scratch over the `tracing`/`metrics` crates since L9 proved the request lifecycle lives in one task; per-stage timing in the access log over W3C traceparent for a single-hop proxy; a separate off-by-default admin listener over reserved paths since `/metrics` is reconnaissance gold), spec written and committed, `metrics.rs` built (atomic registry, fixed-bucket histograms with scrape-time cumulation, Prometheus text renderer, 9 tests) — then work paused mid-level at Vessey's request with a WIP push. Session 2 (08-25): the rest — `logging.rs` (leveled stderr macros, hand-rolled RFC 3339 with the `civil_from_days` calendar math cross-checked against Python at three fixed points, catching a first hardcoded test timestamp that was off by 4 days), `ReqCtx` timing fields + `Instant` stamps and every-exit-path metrics recording in `proxy.rs`, JSON access log with RFC 8259 escaping + `--log-plain`, per-request diagnostics demoted to `debug!` across five files, `admin.rs` (`/metrics` + `/health`, 5 s deadline, startup-fatal bind), `ConnGauge` RAII wiring, three CLI flags. 230 tests pass (214 kept green, +16). Live-verified the full checklist: `jq`-parseable log with stage timings (`null` on a rejection that never routed, `connect_ms:0.0`+`pooled:true` on reuse), status-class counters + `rejected_total{by="auth"}` attribution, cumulative buckets with `+Inf`==`_count`, `/health` walked ok(2/2)→ok(1/2)→degraded(0/2, still HTTP 200)→recovered against live backend kills with matching WARN/INFO breaker lines in the error log, admin-plane isolation (`/metrics` on :8080 proxies to the backend), 404/405 on the admin socket, and both escape hatches. One harness bug, third strike for the "the harness is untested code" lesson: a `pkill -f '127.0.0.1.*9002'` aimed at a backend matched the proxy's own command line (its args contain the backend list) and killed it mid-test — switched to killing by listening port (`lsof -sTCP:LISTEN`). Commits `22a4629` (spec), `83a9400` (metrics WIP, pushed 08-24), `9ebf1c6` (the rest) pushed to `github.com/Vasant18/Ferrum` main via the `switching-gh-accounts` skill, gh switched back to the personal account after each push.
+- **2026-08-26/27** — Level 11 (Caching) implemented inline across two sessions in auto mode (Vessey pre-approved the recommended decisions), per the approved design (`docs/superpowers/specs/2026-08-26-level-11-caching-design.md`). Session 1 (08-26): design brainstormed and spec committed (from-scratch sharded approximate-LRU per the KB's own blessing — the linked-list LRU is the borrow checker's least favorite data structure and production caches shard anyway; opt-in `;cache=` per route with HTTP deciding per response; separate storage/semantics sections in one `cache.rs`); storage engine + RFC 9111 semantics built with 20 unit tests (key isolation, Vary two-step, lazy TTL, restamp, LRU bounds, directive parsing, weak ETag comparison, 8-thread hammer); router grew a third option-partition family (`L11_KEYS`) and `find_route_indexed` (the key carries the route index). Session 2 (08-27): the wiring — `KeyInput` snapshot refactor (the cache is consulted before AND after the in-place L5 rewrite, so the key inputs must be captured once, early), `Lookup::Stale` carrying its key (by restamp time the live head is rewritten), lookup-after-middleware/instead-of-lease in `serve_one`, `serve_cached` running the full client-leg pipeline (chain → L5 → framing) so cached responses are indistinguishable from forwarded ones, proxy→origin conditionals with 304 restamp+serve, client `If-None-Match` answered 304 at the proxy, `TeeWriter` (an `AsyncWrite` wrapper capturing only what the sink accepted, overflow = silent store-cancel, client unaffected), §4.4 unsafe-method invalidation, `--cache-max-*` flags, `cache_events_total` appended to `/metrics` by the admin listener, `"cache"` JSON log field. 250 tests pass (230 kept green, +20). One test's assertion was corrected against the code rather than vice versa (the size gate rejects BEFORE counting `stored` — "stored" means in the cache, not offered to it). `find_route` went production-dead and took the documented `#[allow(dead_code)]`-with-why treatment (the `find`/`for_test` precedent); `CachedResponse.last_modified` was instead REMOVED with the scope-cut argument written where the field was (client-side `If-Modified-Since` needs HTTP-date parsing; the ETag path answers the same question better; `Entry` keeps Last-Modified for the origin leg where the origin compares). Live verification: 13/13 green — miss→hit with the origin's own hit-counter frozen, TTL expiry, `REVALIDATED` with origin answering 304 to our `If-None-Match`, client-conditional 304 with no body and caching headers only, `no-store`/`private` never stored, `Authorization` bypassing the cache entirely, `Vary: Accept-Encoding` serving per-encoding variants, POST invalidation (HIT → POST → MISS with fresh origin hit), 30 LRU evictions under `--cache-max-bytes 16k`, metrics/log fields, an uncached route carrying zero cache artifacts, keep-alive across hits. **One gap found live, fixed, committed separately:** misses on caching routes carried no `X-Cache` at all — indistinguishable from an uncached route; `X-Cache: MISS` now set after the cache snapshot and before the chain/L5 passes so the stored entry stays annotation-free and operator rules keep the last word. Commits `081fae5` (spec), `d453077` (implementation), `cfc3b66` (X-Cache fix), plus docs, pushed to `github.com/Vasant18/Ferrum` main via the `switching-gh-accounts` skill, gh switched back afterwards.
