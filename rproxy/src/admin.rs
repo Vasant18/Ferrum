@@ -119,10 +119,12 @@ async fn serve_one(
                 // costs nothing.
                 "text/plain; version=0.0.4",
                 {
-                    // L10's registry plus L11's cache block: one scrape, one
-                    // document — the scraper doesn't care who owns a counter.
+                    // L10's registry plus L11's cache block plus L13's WAF
+                    // block: one scrape, one document — the scraper doesn't
+                    // care who owns a counter.
                     let mut m = metrics.render();
                     m.push_str(&cache.render_prometheus());
+                    m.push_str(&crate::waf::shared_reputation().render_prometheus());
                     m
                 },
             ),
