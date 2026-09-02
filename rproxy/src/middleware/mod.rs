@@ -434,6 +434,15 @@ impl MiddlewareConfig {
         if self.request_id {
             parts.push("request-id".to_string());
         }
+        if let Some(mode) = self.waf {
+            // Banner position mirrors chain position (after request-id,
+            // before ratelimit) so the startup output reads as the actual
+            // execution order — the property the L6 banner was built for.
+            parts.push(format!(
+                "waf({mode:?} threshold={})",
+                self.waf_threshold.unwrap_or(crate::waf::DEFAULT_THRESHOLD)
+            ));
+        }
         if let Some(rate) = self.rate {
             let burst = self.burst.unwrap_or_else(|| rate.ceil().max(1.0));
             parts.push(format!("ratelimit({rate}/s burst={burst})"));
