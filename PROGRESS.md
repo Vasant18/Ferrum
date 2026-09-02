@@ -20,7 +20,7 @@ Course defined in [Build.md](Build.md). Theory reference: [Reverse-Proxy-Knowled
 | 10 | Observability (logs, metrics, tracing) | 🟢 **Implemented** (2026-08-24/25) | `metrics.rs`: from-scratch registry — status-class counters, `active_connections` gauge (RAII `ConnGauge`), fixed-bucket duration histograms (cumulative `le` computed at scrape time), hand-rolled Prometheus text renderer, zero locks/allocations at record time; `logging.rs`: leveled error log (`error!`..`debug!` macros, `--log-level`, hand-rolled RFC 3339) — per-request diagnostics demoted to `debug`, silent by default; `observe.rs`: access log upgraded to one JSON object per line (RFC 8259 escaping of attacker-controlled values, stage timings, `--log-plain` escape hatch); `proxy.rs`: per-stage `Instant` stamps (route/connect/TTFB) + metrics recorded at every exit path; `admin.rs`: separate admin listener (`--admin`, off by default) serving `/metrics` + `/health` JSON with a 5 s deadline. 230 unit tests. Live-verified JSON log via `jq`, counters/histogram/gauge movement, rejection attribution, `/health` ok→degraded→recovered, admin-plane isolation, `--log-plain` + `--log-level debug`. Quiz pending. |
 | 11 | Caching (LRU, TTL, ETag, revalidation) | 🟢 **Implemented** (2026-08-26/27) | `cache.rs`: sharded approximately-LRU store (16 `std::sync::Mutex` shards, per-shard byte+entry budgets, lazy TTL, `Arc<[u8]>` bodies) + pure RFC 9111 semantics (GET-only, 200/301/404, `Authorization`/`Set-Cookie`/`no-store`/`private` gates, `s-maxage`>`max-age`, `no-cache`=store-but-always-revalidate, `Vary` two-step keying, full-key equality so hash collisions miss); `proxy.rs`: lookup after middleware (auth before cache), fresh hit skips the balancer lease entirely, stale entries send `If-None-Match` and a 304 re-stamps+serves (`X-Cache: REVALIDATED`), `TeeWriter` captures streamed bodies with zero extra reads, RFC 9111 §4.4 unsafe-method invalidation, client `If-None-Match` answered 304 at the proxy; `;cache[=SECS]` route option (third partition family), `--cache-max-*` flags, `cache_events_total` metrics, `"cache"` access-log field, `X-Cache`+`Age` headers. 250 unit tests. Live-verified all 13 checks incl. both revalidation legs, Vary variants, POST invalidation, LRU eviction under a 16 KB budget. Quiz pending. |
 | 12 | Production Features (graceful shutdown, config, hot reload) | 🟢 **Implemented** (2026-09-02) | `config.rs`: hand-rolled TOML-subset parser that LOWERS the file onto the existing CLI vocabulary (one parser per value forever; CLI-beats-file precedence falls out of arg ordering; duplicate keys are errors; line-numbered messages) + `--config`/`--validate` (nginx -t); `main.rs`: parse loop extracted into `parse_settings` (boot, --validate, and reload share ONE path), accept loop `select!`s accept vs SIGTERM/SIGINT/SIGHUP, graceful shutdown = drop listener → drain flag → poll L8's ConnLimiter to zero under `--drain-timeout` (double-signal skips the wait), SIGHUP reload builds the whole new table off to the side and swaps one `Arc` pointer (invalid config rejected wholesale, old config stays live); `proxy.rs`: `RwLock<Arc<RouteTable>>` snapshotted PER EXCHANGE (mid-flight keeps its table, next keep-alive request sees the new one), drain forces `Connection: close`; `health.rs`: probers hold `Weak<Upstream>` and expire with their table. Graceful restart + worker processes explained, deliberately not built. 261 unit tests. Live-verified: file boot, --validate both ways, CLI-over-file, reload under a concurrent slow request, broken reload rejected, clean drain (`Connection: close` + exit after in-flight completes), deadline cut of a too-slow request. Quiz pending. |
-| 13 | Basic WAF (SQLi/XSS/traversal detection, reputation) | ⚪ Not started | CL+TE smuggling vector already rejected in L1 parser |
+| 13 | Basic WAF (SQLi/XSS/traversal detection, reputation) | 🟢 **Implemented** (2026-09-02) | `waf.rs`: normalization first (two-pass percent decode with double-encoding flagged AND scored, entity decode, whitespace collapse, null-byte flag, path canonicalization with climb-above-root detection) + a ~16-rule table (data, not code) scanned over path/query/UA/Referer + CRS-style anomaly scoring (lone quote 2, unambiguous attack grammar 10, block only ≥ threshold) + `Reputation` (16-shard strikes → temp ban with L4-style doubling backoff, lazy decay, process-wide store surviving L12 reloads); wired as an L6 middleware at log → request-id → **waf** → ratelimit → auth → authz; `;waf=block\|detect` + `;waf-threshold=N`; `--waf-ban-after/-secs`; rule names log-only (no payload-tuning oracle); `waf_events_total` metrics + `waf_score` log field. Body inspection deliberately absent (streams stay flat-memory). 280 unit tests. Live-verified: SQLi/XSS/traversal/double-encoded payloads 403'd with zero backend contact, benign lookalikes pass, 3 convictions → ban → innocent request also 403 → decay → served, detect mode forwards + logs, unprotected route untouched. Quiz pending. |
 | 14 | Scalability (clusters, HA, anycast) — theory | ⚪ Not started | |
 
 ## Level 1 — what was built
@@ -1539,6 +1539,157 @@ files, graceful shutdown, hot reload. Design at
     industry increasingly does instead; your FOR case must name what a
     plain drain-and-restart drops that FD passing would not.
 
+## Level 13 — what was built
+
+Basic WAF: the proxy grows an immune system. Design at
+[`docs/superpowers/specs/2026-09-02-level-13-basic-waf-design.md`](docs/superpowers/specs/2026-09-02-level-13-basic-waf-design.md).
+The KB's one-liner was the architecture: "you already built the platform —
+the WAF is middleware with opinions."
+
+- [x] **Normalization first — the KB calls it 80% of WAF quality.** Evasion
+      is mostly encoding games, so `normalize()` percent-decodes twice (a
+      second pass that changes anything IS double-encoding — flagged and
+      scored, since legitimate clients single-encode), decodes the entity
+      forms attackers use to smuggle angle brackets, lowercases, collapses
+      whitespace runs (one `union select` pattern matches all spacings),
+      and strips-and-flags null bytes. Broken escapes stay literal — a WAF
+      must never 500 on hostile input. `canonicalize_path()` resolves
+      `.`/`..` and flags any attempt to climb above root even when the
+      final path lands innocently: we cannot know how the BACKEND resolves
+      paths, so the *attempt* is the signal (the L2 normalization lesson,
+      weaponized, per the KB).
+- [x] **Score, don't hair-trigger — the ModSecurity CRS model.** ~16 rules
+      in a `const` table (data, not code), scanned over four normalized
+      surfaces: canonicalized path, query string, User-Agent, Referer.
+      Points accumulate; conviction only at the threshold (default 10).
+      A lone quote is 2 points — O'Brien buys coffee too; `union`+`select`
+      co-occurring is 10, because that conjunction has no benign URL
+      reading. Anomaly scoring is the difference between a WAF and a
+      false-positive generator ops disables within a week. Benign
+      lookalikes are first-class tests: `O'Brien`, `union station`,
+      `select a plan`, `script kiddie` as prose, versioned paths — all
+      documented as staying under threshold.
+- [x] **Detectors:** SQLi (union-select, comment sequences, tautologies —
+      including FALSE ones like `or 1=2`, which is how blind injection is
+      probed — stacked queries after `;`, timing functions,
+      information_schema), XSS (`<script`, event handlers, `javascript:`
+      URLs, vector tags, eval-family), traversal (`../` literals scanned
+      pre-canonicalization so absorbed climbs still score, sensitive-file
+      paths post-canonicalization, encoded and double-encoded forms),
+      scanner UAs (sqlmap/nikto/…, conviction-weight; a missing UA is 1
+      nuisance point — curl scripts are legitimate, but it tips stacked
+      borderline scores, as in CRS).
+- [x] **No backreferences, and that's a feature.** The precise tautology
+      regex is `(\d+)=\1`; Rust's regex crate rejects backreferences BY
+      DESIGN — the same no-backtracking guarantee that L9 identified as
+      the only reason L2's `~regex` routes aren't a per-request DoS
+      vector. The looser `digit=digit` form convicts blind-injection
+      probes correctly anyway. The constraint and its upside are both in
+      the rule's comment.
+- [x] **Reputation — the L4 breaker pointed inward.** Convictions become
+      strikes (16-shard map, the L6/L11 idiom; lazy decay, the L11 TTL
+      pattern); `ban-after` strikes (default 3) inside the decay window
+      bans the IP for `ban-secs` (default 60 s), doubling per repeat ban
+      to a 1 h cap — the L4 backoff, applied to clients. A banned IP is
+      refused for one hash + one short lock, before any normalization: 
+      cheap refusal of known offenders is most of what reputation buys.
+      The store is process-wide (one `OnceLock`'d `Arc`): an attacker
+      probing /api and /admin is ONE offender — and it survives L12
+      reloads, because rerouting is not an amnesty. Memory-only, restart
+      amnesties: persistent cross-customer feeds are precisely the
+      commercial vendors' moat (KB).
+- [x] **A WAF is a middleware — literally.** `impl Middleware for Waf`,
+      chain order log → request-id → waf → ratelimit → auth → authz:
+      hostility is refused before it consumes a rate token or triggers a
+      credential comparison, and the L6 contract supplies rejection
+      short-circuiting (a blocked request never touches a backend),
+      response-phase unwind (the 403 still carries request-id + log line),
+      `rejected_by:"waf"` attribution, and per-route config through the
+      existing option partition (`waf=`/`waf-threshold=` joined L6_KEYS —
+      they configure a middleware). `waf-threshold` without `waf=` is a
+      boot error, the L6 coherence-guardrail pattern.
+- [x] **Modes, because every WAF ships watching first.** `;waf=detect`
+      logs the verdict, counts `detected`, records strikes (so flipping
+      to block starts with history) but never bans and always forwards;
+      `;waf=block` convicts. In BOTH modes the rule hit-list goes to the
+      error log only — a response that names the rule that fired is a
+      payload-tuning oracle, so the client sees a generic 403 and the
+      access log carries only the numeric `waf_score`.
+- [x] **The honesty checkpoint, kept.** Signature WAFs are a speed bump,
+      not a wall; the real injection fixes are parameterized queries and
+      output encoding in the application. This level buys the automated
+      99%, time during 0-days, and visibility. Request-BODY inspection is
+      deliberately absent: Ferrum streams bodies in 16 KB windows (L1's
+      flat-memory guarantee) and buffering for inspection is a different
+      architecture — the WAF sees heads only and the module docs say so.
+- [x] **280 unit tests** (261 kept green, +19): the normalization table,
+      canonicalization incl. climbs, every detector against real payloads
+      AND benign lookalikes, cross-surface score accumulation, ban
+      threshold/lift/backoff-doubling/decay, detect-never-bans, the
+      middleware contract (403 with no oracle, benign passes, third
+      conviction bans, fourth request refused uninspected).
+- [x] **Live verification, all green:** five payload families (incl.
+      double-encoded traversal) → 403 with generic body; ban after 3
+      convictions refused an INNOCENT request from that IP, lifted after
+      the configured 2 s; detect mode forwarded the attack to the backend
+      while logging `score=10 rules=[...]`; unprotected route passed the
+      same attack untouched; benign lookalikes 200'd; metrics showed
+      convicted=3 detected=1 banned=1 ban_refused=3; `waf_score` in the
+      JSON log. **Two gaps found live, both fixed + committed:** the WAF
+      counters were rendered but never appended to `/metrics` (caught by
+      the warning baseline — `render_prometheus` showed up as dead code),
+      and the startup banner's middleware summary omitted the WAF layer
+      (the banner exists precisely so execution order is readable at
+      boot).
+- [ ] **Level 13 quiz — Vessey to answer before Level 14** (questions below)
+
+### Level 13 quiz — Vessey to answer before Level 14
+
+1. The KB calls normalization 80% of WAF quality. Take `%252e%252e%2fetc/passwd`
+   and walk it through both decode passes: what does each pass produce,
+   which flag is raised where, and what total score accrues before any
+   traversal rule even matches?
+2. Why does the double-encoding flag itself score points, independent of
+   what was hidden? What legitimate client behavior would be punished if
+   single-encoding also scored, and why doesn't it?
+3. `canonicalize_path("/a/../../b")` returns `/b` with the climb flag set.
+   Why is the ATTEMPT convicted when the resolved path is harmless, and
+   which unknown makes the conservative choice correct?
+4. A lone `'` scores 2; `union`+`select` scores 10. Reconstruct the
+   reasoning for each weight, then explain what breaks operationally if
+   you swap them.
+5. The tautology rule matches `or 1=2` — a FALSE tautology. Why is that
+   over-match actually correct, and what does Rust's regex crate refuse to
+   support that forced the looser pattern? Connect that refusal to a
+   safety property L9 identified in the router.
+6. Chain order puts the WAF after request-id but before ratelimit and
+   auth. Give one concrete consequence of each of the two orderings it
+   rejected (WAF-before-request-id; WAF-after-ratelimit).
+7. The 403 body is generic and the rule hit-list is log-only, in both
+   modes. What attack workflow does a rule-naming error page (or an
+   X-Waf-Score header) enable? Walk it.
+8. Why does detect mode record strikes but never ban? What operational
+   sequence is that designed for, and what state advantage does it hand
+   the operator at the moment enforcement flips on?
+9. The ban check runs before inspection. Quantify what a banned IP costs
+   the proxy per request versus an inspected one, and explain why that
+   asymmetry is "most of what reputation buys."
+10. The reputation store survives an L12 config reload but not a restart.
+    Defend both halves of that sentence — why is reload-survival correct
+    and why is restart-amnesty acceptable?
+11. Body inspection is absent by architecture. Name the L1 guarantee that
+    conflicts with it, describe what a body-inspecting WAF must do
+    instead, and name one attack class this WAF consequently cannot see.
+12. The rules live in a `const` table, not code. Add (on paper) a rule
+    catching `<base href=` injection: pattern kind, points, and the
+    justification for your weight against the benign-lookalike test.
+13. Reputation keys on `ctx.peer.ip()` — the socket address. Three levels
+    made the same choice for three different features. Name them and the
+    shared reason.
+14. The KB's honesty checkpoint says signature WAFs are a speed bump.
+    Name the three commercial layers above signatures, and for each, what
+    it catches that this level structurally cannot.
+
 ## Session log
 
 - **2026-07-26** — Course kickoff. Knowledge base built (all 14 levels). `rproxy` crate created. Module 1.1 taught & assigned. Repo pushed to github.com/Vasant18/Ferrum.
@@ -1556,3 +1707,4 @@ files, graceful shutdown, hot reload. Design at
 - **2026-08-24/25** — Level 10 (Observability) implemented inline across two sessions in "auto mode" (Vessey approved the recommended decisions and asked for direct execution), per the approved design (`docs/superpowers/specs/2026-08-24-level-10-observability-design.md`). Session 1 (08-24): design brainstormed (three decision points resolved — from-scratch over the `tracing`/`metrics` crates since L9 proved the request lifecycle lives in one task; per-stage timing in the access log over W3C traceparent for a single-hop proxy; a separate off-by-default admin listener over reserved paths since `/metrics` is reconnaissance gold), spec written and committed, `metrics.rs` built (atomic registry, fixed-bucket histograms with scrape-time cumulation, Prometheus text renderer, 9 tests) — then work paused mid-level at Vessey's request with a WIP push. Session 2 (08-25): the rest — `logging.rs` (leveled stderr macros, hand-rolled RFC 3339 with the `civil_from_days` calendar math cross-checked against Python at three fixed points, catching a first hardcoded test timestamp that was off by 4 days), `ReqCtx` timing fields + `Instant` stamps and every-exit-path metrics recording in `proxy.rs`, JSON access log with RFC 8259 escaping + `--log-plain`, per-request diagnostics demoted to `debug!` across five files, `admin.rs` (`/metrics` + `/health`, 5 s deadline, startup-fatal bind), `ConnGauge` RAII wiring, three CLI flags. 230 tests pass (214 kept green, +16). Live-verified the full checklist: `jq`-parseable log with stage timings (`null` on a rejection that never routed, `connect_ms:0.0`+`pooled:true` on reuse), status-class counters + `rejected_total{by="auth"}` attribution, cumulative buckets with `+Inf`==`_count`, `/health` walked ok(2/2)→ok(1/2)→degraded(0/2, still HTTP 200)→recovered against live backend kills with matching WARN/INFO breaker lines in the error log, admin-plane isolation (`/metrics` on :8080 proxies to the backend), 404/405 on the admin socket, and both escape hatches. One harness bug, third strike for the "the harness is untested code" lesson: a `pkill -f '127.0.0.1.*9002'` aimed at a backend matched the proxy's own command line (its args contain the backend list) and killed it mid-test — switched to killing by listening port (`lsof -sTCP:LISTEN`). Commits `22a4629` (spec), `83a9400` (metrics WIP, pushed 08-24), `9ebf1c6` (the rest) pushed to `github.com/Vasant18/Ferrum` main via the `switching-gh-accounts` skill, gh switched back to the personal account after each push.
 - **2026-08-26/27** — Level 11 (Caching) implemented inline across two sessions in auto mode (Vessey pre-approved the recommended decisions), per the approved design (`docs/superpowers/specs/2026-08-26-level-11-caching-design.md`). Session 1 (08-26): design brainstormed and spec committed (from-scratch sharded approximate-LRU per the KB's own blessing — the linked-list LRU is the borrow checker's least favorite data structure and production caches shard anyway; opt-in `;cache=` per route with HTTP deciding per response; separate storage/semantics sections in one `cache.rs`); storage engine + RFC 9111 semantics built with 20 unit tests (key isolation, Vary two-step, lazy TTL, restamp, LRU bounds, directive parsing, weak ETag comparison, 8-thread hammer); router grew a third option-partition family (`L11_KEYS`) and `find_route_indexed` (the key carries the route index). Session 2 (08-27): the wiring — `KeyInput` snapshot refactor (the cache is consulted before AND after the in-place L5 rewrite, so the key inputs must be captured once, early), `Lookup::Stale` carrying its key (by restamp time the live head is rewritten), lookup-after-middleware/instead-of-lease in `serve_one`, `serve_cached` running the full client-leg pipeline (chain → L5 → framing) so cached responses are indistinguishable from forwarded ones, proxy→origin conditionals with 304 restamp+serve, client `If-None-Match` answered 304 at the proxy, `TeeWriter` (an `AsyncWrite` wrapper capturing only what the sink accepted, overflow = silent store-cancel, client unaffected), §4.4 unsafe-method invalidation, `--cache-max-*` flags, `cache_events_total` appended to `/metrics` by the admin listener, `"cache"` JSON log field. 250 tests pass (230 kept green, +20). One test's assertion was corrected against the code rather than vice versa (the size gate rejects BEFORE counting `stored` — "stored" means in the cache, not offered to it). `find_route` went production-dead and took the documented `#[allow(dead_code)]`-with-why treatment (the `find`/`for_test` precedent); `CachedResponse.last_modified` was instead REMOVED with the scope-cut argument written where the field was (client-side `If-Modified-Since` needs HTTP-date parsing; the ETag path answers the same question better; `Entry` keeps Last-Modified for the origin leg where the origin compares). Live verification: 13/13 green — miss→hit with the origin's own hit-counter frozen, TTL expiry, `REVALIDATED` with origin answering 304 to our `If-None-Match`, client-conditional 304 with no body and caching headers only, `no-store`/`private` never stored, `Authorization` bypassing the cache entirely, `Vary: Accept-Encoding` serving per-encoding variants, POST invalidation (HIT → POST → MISS with fresh origin hit), 30 LRU evictions under `--cache-max-bytes 16k`, metrics/log fields, an uncached route carrying zero cache artifacts, keep-alive across hits. **One gap found live, fixed, committed separately:** misses on caching routes carried no `X-Cache` at all — indistinguishable from an uncached route; `X-Cache: MISS` now set after the cache snapshot and before the chain/L5 passes so the stored entry stays annotation-free and operator rules keep the last word. Commits `081fae5` (spec), `d453077` (implementation), `cfc3b66` (X-Cache fix), plus docs, pushed to `github.com/Vasant18/Ferrum` main via the `switching-gh-accounts` skill, gh switched back afterwards.
 - **2026-09-02** — Level 12 (Production Features) implemented inline in one session in auto mode, per the approved design (`docs/superpowers/specs/2026-09-02-level-12-production-features-design.md`). New `config.rs`: a hand-rolled TOML-subset parser that LOWERS the file onto the existing CLI vocabulary — `max-conns = 10000` IS `--max-conns 10000`, an `[upstreams]` entry IS `--upstream NAME=SPEC`, a `routes` element IS a positional route spec — so every value keeps its one parser and "CLI overrides file" falls out of argument ordering with zero precedence code; duplicate keys are hard errors (last-wins hides drift), messages carry line numbers, and the subset is stated exactly and rejected loudly outside it. `main.rs`: the eleven-level parse loop extracted verbatim into `parse_settings` so boot, `--validate` (nginx -t, runs the FULL guardrail path incl. `TlsArgs::build`), and SIGHUP reload share one parser; the accept loop now `select!`s accept against SIGTERM/SIGINT (break → drain) and SIGHUP (reload → continue); graceful shutdown drops the listener (kernel refuses from that instant), sets a process-wide drain flag that makes every completing exchange — cached responses included — answer `Connection: close`, and polls **L8's ConnLimiter** (the RAII security accounting IS a drain tracker; zero new machinery) to zero under `--drain-timeout`, second signal skips the wait, exit 0 either way with the cut count logged. Hot reload: `RwLock<Arc<RouteTable>>` snapshotted PER EXCHANGE in `handle_client` (mid-flight requests keep a consistent table; the next request on a keep-alive connection sees the new config; per-connection granularity would let a chatty client pin a retired config forever), the whole new table built off to the side through the identical boot path and swapped with one pointer store, invalid files rejected wholesale at ERROR with the old config live. The reload's lifetime problem: `health.rs` probers now hold `Weak<Upstream>` upgraded per tick — a retired table's probers expire within one interval of its last Arc dropping, the `Weak` IS the shutdown signal (no kill channel, no generation counter); same class of fix in `admin.rs`, whose boot-time `Vec<Arc<Upstream>>` capture would have pinned (and misreported) the boot config forever — `/health` now resolves upstreams per request through the shared handle. Graceful restart (FD passing / SO_REUSEPORT) and worker processes explained and deliberately not built, with the KB's own "the orchestrator rolls pods now" concession and Pingora's single-process argument recorded. One dead-code decision: the spec's diff-and-warn on startup-only keys was consciously dropped during implementation (detecting "changed" needs boot values threaded through for a WARN nobody acts on), so `STARTUP_ONLY_KEYS` was REMOVED rather than `#[allow]`ed, and the doc comment that referenced it fixed in the same pass. 261 tests (250 kept green, +11: the config grammar end to end, and the `Weak` upgrade lifetime contract tested directly). Live verification all green: file boot identical to CLI, `--validate` 0/1 with boot-quality errors, CLI `--admin` overriding the file's, SIGHUP swapping routes under a concurrent 4 s request that completed on the OLD table, a garbage config line rejected with traffic uninterrupted, a clean drain (in-flight request finished, response carried `Connection: close`, "drained cleanly" logged, process exited), a deadline drain cutting a too-slow request at 3 s with the count logged, and new connections refused the instant the listener dropped. Commits `ffb8636` (spec), `5b2dbb9` (config parser WIP), `549b0c9` (shutdown+reload), plus docs, pushed to `github.com/Vasant18/Ferrum` main via the `switching-gh-accounts` skill, gh switched back afterwards.
+- **2026-09-02 (later)** — Level 13 (Basic WAF) implemented inline in one session in auto mode, per the approved design (`docs/superpowers/specs/2026-09-02-level-13-basic-waf-design.md`). New `waf.rs` (~750 lines incl. tests), the KB's "middleware with opinions" built literally: normalization first (two-pass percent decode where a changed second pass IS double-encoding — flagged and scored, legitimate clients single-encode; targeted entity decode; whitespace collapse; null-byte flag; broken escapes stay literal because a WAF must never 500 on hostile input), path canonicalization with the climb-above-root ATTEMPT convicted even when the resolved path lands innocent (the backend's resolution is unknowable), a ~16-rule `const` table scanned linearly over four normalized surfaces (canonical path, query, UA, Referer — body inspection deliberately absent, it conflicts with L1's flat-memory streaming and the module docs say so), CRS-style anomaly scoring with benign lookalikes as first-class tests (O'Brien, union station, select a plan all pass), and `Reputation` — the L4 breaker pointed inward: sharded strikes with lazy decay, bans with doubling backoff capped at 1 h, banned IPs refused for one hash + one lock before any inspection. Wired as an L6 middleware (chain slot: log → request-id → waf → ratelimit → auth → authz, so hostility never consumes a rate token or a credential comparison), `;waf=block|detect` + `;waf-threshold=N` through the existing option partition, threshold-without-waf a boot error, one process-wide `OnceLock` reputation store shared across routes AND surviving L12 reloads (rerouting is not an amnesty). Rule names are log-only in both modes — a response naming the fired rule is a payload-tuning oracle. Three implementation corrections worth recording: the tautology rule's precise form needs a backreference, which Rust's regex crate rejects BY DESIGN (the same linear-time guarantee L9 identified as what keeps L2's `~regex` routes DoS-safe) — the looser `digit=digit` form convicts blind-injection probes (`or 1=2`) correctly anyway; and `union+select` co-occurrence and `;DDL-verb` stacked queries were raised to conviction weight after the test suite showed them under threshold — no benign URL reading exists for either conjunction. 280 tests (261 kept green, +19). Live verification all green: five payload families incl. double-encoded traversal 403'd with generic bodies and zero backend contact, 3 convictions → ban that refused an INNOCENT request from that IP → 2 s decay → served again, detect mode forwarding the attack while logging `score=10 rules=[...]`, the unprotected route passing the same attack untouched, metrics (convicted/detected/banned/ban_refused) and the `waf_score` log field all moving. **Two gaps found live, fixed, committed separately:** WAF counters were rendered but never appended to the `/metrics` document (caught by the warning baseline — dead-code warnings are a wiring detector, third time this course), and the startup banner's middleware summary omitted the WAF layer (the banner exists so execution order is readable at boot). Commits `04f7b0a` (spec), `4623bd3` (implementation), `fcdff9e` (metrics wiring), `817fa27` (banner), plus docs, pushed to `github.com/Vasant18/Ferrum` main via the `switching-gh-accounts` skill, gh switched back afterwards.
