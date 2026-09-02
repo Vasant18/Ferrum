@@ -18,6 +18,7 @@
 mod admin;
 mod balancer;
 mod cache;
+mod config;
 mod health;
 mod http;
 mod logging;
