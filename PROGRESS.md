@@ -19,7 +19,7 @@ Course defined in [Build.md](Build.md). Theory reference: [Reverse-Proxy-Knowled
 | 9 | OS Internals (epoll/kqueue, Tokio internals) — theory | 🔵 **Studied** (2026-08-21) | Theory level, no production code. [`docs/level-9-os-internals.md`](docs/level-9-os-internals.md): the `read()`-blocks problem and C10K; `select`→`poll`→`epoll`/`kqueue`→`io_uring` and why O(n)→O(ready) is the whole ballgame; the full `.await`→`Waker`→reactor→`kevent` path traced through Ferrum's own `Conn::read_head`; this machine's actual stack (Darwin arm64 → **kqueue** not epoll, `mio 1.2.2`, 8 worker threads from `#[tokio::main]`); Ferrum's 3 production spawn sites and its await map (**only 3 of 13 files hold a production `.await`**; `balancer.rs` has zero); a blocking-the-executor audit that found the no-lock-across-await guarantee is **compiler-enforced**, not conventional; and nginx read back as the same architecture. Turned up 2 real findings, recorded not fixed. Quiz pending. |
 | 10 | Observability (logs, metrics, tracing) | 🟢 **Implemented** (2026-08-24/25) | `metrics.rs`: from-scratch registry — status-class counters, `active_connections` gauge (RAII `ConnGauge`), fixed-bucket duration histograms (cumulative `le` computed at scrape time), hand-rolled Prometheus text renderer, zero locks/allocations at record time; `logging.rs`: leveled error log (`error!`..`debug!` macros, `--log-level`, hand-rolled RFC 3339) — per-request diagnostics demoted to `debug`, silent by default; `observe.rs`: access log upgraded to one JSON object per line (RFC 8259 escaping of attacker-controlled values, stage timings, `--log-plain` escape hatch); `proxy.rs`: per-stage `Instant` stamps (route/connect/TTFB) + metrics recorded at every exit path; `admin.rs`: separate admin listener (`--admin`, off by default) serving `/metrics` + `/health` JSON with a 5 s deadline. 230 unit tests. Live-verified JSON log via `jq`, counters/histogram/gauge movement, rejection attribution, `/health` ok→degraded→recovered, admin-plane isolation, `--log-plain` + `--log-level debug`. Quiz pending. |
 | 11 | Caching (LRU, TTL, ETag, revalidation) | 🟢 **Implemented** (2026-08-26/27) | `cache.rs`: sharded approximately-LRU store (16 `std::sync::Mutex` shards, per-shard byte+entry budgets, lazy TTL, `Arc<[u8]>` bodies) + pure RFC 9111 semantics (GET-only, 200/301/404, `Authorization`/`Set-Cookie`/`no-store`/`private` gates, `s-maxage`>`max-age`, `no-cache`=store-but-always-revalidate, `Vary` two-step keying, full-key equality so hash collisions miss); `proxy.rs`: lookup after middleware (auth before cache), fresh hit skips the balancer lease entirely, stale entries send `If-None-Match` and a 304 re-stamps+serves (`X-Cache: REVALIDATED`), `TeeWriter` captures streamed bodies with zero extra reads, RFC 9111 §4.4 unsafe-method invalidation, client `If-None-Match` answered 304 at the proxy; `;cache[=SECS]` route option (third partition family), `--cache-max-*` flags, `cache_events_total` metrics, `"cache"` access-log field, `X-Cache`+`Age` headers. 250 unit tests. Live-verified all 13 checks incl. both revalidation legs, Vary variants, POST invalidation, LRU eviction under a 16 KB budget. Quiz pending. |
-| 12 | Production Features (graceful shutdown, config, hot reload) | ⚪ Not started | Listen/backend addrs via CLI args for now |
+| 12 | Production Features (graceful shutdown, config, hot reload) | 🟢 **Implemented** (2026-09-02) | `config.rs`: hand-rolled TOML-subset parser that LOWERS the file onto the existing CLI vocabulary (one parser per value forever; CLI-beats-file precedence falls out of arg ordering; duplicate keys are errors; line-numbered messages) + `--config`/`--validate` (nginx -t); `main.rs`: parse loop extracted into `parse_settings` (boot, --validate, and reload share ONE path), accept loop `select!`s accept vs SIGTERM/SIGINT/SIGHUP, graceful shutdown = drop listener → drain flag → poll L8's ConnLimiter to zero under `--drain-timeout` (double-signal skips the wait), SIGHUP reload builds the whole new table off to the side and swaps one `Arc` pointer (invalid config rejected wholesale, old config stays live); `proxy.rs`: `RwLock<Arc<RouteTable>>` snapshotted PER EXCHANGE (mid-flight keeps its table, next keep-alive request sees the new one), drain forces `Connection: close`; `health.rs`: probers hold `Weak<Upstream>` and expire with their table. Graceful restart + worker processes explained, deliberately not built. 261 unit tests. Live-verified: file boot, --validate both ways, CLI-over-file, reload under a concurrent slow request, broken reload rejected, clean drain (`Connection: close` + exit after in-flight completes), deadline cut of a too-slow request. Quiz pending. |
 | 13 | Basic WAF (SQLi/XSS/traversal detection, reputation) | ⚪ Not started | CL+TE smuggling vector already rejected in L1 parser |
 | 14 | Scalability (clusters, HA, anycast) — theory | ⚪ Not started | |
 
@@ -1383,6 +1383,162 @@ and the job is to *honor* HTTP's caching contract, not invent one.
     fit THIS codebase — which type would own the in-flight map, and what
     Tokio primitive would the 999 waiters block on?
 
+## Level 12 — what was built
+
+Production features: the gap between a program and infrastructure — config
+files, graceful shutdown, hot reload. Design at
+[`docs/superpowers/specs/2026-09-02-level-12-production-features-design.md`](docs/superpowers/specs/2026-09-02-level-12-production-features-design.md).
+
+- [x] **The config file is the CLI, persisted — a decision, not a parser
+      shortcut.** Ferrum already had a configuration language: eleven levels
+      of flags, route specs, and upstream specs, each with a parser and
+      startup guardrails. A second schema (nested route tables, a
+      `[[middleware]]` array) would mean every value has two parsers that
+      must agree forever; config-vs-flag drift is a classic operational bug.
+      So `config.rs` parses a stated TOML subset (`key = value`, one
+      `[upstreams]` table, one `routes` string array, comments — and loudly
+      nothing else) and LOWERS it into the argument vector `main.rs` already
+      consumes. File args first, real CLI args after: the parse loop's
+      last-write-wins arms implement "CLI overrides file" with zero
+      precedence code. Duplicate keys are errors, not last-wins — a config
+      where `max-conns` appears twice is drift in progress, and honoring the
+      second occurrence silently is how it stays hidden. Every error carries
+      a line number.
+- [x] **`--validate` (nginx -t).** Parse-and-exit, but through the FULL
+      startup path: `parse_settings` runs every guardrail from L5's
+      protected headers to L8's TLS coherence, plus `TlsArgs::build`. Deploy
+      pipelines depend on a validator that answers the same question the
+      boot would — which is exactly why boot, `--validate`, and SIGHUP
+      reload share one extracted function rather than a "reload parser"
+      that accepts a subset. Live-verified: a route targeting an undeclared
+      upstream fails `--validate` with the same message boot would give.
+- [x] **Graceful shutdown — the KB's four-step choreography, on machinery
+      already built.** (1) `tokio::signal` streams for SIGTERM/SIGINT,
+      `select!`ed with `accept()`. (2) Breaking the loop drops the listener;
+      the kernel refuses new connections from that instant. (3) Drain: a
+      process-wide `AtomicBool` makes every completing exchange answer
+      `Connection: close` (cached responses included) — and the in-flight
+      count is **L8's `ConnLimiter`**, whose RAII guard releases on every
+      exit path; the security accounting IS a drain tracker, no new
+      counters, no watch channel. (4) `--drain-timeout` (default 15 s)
+      bounds the wait; a second SIGTERM during the drain means "now"; the
+      cut count is logged and exit is 0 either way — the deploy succeeded,
+      the log records what it cost.
+- [x] **Hot reload — the Arc-swap pattern the KB promised in Level 2.** The
+      shared handle is `RwLock<Arc<RouteTable>>` (arc-swap without the
+      dependency). `handle_client` snapshots the Arc **per exchange**, not
+      per connection: a request mid-flight keeps the consistent table it
+      started with; the next request on the same keep-alive connection sees
+      the new config (per-connection granularity would let one chatty client
+      pin a retired config forever). The read lock is held for one refcount
+      bump, never across an await — L9's compiler-enforced rule, still
+      compiler-enforced. SIGHUP re-reads the file and runs the ENTIRE
+      boot-time parse+build+guardrail path off to the side; only success
+      swaps the pointer. An invalid file is rejected wholesale at ERROR and
+      the old config stays live — a reload can never take a working proxy
+      down. Live-verified: routes swapped under a concurrent 4-second
+      request that completed on the old table; a garbage line appended to
+      the file logged `reload REJECTED` and traffic continued on the
+      current config.
+- [x] **The reload's lifetime problem, solved by `Weak`.** Probers used to
+      hold `Arc<Upstream>` — immortal-table-era code that becomes a leak
+      the moment tables retire: a prober owning a strong ref keeps its pool
+      and its idle connections alive forever. Now `spawn_probers` hands each
+      task a `Weak<Upstream>`, upgraded per tick and held only for the
+      tick; when a reload swaps the table and the last in-flight request
+      drops the old Arc, the next upgrade fails and the loop exits. **The
+      `Weak` IS the shutdown signal** — no kill channel, no generation
+      counter, no task registry. Same fix in `admin.rs`, which had captured
+      a boot-time `Vec<Arc<Upstream>>`: `/health` now resolves upstreams
+      per request through the shared handle (the old capture would have
+      reported — and pinned — the boot config forever).
+- [x] **Reload scope, drawn where nginx draws it.** Routes, upstreams, and
+      their per-route options reload; listener, TLS material, connection
+      limits, cache bounds, and log settings are startup-only (parsed and
+      validated on reload, not applied). You can reroute live; you cannot
+      re-listen. Metrics label slots stay boot-time — the L10 cardinality
+      seam is now real: a reload-introduced upstream records under
+      `upstream="-"` until restart. Documented, accepted, quiz fodder.
+- [x] **Explained, deliberately not built** (the course asks for the
+      explanation): **graceful restart** — zero-refusal binary upgrade via
+      FD passing (nginx: the listening socket survives the exec, so the
+      listen queue never closes) or `SO_REUSEPORT` overlap (old and new
+      bind simultaneously; brief dual-serving window) — skipped because the
+      KB itself concedes the industry answer is increasingly "let the
+      orchestrator roll pods", and Ferrum already demonstrates both halves
+      (drain + config swap) separately. **Worker processes** — nginx's
+      master/worker split exists substantially because C segfaults and a
+      worker's death must not take the fleet; Rust panics are per-task and
+      Pingora ships single-process multi-threaded on exactly that argument
+      (L9 documented our 8-thread work-stealing runtime).
+- [x] **261 unit tests** (250 kept green, +11): the config parser's whole
+      grammar (value shapes, comments-vs-# -in-strings, duplicate key/
+      upstream rejection, unknown keys/sections, unterminated forms,
+      single- and multi-line route arrays, switch-false-is-noop, line
+      numbers in errors) and the `Weak` upgrade lifetime contract
+      (mid-tick strong ref does not extend the pool; the upgrade after the
+      last drop fails).
+- [x] **Live verification, all green:** boot from file identical to CLI
+      (banner, routing, strip rewrite, admin plane); `--validate` exit 0 /
+      exit 1 with the boot-path error; CLI `--admin 9200` overriding the
+      file's 9100; SIGHUP route swap under a concurrent slow request that
+      finished on the old table; broken-file reload rejected with traffic
+      uninterrupted; clean drain — in-flight 4 s request completed, its
+      response carried `Connection: close`, then exit with "drained
+      cleanly"; deadline drain — a request slower than `--drain-timeout`
+      was cut after 3 s with the count logged; new connections refused the
+      moment the listener dropped.
+- [ ] **Level 12 quiz — Vessey to answer before Level 13** (questions below)
+
+### Level 12 quiz — Vessey to answer before Level 13
+
+1. The config file lowers into the CLI's argument vector instead of filling
+   a Settings struct directly. What class of bug does that design make
+   impossible, and what is the concrete mechanism by which `--log-level
+   debug` on the command line beats `log-level = "info"` in the file?
+2. Duplicate keys in the file are a hard error. Defend that against the
+   TOML-standard-ish alternative (last wins) — what operational failure
+   mode is the strictness aimed at?
+3. Why must `--validate` run the ENTIRE boot path (guardrails, TLS build,
+   route resolution) rather than just the file parser? Give a concrete
+   config that parses cleanly but must still fail validation.
+4. Walk the four steps of graceful shutdown in order and name the exact
+   mechanism Ferrum uses for each. Which two steps were already built by
+   earlier levels, and by which?
+5. Why does the drain flag live in an `AtomicBool` instead of a
+   `tokio::sync::watch` channel? What property of the readers makes the
+   channel's extra capability worthless here?
+6. During a drain, where exactly does `Connection: close` get injected, and
+   why must the check happen per-exchange rather than once per connection?
+   What would a client experience if it happened only at accept time?
+7. The route-table snapshot is taken per exchange, not per connection.
+   State the failure mode of each alternative granularity (per-request is
+   ours; consider per-connection and per-read).
+8. The reload path builds the complete new RouteTable BEFORE taking the
+   write lock, and the swap is one pointer store. What two distinct
+   correctness properties does that ordering buy?
+9. In-flight requests keep the old table through a reload with no
+   generation counter, no epoch, no RCU library. What Rust mechanism
+   provides the guarantee, and when exactly does the old table's memory
+   free?
+10. Before this level, a prober held `Arc<Upstream>`; now it holds `Weak`
+    and upgrades per tick. Explain the leak chain the strong ref would have
+    created after a reload (name every object kept alive), and why the
+    upgrade must be per-tick rather than once at loop start.
+11. admin.rs used to capture `Vec<Arc<Upstream>>` at boot. After a reload,
+    what would /health have reported, and what worse thing would it have
+    done beyond misreporting?
+12. Which config keys are reload-scoped and which are startup-only? Pick
+    two startup-only keys and give the concrete technical reason each
+    cannot be swapped by a pointer store.
+13. A reload-introduced upstream records its metrics under `upstream="-"`.
+    Trace why, through L10's registry design, and state the fix's cost that
+    made "document it as a seam" the right call for now.
+14. Make the case FOR and AGAINST implementing graceful restart (FD
+    passing) in Ferrum. Your AGAINST case must cite what the KB says the
+    industry increasingly does instead; your FOR case must name what a
+    plain drain-and-restart drops that FD passing would not.
+
 ## Session log
 
 - **2026-07-26** — Course kickoff. Knowledge base built (all 14 levels). `rproxy` crate created. Module 1.1 taught & assigned. Repo pushed to github.com/Vasant18/Ferrum.
@@ -1399,3 +1555,4 @@ and the job is to *honor* HTTP's caching contract, not invent one.
 - **2026-08-21** — Level 9 (OS Internals) studied. **Theory level, zero production code changed** — the correct outcome rather than a shortfall, since Levels 1–8 already run on this machinery; the work was reading the existing code through a lower lens. Write-up at `docs/level-9-os-internals.md`: the `read()`-blocks problem and C10K; the readiness-API evolution (`select`→`poll`→`epoll`/`kqueue`→`IOCP`/`io_uring`) with the O(n)→O(ready) transition identified as the single property that makes 10k idle connections cheap; the full `.await`→`Poll::Pending`→`Waker`→reactor→`kevent`→re-poll path traced through Ferrum's own `Conn::read_head` rather than a toy example, including the non-blocking-read fast path that bypasses the reactor entirely; and nginx re-read as the same epoll architecture, differing only in who writes the state machines. **Facts verified against the tree rather than recalled:** this machine is `Darwin arm64` so the reactor is **`kqueue`, not `epoll`** (every KB mental model is epoll-shaped because that is where proxies deploy); the reactor crate is `mio 1.2.2`, a transitive dependency never named in `Cargo.toml`; `features = ["full"]` silently selects the multi-threaded scheduler with **8 worker threads**. **The award for most interesting measurement goes to the await map:** counting `.await` in code and excluding the comment mentions that inflate a naive `grep` by ~5% gives **72 production / 61 test**, with only **three of thirteen files** holding a production await (`proxy.rs` 57, `health.rs` 10, `main.rs` 5). `balancer.rs` has **zero** — 1,750+ lines of seven balancing algorithms, a three-state breaker, and a LIFO pool, entirely synchronous. Read through this lens, four separate levels (L1 `http.rs`, L5 `rewrite.rs`, L6's rejection of the async middleware trait, L8 `tls.rs`) independently made one unnamed optimization: keep the compiler-generated state machine small. **The blocking-the-executor audit produced a genuinely stronger result than expected:** every production function that takes a lock (`take_conn`, `return_conn`, `try_acquire`, `release`, `RateLimiter::allow`) is a plain `fn`, not `async fn` — so "never hold a lock across `.await`" is **compiler-enforced**, not a review convention, since `.await` cannot appear in a non-async fn. Corroborated by `tokio::sync` appearing *only* inside comments explaining why it is unused, and `spawn_blocking`/`thread::sleep` appearing zero times. Two lesser audit results: `tls.rs`'s synchronous `std::fs` is harmless because L8 ordered it before `bind` (recorded as a coincidence, not claimed as foresight), and `router.rs:53`'s per-request regex is safe **only** because Rust's `regex` crate guarantees linear time with no backtracking — the same line in a PCRE-based proxy is a DoS vector, so this is a Level 2 dependency choice quietly holding up a Level 9 safety property. **Two findings recorded, deliberately not fixed:** (1) `Server.addr` is a `String` shape-validated at startup but never resolved, so `TcpStream::connect` re-resolves on every pool miss with no DNS caching or TTL awareness — invisible so far because L7's pooling skips `connect` on a hit, and not fixed because resolving once at startup is the *wrong* fix for backends that move, with a TTL-aware resolver cache deserving its own level; (2) the runtime's whole shape (8 workers, work stealing, blocking pool) is implicit in `#[tokio::main]` and stated nowhere, which matters the first time anyone tunes it — not changed, because changing a default with no benchmark is exactly the "measure, don't guess" mistake L7 warned about, and the missing `wrk`/`oha` baseline stays L7's recorded debt rather than being reassigned here. 14-question quiz added. Two corrections made during the write-up, both caught by re-verifying rather than trusting the first number: an initial `.await` count of 137 was wrong because it counted prose mentions inside doc comments, and a claimed "7,000-line proxy" was stale (8,793 lines after L8's `tls.rs` + `security.rs`).
 - **2026-08-24/25** — Level 10 (Observability) implemented inline across two sessions in "auto mode" (Vessey approved the recommended decisions and asked for direct execution), per the approved design (`docs/superpowers/specs/2026-08-24-level-10-observability-design.md`). Session 1 (08-24): design brainstormed (three decision points resolved — from-scratch over the `tracing`/`metrics` crates since L9 proved the request lifecycle lives in one task; per-stage timing in the access log over W3C traceparent for a single-hop proxy; a separate off-by-default admin listener over reserved paths since `/metrics` is reconnaissance gold), spec written and committed, `metrics.rs` built (atomic registry, fixed-bucket histograms with scrape-time cumulation, Prometheus text renderer, 9 tests) — then work paused mid-level at Vessey's request with a WIP push. Session 2 (08-25): the rest — `logging.rs` (leveled stderr macros, hand-rolled RFC 3339 with the `civil_from_days` calendar math cross-checked against Python at three fixed points, catching a first hardcoded test timestamp that was off by 4 days), `ReqCtx` timing fields + `Instant` stamps and every-exit-path metrics recording in `proxy.rs`, JSON access log with RFC 8259 escaping + `--log-plain`, per-request diagnostics demoted to `debug!` across five files, `admin.rs` (`/metrics` + `/health`, 5 s deadline, startup-fatal bind), `ConnGauge` RAII wiring, three CLI flags. 230 tests pass (214 kept green, +16). Live-verified the full checklist: `jq`-parseable log with stage timings (`null` on a rejection that never routed, `connect_ms:0.0`+`pooled:true` on reuse), status-class counters + `rejected_total{by="auth"}` attribution, cumulative buckets with `+Inf`==`_count`, `/health` walked ok(2/2)→ok(1/2)→degraded(0/2, still HTTP 200)→recovered against live backend kills with matching WARN/INFO breaker lines in the error log, admin-plane isolation (`/metrics` on :8080 proxies to the backend), 404/405 on the admin socket, and both escape hatches. One harness bug, third strike for the "the harness is untested code" lesson: a `pkill -f '127.0.0.1.*9002'` aimed at a backend matched the proxy's own command line (its args contain the backend list) and killed it mid-test — switched to killing by listening port (`lsof -sTCP:LISTEN`). Commits `22a4629` (spec), `83a9400` (metrics WIP, pushed 08-24), `9ebf1c6` (the rest) pushed to `github.com/Vasant18/Ferrum` main via the `switching-gh-accounts` skill, gh switched back to the personal account after each push.
 - **2026-08-26/27** — Level 11 (Caching) implemented inline across two sessions in auto mode (Vessey pre-approved the recommended decisions), per the approved design (`docs/superpowers/specs/2026-08-26-level-11-caching-design.md`). Session 1 (08-26): design brainstormed and spec committed (from-scratch sharded approximate-LRU per the KB's own blessing — the linked-list LRU is the borrow checker's least favorite data structure and production caches shard anyway; opt-in `;cache=` per route with HTTP deciding per response; separate storage/semantics sections in one `cache.rs`); storage engine + RFC 9111 semantics built with 20 unit tests (key isolation, Vary two-step, lazy TTL, restamp, LRU bounds, directive parsing, weak ETag comparison, 8-thread hammer); router grew a third option-partition family (`L11_KEYS`) and `find_route_indexed` (the key carries the route index). Session 2 (08-27): the wiring — `KeyInput` snapshot refactor (the cache is consulted before AND after the in-place L5 rewrite, so the key inputs must be captured once, early), `Lookup::Stale` carrying its key (by restamp time the live head is rewritten), lookup-after-middleware/instead-of-lease in `serve_one`, `serve_cached` running the full client-leg pipeline (chain → L5 → framing) so cached responses are indistinguishable from forwarded ones, proxy→origin conditionals with 304 restamp+serve, client `If-None-Match` answered 304 at the proxy, `TeeWriter` (an `AsyncWrite` wrapper capturing only what the sink accepted, overflow = silent store-cancel, client unaffected), §4.4 unsafe-method invalidation, `--cache-max-*` flags, `cache_events_total` appended to `/metrics` by the admin listener, `"cache"` JSON log field. 250 tests pass (230 kept green, +20). One test's assertion was corrected against the code rather than vice versa (the size gate rejects BEFORE counting `stored` — "stored" means in the cache, not offered to it). `find_route` went production-dead and took the documented `#[allow(dead_code)]`-with-why treatment (the `find`/`for_test` precedent); `CachedResponse.last_modified` was instead REMOVED with the scope-cut argument written where the field was (client-side `If-Modified-Since` needs HTTP-date parsing; the ETag path answers the same question better; `Entry` keeps Last-Modified for the origin leg where the origin compares). Live verification: 13/13 green — miss→hit with the origin's own hit-counter frozen, TTL expiry, `REVALIDATED` with origin answering 304 to our `If-None-Match`, client-conditional 304 with no body and caching headers only, `no-store`/`private` never stored, `Authorization` bypassing the cache entirely, `Vary: Accept-Encoding` serving per-encoding variants, POST invalidation (HIT → POST → MISS with fresh origin hit), 30 LRU evictions under `--cache-max-bytes 16k`, metrics/log fields, an uncached route carrying zero cache artifacts, keep-alive across hits. **One gap found live, fixed, committed separately:** misses on caching routes carried no `X-Cache` at all — indistinguishable from an uncached route; `X-Cache: MISS` now set after the cache snapshot and before the chain/L5 passes so the stored entry stays annotation-free and operator rules keep the last word. Commits `081fae5` (spec), `d453077` (implementation), `cfc3b66` (X-Cache fix), plus docs, pushed to `github.com/Vasant18/Ferrum` main via the `switching-gh-accounts` skill, gh switched back afterwards.
+- **2026-09-02** — Level 12 (Production Features) implemented inline in one session in auto mode, per the approved design (`docs/superpowers/specs/2026-09-02-level-12-production-features-design.md`). New `config.rs`: a hand-rolled TOML-subset parser that LOWERS the file onto the existing CLI vocabulary — `max-conns = 10000` IS `--max-conns 10000`, an `[upstreams]` entry IS `--upstream NAME=SPEC`, a `routes` element IS a positional route spec — so every value keeps its one parser and "CLI overrides file" falls out of argument ordering with zero precedence code; duplicate keys are hard errors (last-wins hides drift), messages carry line numbers, and the subset is stated exactly and rejected loudly outside it. `main.rs`: the eleven-level parse loop extracted verbatim into `parse_settings` so boot, `--validate` (nginx -t, runs the FULL guardrail path incl. `TlsArgs::build`), and SIGHUP reload share one parser; the accept loop now `select!`s accept against SIGTERM/SIGINT (break → drain) and SIGHUP (reload → continue); graceful shutdown drops the listener (kernel refuses from that instant), sets a process-wide drain flag that makes every completing exchange — cached responses included — answer `Connection: close`, and polls **L8's ConnLimiter** (the RAII security accounting IS a drain tracker; zero new machinery) to zero under `--drain-timeout`, second signal skips the wait, exit 0 either way with the cut count logged. Hot reload: `RwLock<Arc<RouteTable>>` snapshotted PER EXCHANGE in `handle_client` (mid-flight requests keep a consistent table; the next request on a keep-alive connection sees the new config; per-connection granularity would let a chatty client pin a retired config forever), the whole new table built off to the side through the identical boot path and swapped with one pointer store, invalid files rejected wholesale at ERROR with the old config live. The reload's lifetime problem: `health.rs` probers now hold `Weak<Upstream>` upgraded per tick — a retired table's probers expire within one interval of its last Arc dropping, the `Weak` IS the shutdown signal (no kill channel, no generation counter); same class of fix in `admin.rs`, whose boot-time `Vec<Arc<Upstream>>` capture would have pinned (and misreported) the boot config forever — `/health` now resolves upstreams per request through the shared handle. Graceful restart (FD passing / SO_REUSEPORT) and worker processes explained and deliberately not built, with the KB's own "the orchestrator rolls pods now" concession and Pingora's single-process argument recorded. One dead-code decision: the spec's diff-and-warn on startup-only keys was consciously dropped during implementation (detecting "changed" needs boot values threaded through for a WARN nobody acts on), so `STARTUP_ONLY_KEYS` was REMOVED rather than `#[allow]`ed, and the doc comment that referenced it fixed in the same pass. 261 tests (250 kept green, +11: the config grammar end to end, and the `Weak` upgrade lifetime contract tested directly). Live verification all green: file boot identical to CLI, `--validate` 0/1 with boot-quality errors, CLI `--admin` overriding the file's, SIGHUP swapping routes under a concurrent 4 s request that completed on the OLD table, a garbage config line rejected with traffic uninterrupted, a clean drain (in-flight request finished, response carried `Connection: close`, "drained cleanly" logged, process exited), a deadline drain cutting a too-slow request at 3 s with the count logged, and new connections refused the instant the listener dropped. Commits `ffb8636` (spec), `5b2dbb9` (config parser WIP), `549b0c9` (shutdown+reload), plus docs, pushed to `github.com/Vasant18/Ferrum` main via the `switching-gh-accounts` skill, gh switched back afterwards.
