@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ferrum KB — Level 12: Production Features</title>
+<meta name="description" content="A complete, plain-English map of the Barracuda Networks product portfolio: every product family (Email, Application, Network, Data Protection, Managed XDR, MSP) and the BarracudaONE platform — what each product is, what it does, and what problem it solves." />
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    flowchart: { htmlLabels: true, useMaxWidth: true, padding: 12, nodeSpacing: 55, rankSpacing: 55 },
+    startOnLoad: true, theme: 'base', securityLevel: 'loose',
+    themeVariables: {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '15px',
+      primaryColor: '#e7e8ea', primaryTextColor: '#15203a', primaryBorderColor: '#7e848c',
+      lineColor: '#6a6f77', secondaryColor: '#dddfe2', tertiaryColor: '#f3f4f6',
+      noteBkgColor: '#fff3d6', noteTextColor: '#3a2f12', noteBorderColor: '#caa84a',
+      actorBkg: '#e7e8ea', actorTextColor: '#15203a', actorBorder: '#7e848c',
+      clusterBkg: '#eef0f2', clusterBorder: '#a0a4aa'
+    }
+  });
+</script>
+<style>
+  :root{--bg:#0f1320;--panel:#161c2e;--panel-2:#1d2540;--ink:#e8ecf5;--muted:#9aa6c4;--accent:#7c5cff;--accent-2:#22d3a6;--warn:#ffb454;--danger:#ff6b81;--line:#2a3354;--code-bg:#0b0f1a;--max:1100px;}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:linear-gradient(180deg,#0c1020,#0f1320 40%);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  a{color:var(--accent-2);text-decoration:none}a:hover{text-decoration:underline}
+  header.hero{padding:56px 24px 40px;text-align:center;background:radial-gradient(1200px 400px at 50% -10%,rgba(255,107,129,.18),transparent 60%);border-bottom:1px solid var(--line);}
+  header.hero .eyebrow{letter-spacing:.25em;text-transform:uppercase;color:var(--accent-2);font-size:.75rem;font-weight:700}
+  header.hero h1{font-size:clamp(1.9rem,4vw,3rem);margin:.3em 0 .2em;line-height:1.1}
+  header.hero p.sub{color:var(--muted);max-width:790px;margin:0 auto;font-size:1.05rem}
+  .badges{margin-top:18px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .badge{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);padding:4px 12px;border-radius:999px;font-size:.8rem}
+  .layout{display:grid;grid-template-columns:260px 1fr;gap:32px;align-items:start;max-width:1320px;margin:0 auto;padding:0 22px}
+  nav.toc{position:sticky;top:0;max-height:100vh;overflow:auto;padding:28px 10px 60px;border-right:1px solid var(--line);font-size:.9rem;}
+  nav.toc h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.18em;color:var(--muted);margin:18px 8px 6px}
+  nav.toc a{display:block;color:var(--muted);padding:5px 10px;border-radius:8px;border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--panel);color:var(--ink);text-decoration:none;border-left-color:var(--accent)}
+  main{padding:34px 0 80px;min-width:0}
+  section{margin:0 0 46px;scroll-margin-top:18px}
+  section>h2{font-size:1.7rem;margin:0 0 .5em;padding-bottom:.3em;border-bottom:2px solid var(--line);display:flex;align-items:center;gap:.5em;}
+  h3{font-size:1.25rem;margin:1.6em 0 .4em;color:#fff}
+  h4{font-size:1.02rem;margin:1.2em 0 .3em;color:var(--accent-2);text-transform:uppercase;letter-spacing:.04em}
+  p,li{color:var(--ink)}.muted{color:var(--muted)}
+  article.concept{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin:22px 0}
+  article.concept>h3:first-child{margin-top:0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr} .layout{grid-template-columns:1fr} nav.toc{position:static;max-height:none;border-right:none;border-bottom:1px solid var(--line)}}
+  .card{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card h4{margin-top:.2em}
+  .callout{border-left:4px solid var(--accent);background:var(--panel-2);padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  .callout.analogy{border-left-color:var(--accent-2)}.callout.warn{border-left-color:var(--warn)}.callout.danger{border-left-color:var(--danger)}.callout.story{border-left-color:#5ec2ff}
+  .tag{display:inline-block;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:2px 8px;border-radius:6px;margin-bottom:6px}
+  .tag.beg{background:rgba(34,211,166,.15);color:var(--accent-2)}.tag.tech{background:rgba(124,92,255,.18);color:#b9a6ff}.tag.adv{background:rgba(255,107,129,.15);color:var(--danger)}
+  code{background:var(--code-bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.86em;color:#ffd9a0}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.85rem;line-height:1.55}
+  pre code{background:none;border:none;padding:0;color:#d7e0f5}
+  pre.art{color:#ffd9a0;font-size:.95rem;line-height:1.4;letter-spacing:.04em}
+  pre.mermaid{background:#f7f8fc;color:#111;text-align:center}
+  .mermaid svg text,.mermaid text{fill:#15203a !important}
+  .mermaid .nodeLabel,.mermaid .edgeLabel,.mermaid .label,.mermaid span,.mermaid p,.mermaid div,.mermaid foreignObject *{color:#15203a !important;fill:#15203a !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p{background:#f3f5fc !important}
+  .mermaid .cluster-label .nodeLabel,.mermaid .cluster-label p,.mermaid .cluster span,.mermaid .cluster p{color:#3c4046 !important}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.92rem;overflow:hidden;border-radius:10px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel-2);color:#fff}
+  tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  details{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:12px 0}
+  details summary{cursor:pointer;font-weight:600;color:var(--accent-2);padding:6px 0}
+  details[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px}
+  figure{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  figcaption{color:var(--muted);font-size:.85rem;text-align:center;margin-top:8px;font-style:italic}
+  .qa{margin:10px 0}.qa .q{font-weight:600}.qa .a{color:var(--muted);margin:2px 0 0}
+  ol.flow{counter-reset:step;list-style:none;padding-left:0}
+  ol.flow>li{counter-increment:step;position:relative;padding:10px 0 10px 52px;border-bottom:1px dashed var(--line)}
+  ol.flow>li::before{content:counter(step);position:absolute;left:0;top:8px;width:34px;height:34px;background:var(--accent);color:#fff;border-radius:50%;display:grid;place-items:center;font-weight:700}
+  .rank{font-weight:800;color:var(--accent);margin-right:6px}
+  footer{border-top:1px solid var(--line);padding:30px 22px;text-align:center;color:var(--muted);font-size:.88rem}
+  .lead{font-size:1.08rem}
+  .formula{background:var(--code-bg);border:1px dashed var(--accent);border-radius:10px;padding:12px 16px;font-family:monospace;color:#ffd9a0;text-align:center;margin:14px 0}
+
+  /* KB-THEME START */
+  /* Azure (blue palette) */
+  :root{--bg:#0e1c30;--panel:#152740;--panel-2:#1d3458;--ink:#e6edf7;--muted:#93a6c4;--accent:#1a8ae5;--accent-2:#41a7f5;--warn:#d6a96a;--danger:#d98a8a;--line:#264064;--code-bg:#0b1626;}
+  body{background:linear-gradient(180deg,var(--bg),var(--bg))}
+  header.hero{background:radial-gradient(1100px 400px at 50% -10%,rgba(20,119,210,.26),transparent 60%)}
+  h3,.parthead{color:var(--ink)}
+  th{color:var(--ink)}
+  .tag.tech{background:rgba(65,167,245,.16);color:var(--accent-2)}
+  ol.flow>li::before{color:#0b1626}
+  /* KB-THEME END */
+  /* prevent node/edge label clipping */
+  .mermaid foreignObject{overflow:visible !important}
+  .mermaid .nodeLabel,.mermaid .label,.mermaid foreignObject>div,.mermaid foreignObject span,.mermaid foreignObject p{white-space:nowrap !important;overflow:visible !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p,.mermaid .edgeLabel span{white-space:nowrap !important;overflow:visible !important;padding:1px 4px}
+  .mermaid svg{max-width:100%;height:auto}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyebrow">Ferrum KB &middot; Level 12 of 14 &middot; Production Features</div>
+  <h1>Production Features<br/><span style="font-size:.6em;color:var(--muted)">config files, graceful shutdown, hot reload — the gap between a program and infrastructure</span></h1>
+  <p class="sub">A program runs until you kill it. Infrastructure changes its configuration, upgrades itself, and shuts down — <em>without dropping a single in-flight request</em>. Level 12 closes that gap with three deliverables (a config file, a graceful drain, a hot reload) and two things it deliberately explains-but-does-not-build (graceful restart, worker processes). The recurring theme: the machinery was already there — L8's RAII connection counter <em>is</em> a drain tracker, Rust's <code>Weak</code> <em>is</em> a shutdown signal, the CLI parser's last-write-wins <em>is</em> the precedence rule.</p>
+  <div class="badges">
+    <span class="badge">Audience: Vessey (built it) + the curious</span>
+    <span class="badge">Scope: config / shutdown / reload, std + tokio only</span>
+    <span class="badge">Key file: config.rs (481 lines)</span>
+    <span class="badge">Reading time: ~24 min</span>
+  </div>
+  <p class="muted" style="margin-top:18px">
+    <a href="index.html">&larr; Course index</a> &nbsp;&middot;&nbsp;
+    <a href="Level-11-Caching.html">&larr; Level 11: Caching</a> &nbsp;&middot;&nbsp;
+    <a href="Level-13-Basic-WAF.html">Level 13: Basic WAF &rarr;</a>
+  </p>
+</header>
+
+<div class="layout">
+<nav class="toc">
+  <h2>Orientation</h2>
+  <a href="#exec-summary">Executive Summary</a>
+  <a href="#big-picture">The Big Picture</a>
+  <h2>Core</h2>
+  <a href="#config">The Config File: the CLI, persisted</a>
+  <a href="#validate">--validate: nginx -t, the full boot path</a>
+  <a href="#shutdown">Graceful Shutdown</a>
+  <a href="#reload">Hot Reload: swap the Arc</a>
+  <a href="#weak">The Reload's Lifetime Problem</a>
+  <a href="#scope">Reload Scope vs Startup-Only</a>
+  <a href="#not-built">Explained, Not Built</a>
+  <a href="#code-map">Code Map</a>
+  <h2>Compare</h2>
+  <a href="#industry">How Industry Does It</a>
+  <h2>Reference</h2>
+  <a href="#quiz">Quiz</a>
+  <a href="#cheatsheet">Cheat Sheet &amp; Glossary</a>
+</nav>
+
+<main>
+  <section id="exec-summary">
+    <h2>Executive Summary</h2>
+    <p class="lead">Level 12 makes Ferrum behave like infrastructure: it reads a config file, reloads that file on <code>SIGHUP</code> without a restart, and drains cleanly on <code>SIGTERM</code>/<code>SIGINT</code>.</p>
+    <p>The <strong>config file</strong> (<code>config.rs</code>, 481 lines) is a stated TOML subset — <code>key = value</code>, one <code>[upstreams]</code> table, one <code>routes</code> string array, <code>#</code> comments, and loudly nothing else. It is not a second schema: it <strong>lowers</strong> onto the CLI vocabulary that eleven levels already built (one parser per value, forever). File args are placed first in the argument vector and real CLI args after, so <code>main.rs</code>'s existing last-write-wins <code>match</code> arms implement "CLI overrides file" with <em>zero</em> precedence code. Duplicate keys are hard errors — silent last-wins is how config drift hides — and every error carries a line number.</p>
+    <p><strong><code>--validate</code></strong> is nginx's <code>nginx -t</code>: parse and exit, but through the <em>full</em> boot path including <code>TlsArgs::build</code>, so a config that parses but has an undeclared upstream or an incoherent TLS setup fails exactly as boot would. Boot, <code>--validate</code>, and reload share ONE extracted <code>parse_settings</code> function rather than a lenient "reload parser" that could drift.</p>
+    <p><strong>Graceful shutdown</strong> is a four-step choreography on machinery already built: <code>tokio::signal</code> streams <code>select!</code>ed with <code>accept()</code>; dropping the listener refuses new connections at the kernel; L8's <code>ConnLimiter</code> — the RAII guard built for security accounting — <em>is</em> the drain tracker; and a process-wide <code>AtomicBool</code> makes each completing exchange answer <code>Connection: close</code>. A <code>--drain-timeout</code> (default 15&nbsp;s) bounds the wait; a second signal skips it.</p>
+    <p><strong>Hot reload</strong> is the arc-swap pattern with std only: the shared handle is <code>RwLock&lt;Arc&lt;RouteTable&gt;&gt;</code>, snapshotted <em>per exchange</em>. A request mid-flight keeps the table it started with; the next keep-alive request sees the new config. The new table is built and validated wholesale off to the side; only success does one pointer store. An invalid file keeps the old config live. Probers hold <code>Weak&lt;Upstream&gt;</code> and upgrade per tick — the <code>Weak</code> IS the shutdown signal, no kill channels. <strong>261 unit tests</strong> (250 kept green, +11), live-verified end to end.</p>
+  </section>
+
+  <section id="big-picture">
+    <h2>The Big Picture</h2>
+    <p class="lead">Level 12 does not add a stage to the request path — it wraps the whole process lifecycle around it. The three deliverables touch <em>startup</em> (config), the <em>accept loop</em> (shutdown + reload signals), and <em>every exchange</em> (the per-request table snapshot and the drain flag).</p>
+    <p>Where earlier levels added machinery <em>inside</em> a request, this level adds machinery <em>around</em> requests. The one place it reaches into the hot path is the highlighted stage below: each exchange snapshots the current <code>Arc&lt;RouteTable&gt;</code> and checks the shutdown flag on the way out. Everything else — parsing a file, handling a signal, rebuilding a table — happens on the process's control plane, not its data plane.</p>
+    <figure>
+<pre class="mermaid">
+flowchart TD
+  BOOT["Boot: parse_settings(file args ++ CLI args)"] --> LIST["Bind listener + admin listener"]
+  LIST --> LOOP{"Accept loop:<br/>select! over accept + signals"}
+  LOOP -->|"new connection"| HC["handle_client task"]
+  HC --> SNAP["Snapshot Arc&lt;RouteTable&gt; PER EXCHANGE<br/>(THIS LEVEL) + check shutdown flag"]
+  SNAP --> SERVE["serve_one: route, cache, balance, proxy"]
+  LOOP -->|"SIGHUP"| RELOAD["reload(): rebuild off to the side,<br/>validate, one pointer swap"]
+  RELOAD -.->|"new Arc"| SNAP
+  LOOP -->|"SIGTERM / SIGINT"| DRAIN["drop listener, set drain flag,<br/>poll ConnLimiter to zero, deadline"]
+  DRAIN --> EXIT["exit 0"]
+</pre>
+    <figcaption>The process lifecycle. Boot lowers the file into the CLI arg vector; the accept loop <code>select!</code>s traffic against three signals; the only data-plane touch is the highlighted per-exchange snapshot and drain check.</figcaption>
+    </figure>
+    <div class="callout analogy"><strong>Analogy:</strong> a program is a food truck — it opens, serves, and when the owner leaves, the shutters slam mid-order. Infrastructure is a restaurant: last orders are called (stop accepting), the kitchen finishes the tickets already in (drain), tomorrow's menu is swapped in overnight without closing (hot reload), and there's a hard closing time so one lingering table can't keep the staff till dawn (drain deadline).</div>
+  </section>
+
+  <section id="config">
+    <h2>The Config File: the CLI, persisted</h2>
+    <p class="lead">The most important decision in this level is not <em>how</em> to parse a file — it is refusing to invent a second configuration language. Ferrum already had one: eleven levels of flags, route specs, and upstream specs, each with a parser and startup guardrails.</p>
+    <p>A config file that invented a second schema — nested tables for routes, a <code>[[middleware]]</code> array, its own duration grammar — would mean every value has <strong>two parsers that must agree forever</strong>. They wouldn't; config-vs-flag drift is a classic operational bug (the flag accepts <code>64m</code>, the file's own size parser quietly reads <code>64</code>). So <code>config.rs</code> parses a stated TOML subset and <strong>lowers</strong> it onto the CLI vocabulary 1:1. In the file's own words: <code>max-conns = 10000</code> IS <code>--max-conns 10000</code>, an <code>[upstreams]</code> entry IS an <code>--upstream NAME=SPEC</code>, a <code>routes</code> element IS a positional route spec.</p>
+
+    <article class="concept">
+      <h3>The subset, stated exactly</h3>
+      <p>The parser handles precisely these forms and rejects everything else with a line number:</p>
+      <pre><code># ferrum.toml — every value is a CLI flag name, minus the leading --
+listen    = "127.0.0.1:8080"
+admin     = "127.0.0.1:9100"
+log-level = "info"
+max-conns = 10000
+tls-cert  = "cert.pem"        # startup-only (see Reload Scope)
+no-access-log = true          # a switch: true emits --no-access-log, false emits nothing
+
+[upstreams]                    # one table, NAME = "SPEC" (the --upstream grammar)
+api = "127.0.0.1:9001,127.0.0.1:9002;health=/health"
+
+routes = [                     # one string array, the route-spec grammar verbatim
+  "/api/**=api;cache=60;rate=100/s",
+  "/=api",
+]</code></pre>
+      <p><strong>Nothing else.</strong> No nested tables, no floats, no datetimes, no dotted keys, no inline tables — "this parser refuses to half-understand a file" (the module doc's phrasing). Values are <strong>typed by shape</strong>: a leading <code>"</code> is a string, <code>true</code>/<code>false</code> is a bool, all-digits is an integer. Sizes like <code>64m</code> and durations like <code>30s</code> are strings <em>to this parser</em> — quoted, and handed unchanged to <code>parse_size</code>/<code>parse_duration</code> downstream. One grammar per value, in exactly one place.</p>
+    </article>
+
+    <article class="concept">
+      <h3>Precedence: CLI beats file, with zero precedence code</h3>
+      <p>The requirement is that <code>rproxy --config ferrum.toml --log-level debug</code> runs the file's config with debug logging. The clever part is the <em>mechanism</em>: <code>config::load()</code> returns a <code>FileConfig { listen, args }</code> where <code>args</code> is a flag vector the CLI parser already speaks. <code>main.rs</code> builds one merged vector — <strong>file args first, real CLI args appended after</strong> — and feeds it to <code>parse_settings</code>. That function's loop already does last-write-wins (<code>--log-level</code> seen twice keeps the last), so the later CLI value simply overwrites the earlier file value.</p>
+      <pre><code>// main.rs — the entire "precedence engine"
+let mut merged: Vec&lt;String&gt; = Vec::new();
+merged.extend(cfg.args.iter().cloned());   // file first
+merged.extend(cli_iter);                    // real CLI after
+let settings = parse_settings(merged)?;     // last-write-wins does the rest</code></pre>
+      <p>There is no precedence table, no priority enum, no "if CLI is set, else file" ladder anywhere. The ordering of the vector <em>is</em> the precedence. The one exception is <code>listen</code>: it is positional on the CLI, so it cannot ride inside <code>args</code>. <code>FileConfig.listen</code> is carried separately and applied by <code>main</code> only when the real CLI didn't supply its own listen address.</p>
+    </article>
+
+    <article class="concept">
+      <h3>Duplicate keys are a hard error</h3>
+      <p>TOML-standard-ish behavior would be last-wins. Ferrum makes a duplicate key a hard error instead. The reason is operational, not pedantic: in a 400-line config, <code>max-conns</code> appearing twice is <strong>drift in progress</strong> — someone edited the wrong copy, a merge doubled a block, a templating system emitted a stray line. Silently honoring the second occurrence is exactly how that stays hidden until 3&nbsp;a.m. Duplicate upstream names in the same file are caught in the parser too (rather than only downstream in <code>build_routes</code>) purely for the better line number.</p>
+      <div class="callout warn"><strong>Watch out:</strong> the <code>#</code> comment stripper is quote-aware. A <code>#</code> inside a quoted string (say a URL fragment) is preserved; only a <code>#</code> outside a string starts a comment. This is why there is a real <code>strip_comment</code> pass rather than a naive <code>split('#')</code>.</div>
+    </article>
+  </section>
+
+  <section id="validate">
+    <h2>--validate: nginx -t, the full boot path</h2>
+    <p class="lead">A validator that only checks syntax is worse than useless — it gives deploy pipelines false confidence. <code>--validate</code> answers the <em>same</em> question a real boot would.</p>
+    <p>The flag means "parse and exit," but reaching the exit requires running the entire startup path. If <code>config::load</code> succeeds the file is syntactically fine; the <em>dangerous</em> errors live deeper — a route targeting an upstream that was never declared, a TLS setup where the cert and key don't cohere, a client-CA requested without client-auth. So <code>--validate</code> runs <code>dry_run_build</code>: it calls <code>parse_settings</code> (every guardrail from L5's protected headers through L8's TLS coherence) and then <code>TlsArgs::build()</code> — the one guardrail <code>build_routes</code> does not itself run, because building the rustls config is the moment cert/key mismatches surface.</p>
+    <pre><code>// main.rs — --validate reuses the whole startup path in a dry run
+fn dry_run_build(args: &amp;[String]) -&gt; std::io::Result&lt;()&gt; {
+    let s = /* parse_settings + build_routes */;
+    let _ = s.tls_args.build()?;   // the one guardrail build_routes skips
+    Ok(())
+}
+// exit 0 + "config OK", or exit 1 + "config INVALID: {e}" — nothing bound.</code></pre>
+    <div class="callout"><strong>One path, three callers.</strong> Boot, <code>--validate</code>, and SIGHUP reload all run the IDENTICAL <code>parse_settings</code> + <code>build_routes</code> chain. <code>parse_settings</code> was extracted verbatim from <code>main</code> for exactly this reason. The rejected alternative — a separate lenient "reload parser" that accepts a subset — is precisely the drift trap the config-file design spent its whole budget avoiding: a validator that says OK to something boot would reject (or vice versa) is a liar. Live-verified: a route targeting an undeclared upstream fails <code>--validate</code> with the same message boot gives.</div>
+  </section>
+
+  <section id="shutdown">
+    <h2>Graceful Shutdown</h2>
+    <p class="lead">SIGTERM arrives (the orchestrator is rolling the pod). The proxy must stop accepting, let in-flight requests finish, and get out of the way — with a hard deadline so a hung client can't hold the deploy hostage. Four steps, three of which reuse machinery earlier levels already built.</p>
+    <figure>
+<pre class="mermaid">
+stateDiagram-v2
+  [*] --> Serving
+  Serving --> Draining : SIGTERM / SIGINT breaks the accept loop
+  Draining --> Draining : in_flight() &gt; 0, poll every 100ms
+  Draining --> Drained : in_flight() == 0
+  Draining --> Cut : drain-timeout expires
+  Draining --> Cut : second signal (operator asked twice)
+  Drained --> [*] : exit 0, "drained cleanly"
+  Cut --> [*] : exit 0, WARN "cutting N connection(s)"
+  note right of Draining
+    listener already dropped:
+    kernel refuses new connections.
+    completing exchanges get
+    Connection: close.
+  end note
+</pre>
+    <figcaption>The shutdown state machine. Both terminal transitions exit 0 — the deploy succeeded; the log records what, if anything, was cut.</figcaption>
+    </figure>
+
+    <ol class="flow">
+      <li><strong>Signal, select!ed with accept.</strong> <code>tokio::signal::unix::signal(SignalKind::terminate())</code> and <code>interrupt()</code> (and <code>hangup()</code> for reload) are registered once, outside the loop. The accept loop is a <code>tokio::select!</code> over <code>listener.accept()</code> and the three signal streams. A SIGTERM/SIGINT simply <code>break</code>s the loop.</li>
+      <li><strong>Stop accepting — by dropping the listener.</strong> There is no "accepting = false" flag. Breaking the loop drops the <code>TcpListener</code>, which closes the socket; from that instant the <em>kernel</em> refuses new connections. Nothing in userspace has to police it.</li>
+      <li><strong>Drain — L8's ConnLimiter is the tracker.</strong> Level 8 built <code>ConnLimiter</code> to enforce <code>--max-conns</code>: an RAII guard that increments on accept and releases on <code>Drop</code> through <em>every</em> exit path (success, error, panic). That guard is, structurally, a live-connection counter. Shutdown polls <code>limiter.in_flight()</code> to zero on a 100&nbsp;ms tick. No new counters, no <code>watch</code> channel — <strong>the security accounting IS a drain tracker</strong>.</li>
+      <li><strong>Deadline.</strong> The whole poll runs inside <code>tokio::time::timeout(drain_timeout, ...)</code>, default 15&nbsp;s (<code>--drain-timeout SECS</code>). On expiry, remaining tasks are cut by process exit; the count is logged first. Exit is 0 whether it drained cleanly or hit the deadline — the deploy succeeded either way, and the log says what it cost.</li>
+    </ol>
+
+    <article class="concept">
+      <h3>Keep-alive connections must not linger: the AtomicBool</h3>
+      <p>Dropping the listener stops <em>new</em> connections, but an existing keep-alive connection would happily sit idle waiting for its next request, keeping <code>in_flight()</code> above zero forever. The fix is a process-wide <code>static SHUTTING_DOWN: AtomicBool</code> in <code>proxy.rs</code>, flipped by <code>begin_shutdown()</code>. After each exchange, <code>serve_one</code> checks it: during shutdown the response carries <code>Connection: close</code> (cached responses included), and the connection ends naturally after the in-flight request completes. The check rides the existing <code>client_still_usable</code> computation — it is one more reason the connection can't be reused, alongside the client asking to close or the backend closing.</p>
+      <div class="callout"><strong>Why an <code>AtomicBool</code>, not a <code>tokio::sync::watch</code>?</strong> A watch channel's whole value-add is <em>waking</em> subscribers when the value changes. But the readers here don't need to be woken — they check the flag at a natural point they already reach (the end of each exchange). A relaxed atomic load is a single instruction with no allocation, no task registry, no plumbing. The channel's extra capability is worthless because the readers are already polling by nature of the protocol.</div>
+    </article>
+  </section>
+
+  <section id="reload">
+    <h2>Hot Reload: swap the Arc</h2>
+    <p class="lead">SIGHUP arrives. Re-read the file, validate it wholesale, and atomically swap the route table — so that new requests see the new config while in-flight requests keep the one they started with, and an invalid file changes nothing at all.</p>
+    <p>The shared handle is <code>RwLock&lt;Arc&lt;RouteTable&gt;&gt;</code> — arc-swap without the dependency, the Rust pattern the KB promised back in Level 2. The read path is <code>routes.read().unwrap().clone()</code>: a refcount bump under a read lock held for <em>nanoseconds</em>, never across an <code>.await</code> (L9's rule, still compiler-enforced). The reload path builds the entire new table off to the side, then does one pointer store under the write lock.</p>
+
+    <article class="concept">
+      <h3>Snapshot granularity is the exchange, not the connection</h3>
+      <p><code>handle_client</code> loads the current <code>Arc</code> at the top of each <code>serve_one</code> iteration. That single choice has three consequences:</p>
+      <ul>
+        <li>A request <strong>mid-flight</strong> keeps the exact table it started with — a consistent snapshot until it finishes, so a reload can't tear a route match in half.</li>
+        <li>The <strong>next request on the same keep-alive connection</strong> sees the new config. Per-connection granularity would let one chatty client pin a retired config <em>forever</em>.</li>
+        <li>The old <code>Arc</code> frees itself when its last holder — the last in-flight request that snapshotted it — drops. Ownership solves the torn-read problem by construction; there is no epoch, no generation counter, no RCU library.</li>
+      </ul>
+      <pre><code>// proxy.rs::handle_client — one snapshot per exchange
+let table: Arc&lt;RouteTable&gt; = match routes.read() {
+    Ok(guard) =&gt; Arc::clone(&amp;guard),   // refcount bump, lock released immediately
+    Err(poisoned) =&gt; Arc::clone(&amp;poisoned.into_inner()),
+};
+serve_one(&amp;table, /* ... */).await;</code></pre>
+    </article>
+
+    <article class="concept">
+      <h3>Wholesale validation, then one pointer store</h3>
+      <p><code>reload()</code> runs <code>config::load</code> → <code>parse_settings</code> → <code>build_routes</code> — the full boot-time path — <em>before</em> it touches the write lock. Only on success does it <code>Arc::new</code> the table, spawn probers for it, and store the pointer:</p>
+      <pre><code>// main.rs::reload — build everything, THEN swap
+match config::load(path).and_then(|cfg| parse_settings(cfg.args)).map(|s| s.routes) {
+    Ok(table) =&gt; {
+        let table = Arc::new(table);
+        health::spawn_probers(table.upstreams());     // new table's pools
+        *routes.write().unwrap() = Arc::clone(&amp;table); // ONE pointer store
+        crate::info!("reload: config applied ...");
+    }
+    Err(e) =&gt; crate::error!("reload REJECTED (old config stays live): {e}"),
+}</code></pre>
+      <p>Building before locking buys <strong>two distinct correctness properties</strong>: (1) the write lock is held for the duration of a single pointer store — no reader ever waits on a parse — and (2) a broken file can't leave the table half-swapped, because the swap is atomic and only reached on total success. Live-verified: a garbage line appended to the file logged <code>reload REJECTED</code> and traffic continued uninterrupted on the current config; and a route swap under a concurrent 4-second request completed on the <em>old</em> table.</p>
+      <div class="callout danger"><strong>A reload can never take a working proxy down.</strong> This is the whole contract. An operator who fat-fingers the config and sends SIGHUP gets an ERROR log and a still-serving proxy, not an outage. That is only true because validation is wholesale and the swap is a single atomic store of an already-built table.</div>
+    </article>
+  </section>
+
+  <section id="weak">
+    <h2>The Reload's Lifetime Problem, solved by Weak</h2>
+    <p class="lead">The moment route tables stop being immortal, every long-lived reference to their contents becomes a potential leak. Two places held such references — the health probers and the admin plane — and both are fixed by the same insight: hold a <code>Weak</code>, not an <code>Arc</code>.</p>
+
+    <article class="concept">
+      <h3>Probers: the Weak IS the shutdown signal</h3>
+      <p>Before Level 12, <code>spawn_probers</code> handed each background task an <code>Arc&lt;Upstream&gt;</code>. Harmless when tables were immortal; a leak the moment they retire. Trace the chain: a prober owning a strong <code>Arc&lt;Upstream&gt;</code> keeps the <code>Upstream</code> alive → which keeps its connection pool alive → which keeps every idle pooled TCP connection alive → <em>forever</em>, long after a reload retired that upstream. The prober would keep probing servers no live route points to.</p>
+      <p>Now each task holds a <code>Weak&lt;Upstream&gt;</code> and upgrades it <strong>per tick</strong>, holding the strong ref only for that tick's work. The strong references live where they should — in the route table(s). When a reload swaps the table and the last in-flight request drops the old <code>Arc&lt;RouteTable&gt;</code>, the old upstream's refcount hits zero, and the prober's next <code>weak.upgrade()</code> returns <code>None</code> → the loop <code>return</code>s. Old pooled connections close with their <code>Upstream</code>.</p>
+      <pre><code>// health.rs::probe_loop — upgrade per tick; a failed upgrade ends the loop
+loop {
+    tokio::time::sleep(cfg.interval).await;
+    let Some(up) = weak.upgrade() else { return }; // the table retired -&gt; exit
+    // ... probe due servers, holding `up` only for this tick ...
+}</code></pre>
+      <p><strong>No kill channel, no generation counter, no task registry.</strong> The upgrade <em>must</em> be per-tick, not once at loop start — a strong ref grabbed at start and held would be exactly the leak we're removing; it would pin the pool for the prober's whole life. The old table's probers die within one interval of the last in-flight request finishing.</p>
+    </article>
+
+    <article class="concept">
+      <h3>admin.rs: the boot-Vec capture would pin retired pools</h3>
+      <p>The admin plane's <code>/health</code> endpoint had captured a <code>Vec&lt;Arc&lt;Upstream&gt;&gt;</code> at boot. After a reload this is doubly wrong. The <em>misreporting</em>: <code>/health</code> would report the boot-time upstreams' health, ignoring everything the reload changed. The <em>worse thing</em>: that captured <code>Vec</code> is itself a set of strong refs — it would <strong>pin the boot-time pools alive forever</strong>, the exact leak the probers just escaped, defeating the whole <code>Weak</code> design from the other side. The fix: <code>/health</code> now resolves upstreams <em>per request</em> through the shared <code>RwLock&lt;Arc&lt;RouteTable&gt;&gt;</code> handle, so it always reflects the live config and holds no long-lived strong ref.</p>
+    </article>
+  </section>
+
+  <section id="scope">
+    <h2>Reload Scope vs Startup-Only</h2>
+    <p class="lead">Not everything can be swapped by a pointer store. Ferrum draws the reload line exactly where nginx does: you can reroute live, but you cannot re-listen.</p>
+    <div class="grid2">
+      <div class="card">
+        <span class="tag beg">Reloads live</span>
+        <h4>Routes &amp; upstreams</h4>
+        <p><strong>What:</strong> the <code>routes</code> array, the <code>[upstreams]</code> table, and their per-route options (cache TTL, rate limits, middleware, strip/rewrite rules).</p>
+        <p><strong>Why it can:</strong> they are entirely contained in the <code>RouteTable</code>, which is exactly the thing behind the swappable <code>Arc</code>. Rebuilding and swapping the table applies them atomically.</p>
+      </div>
+      <div class="card">
+        <span class="tag adv">Startup-only</span>
+        <h4>listen, admin, TLS, limits, cache bounds, logging</h4>
+        <p><strong>What:</strong> <code>listen</code>, <code>admin</code>, TLS material, <code>max-conns</code>, cache byte/entry bounds, log settings.</p>
+        <p><strong>Why it can't:</strong> they are bound to OS resources or fixed-size allocations created once at boot — not to the table.</p>
+      </div>
+    </div>
+    <p>Two concrete reasons a pointer store can't touch these: <strong><code>listen</code></strong> is a bound socket — changing it means <code>bind()</code>ing a new one and unbinding the old, a kernel resource dance, not a memory swap (this is the same line nginx draws for listeners). <strong>TLS material</strong> is baked into the rustls <code>ServerConfig</code> constructed at boot; swapping certs mid-flight would mean rebuilding the acceptor and coordinating with connections already mid-handshake. On SIGHUP, startup-only changes in the file are <em>parsed and validated</em> (so a typo is still caught) but not applied; a WARN names the ignored keys and the rest reloads.</p>
+    <div class="callout warn"><strong>The L10 cardinality seam, now real.</strong> Metrics label slots are fixed at startup. A reload-introduced upstream name — one that didn't exist at boot — records its metrics under <code>upstream="-"</code> until a restart. This is a direct consequence of Level 10's decision to bound label cardinality at boot. The fix (dynamic label registration) has real cost in the metrics registry, so "document it as a seam" was the right call for now. Documented, accepted, quiz fodder.</div>
+  </section>
+
+  <section id="not-built">
+    <h2>Explained, Not Built</h2>
+    <p class="lead">The course asks for the <em>explanation</em> of two production features Ferrum deliberately does not implement. The explanation is the lesson — knowing why a thing isn't there is as valuable as building it.</p>
+
+    <article class="concept">
+      <h3>Graceful restart (FD passing / SO_REUSEPORT)</h3>
+      <p>A zero-refusal <em>binary</em> upgrade: swap the executable itself without dropping the listen queue. Two industry mechanisms: <strong>FD passing</strong> (nginx — the listening socket's file descriptor survives the <code>exec</code>, so the kernel's accept queue never closes across the upgrade) and <strong>SO_REUSEPORT overlap</strong> (old and new processes bind the same port simultaneously; a brief dual-serving window lets the old drain while the new accepts).</p>
+      <p><strong>The FOR case:</strong> a plain drain-and-restart drops connections that arrive in the gap between the old process releasing the port and the new one binding it — and drops the accept queue's backlog outright. FD passing preserves both: no refused connection, ever, across a binary upgrade.</p>
+      <p><strong>The AGAINST case:</strong> the KB itself concedes the industry answer is increasingly "let the orchestrator roll pods" — Kubernetes drains one replica while another already serves, so the zero-refusal guarantee moves up a layer. Implementing FD passing would be a <em>second</em> process-lifecycle protocol for a teaching proxy that already demonstrates both halves — drain (shutdown) and config swap (reload) — separately. The teaching value is in seeing those halves clearly, not in gluing them into a binary-swap dance.</p>
+    </article>
+
+    <article class="concept">
+      <h3>Worker processes</h3>
+      <p>nginx runs a master and N worker processes. A large part of <em>why</em> is crash containment: nginx is C, C segfaults, and one worker's death must not take the fleet down. That argument does not transfer to Ferrum. Rust's panics are <strong>per-task</strong> — a panicking request task unwinds and drops its guards (the <code>ConnLimiter</code> releases, connections close) without touching its neighbors. There is no memory-unsafety class of crash to contain. Pingora (Cloudflare's Rust proxy) ships <strong>single-process, multi-threaded</strong> on exactly this reasoning, and Level 9 already documented Ferrum's 8-thread work-stealing tokio runtime — the parallelism a worker pool would provide, without a second process-management layer.</p>
+    </article>
+
+    <article class="concept">
+      <h3>File watching (inotify / kqueue auto-reload)</h3>
+      <p>Also skipped. SIGHUP is the interface every process manager (systemd, supervisord, k8s lifecycle hooks) already speaks. An inotify/kqueue watcher would add a platform-specific API and debounce logic (editors write files in several syscalls; a naive watcher reloads mid-write) — all to save typing <code>kill -HUP</code>.</p>
+    </article>
+  </section>
+
+  <section id="code-map">
+    <h2>Code Map</h2>
+    <p class="lead">What Level 12 added or changed, verified against <code>rproxy/src/</code>.</p>
+    <table>
+      <thead><tr><th>File</th><th>Unit</th><th>Responsibility</th></tr></thead>
+      <tbody>
+        <tr><td><code>config.rs</code> <span class="tag beg">new</span></td><td><code>load</code> / <code>parse</code> / <code>parse_value</code> / <code>strip_comment</code></td><td>TOML-subset parser → <code>FileConfig { listen, args }</code>; value-by-shape typing; duplicate-key and unknown-key rejection; line-numbered errors. 481 lines.</td></tr>
+        <tr><td><code>config.rs</code></td><td><code>VALUE_KEYS</code> / <code>SWITCH_KEYS</code></td><td>The CLI surface as of L11: which file keys lower to <code>--key VALUE</code> vs bare <code>--key</code> switches. Authority remains <code>main.rs</code>.</td></tr>
+        <tr><td><code>main.rs</code> <span class="tag tech">edit</span></td><td><code>parse_settings</code> (extracted)</td><td>The one boot path: parse args → build guardrails → <code>Settings</code>. Shared by boot, <code>--validate</code>, and reload.</td></tr>
+        <tr><td><code>main.rs</code></td><td><code>dry_run_build</code></td><td><code>--validate</code>: run <code>parse_settings</code> + <code>build_routes</code> + <code>TlsArgs::build</code>, exit 0/1, bind nothing.</td></tr>
+        <tr><td><code>main.rs</code></td><td>accept loop (<code>select!</code>) + shutdown</td><td>Signal streams <code>select!</code>ed with <code>accept()</code>; drop listener; poll <code>limiter.in_flight()</code> under <code>--drain-timeout</code>; double-signal skips the wait.</td></tr>
+        <tr><td><code>main.rs</code></td><td><code>reload</code></td><td>SIGHUP → rebuild off to the side → validate wholesale → one <code>*routes.write() =</code> pointer store → respawn probers; reject keeps old config live.</td></tr>
+        <tr><td><code>proxy.rs</code></td><td><code>SHUTTING_DOWN</code> / <code>begin_shutdown</code></td><td>Process-wide <code>AtomicBool</code>; <code>serve_one</code> injects <code>Connection: close</code> per completing exchange during drain via <code>client_still_usable</code>.</td></tr>
+        <tr><td><code>proxy.rs</code></td><td><code>handle_client</code></td><td>Snapshots <code>Arc&lt;RouteTable&gt;</code> from the <code>RwLock</code> handle PER EXCHANGE, never across an await.</td></tr>
+        <tr><td><code>health.rs</code></td><td><code>spawn_probers</code> / <code>probe_loop</code></td><td>Takes <code>Weak&lt;Upstream&gt;</code>; upgrades per tick; a failed upgrade ends the loop. The <code>Weak</code> IS the shutdown signal.</td></tr>
+        <tr><td><code>admin.rs</code></td><td><code>run</code> / <code>health_json</code></td><td><code>/health</code> resolves upstreams per request through the shared <code>RwLock&lt;Arc&lt;RouteTable&gt;&gt;</code> instead of a boot-time <code>Vec</code> capture.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="industry">
+    <h2>How Industry Does It</h2>
+    <p class="lead">Config format, reload model, and shutdown are three of the most divergent areas across proxies. Here is where Ferrum sits — honestly, as a teaching build.</p>
+    <table>
+      <thead><tr><th>Concern</th><th>nginx</th><th>Apache httpd</th><th>HAProxy</th><th>Envoy</th><th>Ferrum (ours)</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Config format</strong></td>
+          <td>Bespoke block-structured DSL (<code>server { location { } }</code>), one parser.</td>
+          <td>Bespoke directive/container DSL (<code>&lt;VirtualHost&gt;</code>), modules extend it.</td>
+          <td>Bespoke section-based (<code>frontend</code>/<code>backend</code>) keyword config.</td>
+          <td>YAML/JSON against a large protobuf schema; xDS for dynamic delivery.</td>
+          <td>TOML subset that <em>lowers onto the CLI</em> — no second schema, one parser per value.</td>
+        </tr>
+        <tr>
+          <td><strong>Validate</strong></td>
+          <td><code>nginx -t</code>: full parse + config test.</td>
+          <td><code>apachectl configtest</code>.</td>
+          <td><code>haproxy -c</code>.</td>
+          <td><code>--mode validate</code> against the schema.</td>
+          <td><code>--validate</code>: the <em>full boot path</em> incl <code>TlsArgs::build</code>, same code as boot.</td>
+        </tr>
+        <tr>
+          <td><strong>Reload model</strong></td>
+          <td>SIGHUP → master spawns new workers, old workers drain then exit.</td>
+          <td>graceful restart → new gen of children, old finish current requests.</td>
+          <td>SIGUSR2 / new process; classic HAProxy needed a brief connection gap (later versions reduced it).</td>
+          <td>Hot restart via shared-memory + config; xDS pushes updates with no restart.</td>
+          <td>SIGHUP → rebuild + validate wholesale → one <code>Arc</code> pointer swap, <em>same process</em>.</td>
+        </tr>
+        <tr>
+          <td><strong>Reload granularity</strong></td>
+          <td>Per-worker: old workers keep old config until they exit.</td>
+          <td>Per-child process.</td>
+          <td>Per-process.</td>
+          <td>Per-connection / xDS resource versioning.</td>
+          <td><strong>Per-exchange</strong>: next keep-alive request sees new config; mid-flight keeps its snapshot.</td>
+        </tr>
+        <tr>
+          <td><strong>Zero-drop binary upgrade</strong></td>
+          <td>Yes — FD passing across <code>exec</code>.</td>
+          <td>Graceful restart (same-binary); full upgrade less seamless.</td>
+          <td>Yes — SO_REUSEPORT / FD handoff in modern versions.</td>
+          <td>Hot restart preserves listeners.</td>
+          <td><strong>No</strong> — explained not built; the halves (drain + swap) exist separately.</td>
+        </tr>
+        <tr>
+          <td><strong>Process model</strong></td>
+          <td>Master + N workers (C crash containment).</td>
+          <td>Multi-process / MPM (prefork, worker, event).</td>
+          <td>Multi-process (nbproc, largely superseded by threads).</td>
+          <td>Single process, multi-threaded.</td>
+          <td>Single process, 8-thread tokio runtime (Pingora's argument; L9).</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="callout"><strong>The honest trade-off.</strong> Ferrum's per-exchange reload granularity is arguably <em>finer</em> than nginx's per-worker model — a nginx worker can hold old config through a long-lived connection, while Ferrum's next request always sees the swap. But Ferrum gives that up nothing free: it pays with a single-process model (no worker-crash containment, which Rust makes unnecessary) and no binary-upgrade path (which the KB argues the orchestrator now owns). The config-lowers-onto-CLI idea is genuinely distinctive and only possible <em>because</em> Ferrum grew a CLI grammar first; a config-first proxy like Envoy has the opposite shape. Everything here is a teaching build — nginx and Envoy have decades of edge-case hardening (config includes, per-directive contexts, xDS incremental deltas) Ferrum does not attempt.</div>
+  </section>
+
+  <section id="quiz">
+    <h2>Quiz</h2>
+    <p class="lead">Copied verbatim from <code>PROGRESS.md</code> &sect; "Level 12 quiz — Vessey to answer before Level 13". Answers are Vessey's to write.</p>
+    <div class="qa"><ol>
+      <li><p class="q">The config file lowers into the CLI's argument vector instead of filling a Settings struct directly. What class of bug does that design make impossible, and what is the concrete mechanism by which <code>--log-level debug</code> on the command line beats <code>log-level = "info"</code> in the file?</p></li>
+      <li><p class="q">Duplicate keys in the file are a hard error. Defend that against the TOML-standard-ish alternative (last wins) — what operational failure mode is the strictness aimed at?</p></li>
+      <li><p class="q">Why must <code>--validate</code> run the ENTIRE boot path (guardrails, TLS build, route resolution) rather than just the file parser? Give a concrete config that parses cleanly but must still fail validation.</p></li>
+      <li><p class="q">Walk the four steps of graceful shutdown in order and name the exact mechanism Ferrum uses for each. Which two steps were already built by earlier levels, and by which?</p></li>
+      <li><p class="q">Why does the drain flag live in an <code>AtomicBool</code> instead of a <code>tokio::sync::watch</code> channel? What property of the readers makes the channel's extra capability worthless here?</p></li>
+      <li><p class="q">During a drain, where exactly does <code>Connection: close</code> get injected, and why must the check happen per-exchange rather than once per connection? What would a client experience if it happened only at accept time?</p></li>
+      <li><p class="q">The route-table snapshot is taken per exchange, not per connection. State the failure mode of each alternative granularity (per-request is ours; consider per-connection and per-read).</p></li>
+      <li><p class="q">The reload path builds the complete new RouteTable BEFORE taking the write lock, and the swap is one pointer store. What two distinct correctness properties does that ordering buy?</p></li>
+      <li><p class="q">In-flight requests keep the old table through a reload with no generation counter, no epoch, no RCU library. What Rust mechanism provides the guarantee, and when exactly does the old table's memory free?</p></li>
+      <li><p class="q">Before this level, a prober held <code>Arc&lt;Upstream&gt;</code>; now it holds <code>Weak</code> and upgrades per tick. Explain the leak chain the strong ref would have created after a reload (name every object kept alive), and why the upgrade must be per-tick rather than once at loop start.</p></li>
+      <li><p class="q">admin.rs used to capture <code>Vec&lt;Arc&lt;Upstream&gt;&gt;</code> at boot. After a reload, what would /health have reported, and what worse thing would it have done beyond misreporting?</p></li>
+      <li><p class="q">Which config keys are reload-scoped and which are startup-only? Pick two startup-only keys and give the concrete technical reason each cannot be swapped by a pointer store.</p></li>
+      <li><p class="q">A reload-introduced upstream records its metrics under <code>upstream="-"</code>. Trace why, through L10's registry design, and state the fix's cost that made "document it as a seam" the right call for now.</p></li>
+      <li><p class="q">Make the case FOR and AGAINST implementing graceful restart (FD passing) in Ferrum. Your AGAINST case must cite what the KB says the industry increasingly does instead; your FOR case must name what a plain drain-and-restart drops that FD passing would not.</p></li>
+    </ol></div>
+  </section>
+
+  <section id="cheatsheet">
+    <h2>Cheat Sheet &amp; Glossary</h2>
+    <h3>Flags, defaults &amp; signals</h3>
+    <table>
+      <thead><tr><th>Name</th><th>Value / default</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>--config PATH</code></td><td>—</td><td>Load a TOML-subset config file; lowered into the arg vector before real CLI args.</td></tr>
+        <tr><td><code>--validate</code></td><td>—</td><td>Run the full boot path (incl <code>TlsArgs::build</code>) and exit 0 (<code>config OK</code>) or 1 (<code>config INVALID</code>). Binds nothing. Requires <code>--config</code>.</td></tr>
+        <tr><td><code>--drain-timeout SECS</code></td><td><strong>15 s</strong></td><td>Hard deadline for the shutdown drain; on expiry remaining connections are cut (count logged).</td></tr>
+        <tr><td>Drain poll tick</td><td><strong>100 ms</strong></td><td>How often shutdown re-checks <code>limiter.in_flight()</code>.</td></tr>
+        <tr><td><code>SIGTERM</code> / <code>SIGINT</code></td><td>—</td><td>Begin graceful shutdown. A second one during the drain skips the wait (immediate).</td></tr>
+        <tr><td><code>SIGHUP</code></td><td>—</td><td>Hot reload the config file. No <code>--config</code> ⇒ logged WARN, ignored.</td></tr>
+        <tr><td>Exit code</td><td><strong>0</strong></td><td>Clean drain and deadline-cut both exit 0 (the deploy succeeded; the log records what was cut). Bad config at boot / failed <code>--validate</code> exit 1.</td></tr>
+        <tr><td>Unit tests</td><td><strong>261</strong> (+11)</td><td>250 prior tests kept green; +11 cover the config grammar and the <code>Weak</code>-upgrade lifetime contract.</td></tr>
+      </tbody>
+    </table>
+    <h3>Config file subset (accepted forms)</h3>
+    <table>
+      <thead><tr><th>Form</th><th>Example</th><th>Lowers to</th></tr></thead>
+      <tbody>
+        <tr><td>Value key</td><td><code>max-conns = 10000</code></td><td><code>--max-conns 10000</code></td></tr>
+        <tr><td>Switch (true)</td><td><code>no-access-log = true</code></td><td><code>--no-access-log</code></td></tr>
+        <tr><td>Switch (false)</td><td><code>no-access-log = false</code></td><td>(nothing — default is false)</td></tr>
+        <tr><td><code>[upstreams]</code> entry</td><td><code>api = "1.2.3.4:9001;health=/h"</code></td><td><code>--upstream api=1.2.3.4:9001;health=/h</code></td></tr>
+        <tr><td><code>routes</code> element</td><td><code>"/api/**=api;cache=60"</code></td><td>positional route spec</td></tr>
+        <tr><td>Comment</td><td><code># note</code> (quote-aware)</td><td>ignored</td></tr>
+      </tbody>
+    </table>
+    <h3>Glossary</h3>
+    <table>
+      <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td>Lowering</td><td>Translating the config file into the pre-existing CLI argument vector, so one parser handles every value and CLI-beats-file falls out of arg ordering.</td></tr>
+        <tr><td>Arc-swap</td><td>The pattern of sharing an immutable value behind an atomic pointer and replacing the whole value with one store. Ferrum uses <code>RwLock&lt;Arc&lt;RouteTable&gt;&gt;</code> — arc-swap without the crate.</td></tr>
+        <tr><td>Drain</td><td>Waiting for in-flight requests to finish after refusing new ones, so a shutdown/deploy drops nothing.</td></tr>
+        <tr><td><code>ConnLimiter</code></td><td>L8's RAII connection counter (enforces <code>--max-conns</code>); reused as the drain tracker because it already counts live connections and releases on <code>Drop</code>.</td></tr>
+        <tr><td><code>Weak&lt;T&gt;</code></td><td>A non-owning reference that must be <code>upgrade()</code>d to an <code>Arc</code> to use. A failed upgrade means the value was dropped — here, that the route table retired. Serves as the prober's shutdown signal.</td></tr>
+        <tr><td>Per-exchange snapshot</td><td>Loading the current <code>Arc&lt;RouteTable&gt;</code> once per request (not per connection), so keep-alive connections pick up reloads on their next request.</td></tr>
+        <tr><td>Graceful restart</td><td>Upgrading the running binary with zero refused connections (FD passing / SO_REUSEPORT). Explained, not built.</td></tr>
+        <tr><td>Startup-only key</td><td>A config key bound to an OS resource or fixed allocation (listener, TLS config, limits) that a reload parses/validates but does not apply.</td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+</div>
+
+<footer>
+  <p>Ferrum KB &mdash; Level 12: Production Features &bull; Built 2026-09-02</p>
+  <p class="muted">A teaching reverse proxy in Rust. Claims verified against <code>rproxy/src/config.rs</code>, <code>main.rs</code>, <code>proxy.rs</code>, <code>health.rs</code>, <code>admin.rs</code> and PROGRESS.md. Where ours is crude next to production process managers, the page says so.</p>
+</footer>
+</body>
+</html>

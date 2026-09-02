@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ferrum KB — Level 8: Security & TLS</title>
+<meta name="description" content="A complete, plain-English map of the Barracuda Networks product portfolio: every product family (Email, Application, Network, Data Protection, Managed XDR, MSP) and the BarracudaONE platform — what each product is, what it does, and what problem it solves." />
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    flowchart: { htmlLabels: true, useMaxWidth: true, padding: 12, nodeSpacing: 55, rankSpacing: 55 },
+    startOnLoad: true, theme: 'base', securityLevel: 'loose',
+    themeVariables: {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '15px',
+      primaryColor: '#e7e8ea', primaryTextColor: '#15203a', primaryBorderColor: '#7e848c',
+      lineColor: '#6a6f77', secondaryColor: '#dddfe2', tertiaryColor: '#f3f4f6',
+      noteBkgColor: '#fff3d6', noteTextColor: '#3a2f12', noteBorderColor: '#caa84a',
+      actorBkg: '#e7e8ea', actorTextColor: '#15203a', actorBorder: '#7e848c',
+      clusterBkg: '#eef0f2', clusterBorder: '#a0a4aa'
+    }
+  });
+</script>
+<style>
+  :root{--bg:#0f1320;--panel:#161c2e;--panel-2:#1d2540;--ink:#e8ecf5;--muted:#9aa6c4;--accent:#7c5cff;--accent-2:#22d3a6;--warn:#ffb454;--danger:#ff6b81;--line:#2a3354;--code-bg:#0b0f1a;--max:1100px;}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:linear-gradient(180deg,#0c1020,#0f1320 40%);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  a{color:var(--accent-2);text-decoration:none}a:hover{text-decoration:underline}
+  header.hero{padding:56px 24px 40px;text-align:center;background:radial-gradient(1200px 400px at 50% -10%,rgba(255,107,129,.18),transparent 60%);border-bottom:1px solid var(--line);}
+  header.hero .eyebrow{letter-spacing:.25em;text-transform:uppercase;color:var(--accent-2);font-size:.75rem;font-weight:700}
+  header.hero h1{font-size:clamp(1.9rem,4vw,3rem);margin:.3em 0 .2em;line-height:1.1}
+  header.hero p.sub{color:var(--muted);max-width:790px;margin:0 auto;font-size:1.05rem}
+  .badges{margin-top:18px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .badge{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);padding:4px 12px;border-radius:999px;font-size:.8rem}
+  .layout{display:grid;grid-template-columns:260px 1fr;gap:32px;align-items:start;max-width:1320px;margin:0 auto;padding:0 22px}
+  nav.toc{position:sticky;top:0;max-height:100vh;overflow:auto;padding:28px 10px 60px;border-right:1px solid var(--line);font-size:.9rem;}
+  nav.toc h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.18em;color:var(--muted);margin:18px 8px 6px}
+  nav.toc a{display:block;color:var(--muted);padding:5px 10px;border-radius:8px;border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--panel);color:var(--ink);text-decoration:none;border-left-color:var(--accent)}
+  main{padding:34px 0 80px;min-width:0}
+  section{margin:0 0 46px;scroll-margin-top:18px}
+  section>h2{font-size:1.7rem;margin:0 0 .5em;padding-bottom:.3em;border-bottom:2px solid var(--line);display:flex;align-items:center;gap:.5em;}
+  h3{font-size:1.25rem;margin:1.6em 0 .4em;color:#fff}
+  h4{font-size:1.02rem;margin:1.2em 0 .3em;color:var(--accent-2);text-transform:uppercase;letter-spacing:.04em}
+  p,li{color:var(--ink)}.muted{color:var(--muted)}
+  article.concept{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin:22px 0}
+  article.concept>h3:first-child{margin-top:0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr} .layout{grid-template-columns:1fr} nav.toc{position:static;max-height:none;border-right:none;border-bottom:1px solid var(--line)}}
+  .card{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card h4{margin-top:.2em}
+  .callout{border-left:4px solid var(--accent);background:var(--panel-2);padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  .callout.analogy{border-left-color:var(--accent-2)}.callout.warn{border-left-color:var(--warn)}.callout.danger{border-left-color:var(--danger)}.callout.story{border-left-color:#5ec2ff}
+  .tag{display:inline-block;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:2px 8px;border-radius:6px;margin-bottom:6px}
+  .tag.beg{background:rgba(34,211,166,.15);color:var(--accent-2)}.tag.tech{background:rgba(124,92,255,.18);color:#b9a6ff}.tag.adv{background:rgba(255,107,129,.15);color:var(--danger)}
+  code{background:var(--code-bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.86em;color:#ffd9a0}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.85rem;line-height:1.55}
+  pre code{background:none;border:none;padding:0;color:#d7e0f5}
+  pre.art{color:#ffd9a0;font-size:.95rem;line-height:1.4;letter-spacing:.04em}
+  pre.mermaid{background:#f7f8fc;color:#111;text-align:center}
+  .mermaid svg text,.mermaid text{fill:#15203a !important}
+  .mermaid .nodeLabel,.mermaid .edgeLabel,.mermaid .label,.mermaid span,.mermaid p,.mermaid div,.mermaid foreignObject *{color:#15203a !important;fill:#15203a !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p{background:#f3f5fc !important}
+  .mermaid .cluster-label .nodeLabel,.mermaid .cluster-label p,.mermaid .cluster span,.mermaid .cluster p{color:#3c4046 !important}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.92rem;overflow:hidden;border-radius:10px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel-2);color:#fff}
+  tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  details{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:12px 0}
+  details summary{cursor:pointer;font-weight:600;color:var(--accent-2);padding:6px 0}
+  details[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px}
+  figure{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  figcaption{color:var(--muted);font-size:.85rem;text-align:center;margin-top:8px;font-style:italic}
+  .qa{margin:10px 0}.qa .q{font-weight:600}.qa .a{color:var(--muted);margin:2px 0 0}
+  ol.flow{counter-reset:step;list-style:none;padding-left:0}
+  ol.flow>li{counter-increment:step;position:relative;padding:10px 0 10px 52px;border-bottom:1px dashed var(--line)}
+  ol.flow>li::before{content:counter(step);position:absolute;left:0;top:8px;width:34px;height:34px;background:var(--accent);color:#fff;border-radius:50%;display:grid;place-items:center;font-weight:700}
+  .rank{font-weight:800;color:var(--accent);margin-right:6px}
+  footer{border-top:1px solid var(--line);padding:30px 22px;text-align:center;color:var(--muted);font-size:.88rem}
+  .lead{font-size:1.08rem}
+  .formula{background:var(--code-bg);border:1px dashed var(--accent);border-radius:10px;padding:12px 16px;font-family:monospace;color:#ffd9a0;text-align:center;margin:14px 0}
+
+  /* KB-THEME START */
+  /* Azure (blue palette) */
+  :root{--bg:#0e1c30;--panel:#152740;--panel-2:#1d3458;--ink:#e6edf7;--muted:#93a6c4;--accent:#1a8ae5;--accent-2:#41a7f5;--warn:#d6a96a;--danger:#d98a8a;--line:#264064;--code-bg:#0b1626;}
+  body{background:linear-gradient(180deg,var(--bg),var(--bg))}
+  header.hero{background:radial-gradient(1100px 400px at 50% -10%,rgba(20,119,210,.26),transparent 60%)}
+  h3,.parthead{color:var(--ink)}
+  th{color:var(--ink)}
+  .tag.tech{background:rgba(65,167,245,.16);color:var(--accent-2)}
+  ol.flow>li::before{color:#0b1626}
+  /* KB-THEME END */
+  /* prevent node/edge label clipping */
+  .mermaid foreignObject{overflow:visible !important}
+  .mermaid .nodeLabel,.mermaid .label,.mermaid foreignObject>div,.mermaid foreignObject span,.mermaid foreignObject p{white-space:nowrap !important;overflow:visible !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p,.mermaid .edgeLabel span{white-space:nowrap !important;overflow:visible !important;padding:1px 4px}
+  .mermaid svg{max-width:100%;height:auto}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyebrow">Ferrum KB &middot; Level 8 of 14 &middot; Security &amp; TLS</div>
+  <h1>Security &amp; TLS<br/><span style="font-size:.6em;color:var(--muted)">The one place we stop building from scratch &mdash; and everything around the crypto that is still ours</span></h1>
+  <p class="sub">Level 8 gives Ferrum a lock on the front door and a bouncer beside it. TLS termination arrives through <code>rustls</code> + <code>tokio-rustls</code> &mdash; the single deliberate library exception in a from-scratch course, because hand-rolling crypto is this level's named mistake #1. But the crypto is the small part. The interesting engineering is <em>around</em> it: where the handshake runs (inside the spawned task, never the accept loop), how long it may take, a global-plus-per-IP connection limiter released by RAII, hand-rolled CIDR allow/deny, and body/header caps enforced mid-stream. All of it rides Level 1's <code>Conn&lt;S&gt;</code> seam for free.</p>
+  <div class="badges">
+    <span class="badge">Audience: Vessey (revising the build)</span>
+    <span class="badge">Scope: TLS, mTLS, conn limits, CIDR, body/header caps</span>
+    <span class="badge">Reading time: ~26 min</span>
+  </div>
+  <p class="muted" style="margin-top:18px">
+    <a href="index.html">&larr; Course index</a> &nbsp;&middot;&nbsp;
+    <a href="Level-07-Performance.html">&larr; Level 7: Performance</a> &nbsp;&middot;&nbsp;
+    <a href="Level-09-OS-Internals.html">Level 9: OS Internals &rarr;</a>
+  </p>
+</header>
+
+<div class="layout">
+<nav class="toc">
+  <h2>Orientation</h2>
+  <a href="#exec-summary">Executive Summary</a>
+  <a href="#big-picture">The Big Picture</a>
+  <h2>Core</h2>
+  <a href="#rustls">rustls: The One Exception</a>
+  <a href="#seam">The Conn&lt;S&gt; Seam Pays Off</a>
+  <a href="#handshake">Handshake Inside the Task</a>
+  <a href="#mtls">mTLS &amp; Startup Guardrails</a>
+  <a href="#connlimiter">ConnLimiter: Global + Per-IP</a>
+  <a href="#cidr">Hand-Rolled CIDR Allow/Deny</a>
+  <a href="#limits">Body &amp; Header Caps</a>
+  <a href="#code-map">Code Map</a>
+  <h2>Compare</h2>
+  <a href="#industry">How the Industry Does It</a>
+  <h2>Reference</h2>
+  <a href="#quiz">Quiz</a>
+  <a href="#cheatsheet">Cheat Sheet &amp; Glossary</a>
+</nav>
+
+<main>
+<section id="exec-summary">
+  <h2>Executive Summary</h2>
+  <p class="lead">Encrypt the transport, then armor the front door &mdash; and own everything except the crypto itself.</p>
+  <p>Level 8 has two halves, both drawn from the knowledge base's own framing. The first is <strong>encrypted transport</strong>: TLS termination and mutual TLS. The second is <strong>armored defaults</strong> &mdash; the "front door" hardening that answers slowloris, resource exhaustion, and known-bad sources. This is the one level where "from scratch" deliberately stops at the library boundary. Building your own crypto or hand-rolling certificate parsing is listed as this level's mistake #1, because the failure mode is not a visible bug &mdash; it is a silent loss of confidentiality.</p>
+  <p>TLS termination comes from <code>rustls</code> + <code>tokio-rustls</code> (<code>tls.rs</code>), with the crypto provider pinned to <strong><code>ring</code></strong> rather than the <code>aws-lc-rs</code> default: a far lighter build with no cmake/NASM toolchain. These are the first new dependencies since Level 2's <code>regex</code>. The protocol floor is TLS 1.2 with 1.3 preferred, and there is deliberately no knob to go lower &mdash; rustls does not implement SSLv3 or TLS 1.0/1.1 <em>at all</em>. ALPN is pinned to <code>http/1.1</code> because this proxy speaks exactly one protocol and saying so in the handshake is more honest than negotiating h2 and then failing to parse it.</p>
+  <p>Levels 1&ndash;7 run over TLS <strong>completely unchanged</strong>, because Level 1 made <code>Conn&lt;S&gt;</code> generic over <code>S: AsyncRead + AsyncWrite + Unpin</code> instead of concrete over <code>TcpStream</code>, and <code>tokio_rustls::server::TlsStream</code> satisfies both. Seven levels later, that one decision <em>is</em> this level's entire integration cost: only <code>handle_client</code> and <code>serve_one</code> were generic-ized to pay it off.</p>
+  <p>The most important decision in the level is not about rustls at all: the handshake runs <strong>inside the spawned per-connection task, never in the accept loop</strong>. Awaiting it in the accept loop would let one client that sends a single <code>ClientHello</code> byte stall <em>every</em> new connection process-wide &mdash; a one-attacker total denial of service that passes every functional test. A <code>TLS_HANDSHAKE_TIMEOUT</code> of 10s bounds it, because otherwise slowloris just moves one layer down.</p>
+  <p>The armoring half (<code>security.rs</code>) is on by default. <code>ConnLimiter</code> gives a global ceiling plus a per-source-IP cap, checked before the spawn and released by <code>Drop</code> on an RAII guard. Hand-rolled <code>Cidr</code>/<code>CidrList</code> gives allow/deny on the socket peer address (deny beats allow; a non-empty allow list is default-deny; IPv4-mapped addresses normalized at the edge). Body caps are enforced <em>while streaming</em> (413), header count is capped at 431. A denied source and an over-limit connection both close <strong>with no response</strong> &mdash; a TLS-specific reversal of the design doc, because handshaking to answer 403 spends an RSA/ECDHE operation on traffic you already decided to refuse.</p>
+</section>
+
+<section id="big-picture">
+  <h2>The Big Picture</h2>
+  <p>Level 8 wraps a <strong>shell around the outside</strong> of the request pipeline and adds <strong>one counter inside</strong> the body loop. Every pre-existing stage &mdash; head read, routing, middleware, forwarding &mdash; is untouched. The new work lives in the accept loop (CIDR check, connection limits) and in the newly-spawned task (TLS handshake), plus two size caps in the head/body path.</p>
+  <p>The ordering matters, and it is deliberately cheapest-first. The CIDR check runs before any allocation. The connection limits run before the task spawn. Only <em>then</em> do we spawn, and only <em>inside</em> that task do we perform the handshake. Each gate is arranged so that the check is cheaper than the attack it defends against.</p>
+  <figure>
+<pre class="mermaid">
+flowchart TD
+  A["accept() returns (stream, peer)"] --> N["normalize_peer(peer)<br/>collapse ::ffff:a.b.c.d -&gt; v4"]
+  N --> CIDR{"cidrs.permits(ip)?"}
+  CIDR -->|"no"| D1["close, no response<br/>(no alloc, no spawn, no handshake)"]
+  CIDR -->|"yes"| LIM{"limiter.try_acquire(ip)?"}
+  LIM -->|"refused"| D2["close, no response<br/>(before the spawn)"]
+  LIM -->|"ConnGuard"| ND["set_nodelay on raw socket"]
+  ND --> SP["tokio::spawn task<br/>(guard moved in -&gt; Drop releases slot)"]
+  SP --> TLS{"TLS listener?"}
+  TLS -->|"yes"| HS["timeout(TLS_HANDSHAKE_TIMEOUT,<br/>acceptor.accept(stream))"]
+  TLS -->|"no"| PLAIN["handle_client(stream, scheme=http)"]
+  HS -->|"ok"| HC["handle_client(tls, scheme=https)"]
+  HS -->|"fail / timeout"| D3["debug-log, drop<br/>(no HTTP layer to answer on)"]
+  HC --> CORE["head read (L1) -&gt; 431 count cap -&gt; 413 body cap<br/>-&gt; route (L2) -&gt; middleware (L6) -&gt; forward (L3/L4/L7)"]
+  PLAIN --> CORE
+</pre>
+<figcaption>The Level 8 shell (highlighted logic) wraps the existing core. Two gates fire in the accept loop before any work; the handshake fires inside the task; the two size caps live in the head/body path. The routing chain below <code>handle_client</code> is byte-for-byte the Level 7 code.</figcaption>
+  </figure>
+  <div class="callout analogy"><strong>Analogy:</strong> Think of a nightclub. TLS is the tinted-glass tunnel from the street to the door &mdash; nobody outside can see who is walking in or what they are carrying. The bouncer is the armoring half: he counts heads (global limit), stops any one stag party from filling the room (per-IP cap), keeps a banned-names list (deny CIDR) and optionally a guest list (allow CIDR), and turns away anyone over the fire-code limit <em>at the rope</em> &mdash; without walking them inside first to explain why. Crucially, the bouncer stands <em>inside his own booth</em> (the spawned task) so that one slow ID check does not freeze the entire door.</div>
+</section>
+<section id="rustls">
+  <h2>rustls: The One From-Scratch Exception</h2>
+  <p class="lead">Every other subsystem in this course is built from primitives. TLS is where that stops &mdash; on purpose.</p>
+  <p>The router's matcher, the balancer's hash ring, the limiter's token bucket, the pool's LIFO stack &mdash; all hand-built. Certificate parsing and TLS state machines are the documented exception. <code>tls.rs</code>'s own module doc names it plainly: rolling your own crypto is this level's mistake #1, "because the failure mode is not a bug you can see in a test, it is a silent loss of confidentiality." A subtly-wrong AES-GCM or a padding-oracle in your handshake code does not fail a functional test; it quietly leaks. So Ferrum reaches for a library here and only here.</p>
+
+  <h3>Why rustls, and why <code>ring</code></h3>
+  <p>The choice is <code>rustls</code> + <code>tokio-rustls</code>: memory-safe, pure-Rust, with no OpenSSL C surface to fuzz or CVE-track. Within rustls, the crypto <em>provider</em> is pinned explicitly to <strong><code>ring</code></strong> rather than the newer <code>aws-lc-rs</code> default. The reason is build weight: <code>ring</code> is substantially lighter and needs no cmake/NASM toolchain. The spec even records the evidence &mdash; <code>rproxy/target/</code> still held ~1.2 GB of stale <code>aws-lc-sys</code> artifacts from an earlier probe of this level.</p>
+  <p>Because the crate is built with <code>default-features = false</code>, there is no process-wide default provider installed. <code>build_server_config</code> in <code>tls.rs</code> therefore passes it by hand:</p>
+  <pre><code>let provider = Arc::new(rustls::crypto::ring::default_provider());
+let builder = ServerConfig::builder_with_provider(provider)
+    .with_safe_default_protocol_versions()   // TLS 1.3 + 1.2, nothing older
+    .map_err(|e| bad(format!("tls: {e}")))?;</code></pre>
+  <p>Naming the provider in one place beats a global install whose absence would surface as a runtime panic on the first handshake &mdash; a failure that arrives in production, not at boot.</p>
+
+  <h3>The protocol floor is an absence, not a setting</h3>
+  <p><code>with_safe_default_protocol_versions()</code> gives TLS 1.3 (preferred) and 1.2, and there is <strong>no path older</strong>. This is the strongest form of the level's theme &mdash; "the config a lazy user gets must be the safe one." As <code>tls.rs</code> puts it, the strongest version of that idea is "a config where the unsafe option cannot be typed." rustls simply does not implement SSLv3 or TLS 1.0/1.1, so no flag can re-enable them. Contrast nginx or HAProxy, where <code>ssl_protocols</code> is a line an operator can widen back to <code>TLSv1</code> under pressure from a legacy client.</p>
+
+  <h3>ALPN pinned to <code>http/1.1</code></h3>
+  <p>After building the cert, <code>build_server_config</code> sets one line:</p>
+  <pre><code>config.alpn_protocols = vec![b"http/1.1".to_vec()];</code></pre>
+  <p>This proxy speaks exactly one wire protocol. Advertising <code>http/1.1</code> in the handshake is more honest than letting a modern client negotiate <code>h2</code> and then discovering, after the connection is up, that Ferrum cannot parse HTTP/2 framing. HTTP/2 is not on this course's 14-level map; if it ever arrives, this is the single line that changes.</p>
+  <div class="callout warn"><strong>Watch out:</strong> This is a teaching build. rustls's <em>defaults</em> are production-grade &mdash; but everything Ferrum wraps around them (session-store tuning, OCSP stapling, backend re-encryption, ACME issuance) is deliberately out of scope. Treat this as "correct TLS termination," not "a hardened edge appliance."</div>
+</section>
+
+<section id="seam">
+  <h2>The <code>Conn&lt;S&gt;</code> Seam Pays Off</h2>
+  <p class="lead">A generic chosen in Level 1, for reasons that would not fully land for seven levels, is what makes TLS almost free here.</p>
+  <p>Back in Level 1, the connection wrapper was written as <code>Conn&lt;S&gt;</code> generic over <code>S: AsyncRead + AsyncWrite + Unpin</code>, rather than concrete over <code>TcpStream</code>. A <code>tokio_rustls::server::TlsStream&lt;TcpStream&gt;</code> implements both of those traits. So the <em>entire</em> parsing, framing, routing, middleware, and forwarding core &mdash; every line of Levels 1 through 7 &mdash; works over an encrypted stream <strong>with no change whatsoever</strong>. The bytes coming out of the <code>read</code> call are plaintext either way; only the layer underneath differs.</p>
+  <p>The integration cost, seven levels later, was making exactly two signatures generic (both in <code>proxy.rs</code>):</p>
+  <pre><code>pub async fn handle_client&lt;S: AsyncRead + AsyncWrite + Unpin&gt;(
+    client: S, ...
+)
+async fn serve_one&lt;S: AsyncRead + AsyncWrite + Unpin&gt;(
+    client: &amp;mut Conn&lt;S&gt;, ...
+)</code></pre>
+
+  <h3>Generics, not an enum</h3>
+  <p>The obvious alternative was an <code>enum Stream { Plain(TcpStream), Tls(TlsStream&lt;TcpStream&gt;) }</code>. It was rejected. This is the hottest loop in the program &mdash; every proxied byte passes through a <code>read</code> and a <code>write</code>. An enum would force a <code>match</code> on every one of those calls, branching on which variant it holds. Generics give <strong>static dispatch</strong>: the compiler monomorphizes two copies of the proxy core, each hard-wired to its concrete stream type, with zero per-read branching. The price is two copies of that code in the binary &mdash; the correct trade for a proxy, where per-byte cost dominates and binary size does not.</p>
+
+  <h3>The consequence: <code>set_nodelay</code> moves up</h3>
+  <p><code>set_nodelay</code> is a <code>TcpStream</code>-inherent method &mdash; it lives on the file descriptor. Once TLS wraps the socket, the generic proxy core no longer knows it is holding a <code>TcpStream</code>, so it cannot call it. The fix in <code>main.rs</code> is to apply it to the <strong>raw socket in the accept loop, before any TLS wrap</strong>:</p>
+  <pre><code>let _ = stream.set_nodelay(true);   // on the raw fd, before spawn/handshake</code></pre>
+  <p>This is both necessary and correct: the option lives on the file descriptor, which the TLS stream goes on to own. Disabling Nagle's algorithm matters because Ferrum writes small serialized heads that should not sit in a coalescing buffer waiting for a timer &mdash; every reverse proxy disables Nagle for the same reason.</p>
+
+  <h3>The Level 5 seam, finally closed</h3>
+  <p>Level 5 left a narrower seam: <code>proxy.rs</code> carried <code>scheme: "http", // Level 8 sets "https" after TLS termination</code>. That comment was a promissory note. Level 8 pays it: after termination, the backend has no other way to learn what the client actually spoke, so <code>X-Forwarded-Proto</code> must report it. In <code>main.rs</code>, <code>scheme</code> is <code>"https"</code> on the TLS arm and <code>"http"</code> on the plaintext arm, threaded through <code>handle_client</code>. Critically it is the <em>listener's</em> scheme &mdash; an observation &mdash; never a client-supplied hint. A backend that gates secure cookies or a redirect-to-HTTPS on that header must be reading a fact, not an assertion.</p>
+</section>
+
+<section id="handshake">
+  <h2>The Handshake Runs Inside the Task</h2>
+  <p class="lead">This is the most important security decision in the level, and it is about <em>our</em> code, not rustls.</p>
+  <p>The question is deceptively small: <em>where do you <code>await</code> the TLS handshake?</em> There are two candidate placements, and they look almost identical. One of them is a one-attacker, one-line total denial of service.</p>
+
+  <div class="grid2">
+    <div class="card">
+      <span class="tag adv">Wrong</span>
+      <h4>Handshake in the accept loop</h4>
+<pre><code>loop {
+  let (s, peer) = accept().await;
+  let tls = acceptor.accept(s).await; // &lt;- BLOCKS
+  spawn(handle(tls));
+}</code></pre>
+      <p>The accept loop is single-threaded and sequential. Awaiting the handshake here means the loop cannot call <code>accept()</code> again until this one client finishes its handshake.</p>
+    </div>
+    <div class="card">
+      <span class="tag beg">Right</span>
+      <h4>Handshake inside the spawned task</h4>
+<pre><code>loop {
+  let (s, peer) = accept().await;
+  spawn(async move {
+    let tls = timeout(HS,
+        acceptor.accept(s)).await;
+    handle(tls);
+  });
+}</code></pre>
+      <p>The loop spawns immediately and loops back to <code>accept()</code>. The handshake happens off to the side, one task per connection, blocking nobody.</p>
+    </div>
+  </div>
+
+  <h3>The exact attack</h3>
+  <p>In the wrong placement, an attacker opens a TCP connection and sends a <strong>single <code>ClientHello</code> byte</strong>, then goes silent. <code>acceptor.accept(s).await</code> sits waiting for the rest of the handshake that will never come. The accept loop is now frozen. <em>Every</em> new connection to the process &mdash; legitimate or not &mdash; stalls behind that one silent socket. One attacker, one byte, and the whole listener is wedged.</p>
+  <div class="callout danger"><strong>Why every functional test still passes:</strong> a proxy that serves one client at a time <em>works perfectly</em> under any test that connects, requests, and disconnects sequentially. The bug is invisible until two clients overlap and one of them is malicious. Level 1's own comment on the accept loop already stated the rule &mdash; "anything slow in this loop delays every new client" &mdash; but TLS is where breaking it turns from <em>slow</em> into <em>catastrophic</em>.</div>
+  <p>Ferrum's <code>main.rs</code> does it right, and its comment says so in as many words: "THE handshake ordering decision of this level. This <code>.await</code> is inside the spawned task, NOT in the accept loop above."</p>
+
+  <h3>The deadline: <code>TLS_HANDSHAKE_TIMEOUT</code></h3>
+  <p>Moving the handshake into the task fixes the accept-loop DoS, but it opens a subtler hole: a task stuck mid-handshake forever is a leaked connection. So the handshake gets its own deadline &mdash; the TLS-layer analogue of Level 1's <code>HEAD_READ_TIMEOUT</code>:</p>
+  <pre><code>let tls = match tokio::time::timeout(
+    tls::TLS_HANDSHAKE_TIMEOUT,          // 10s
+    acceptor.accept(stream),
+).await {
+    Ok(Ok(s))  =&gt; s,                     // handshake completed
+    Ok(Err(e)) =&gt; { debug!("tls handshake failed: {e}"); return; }
+    Err(_)     =&gt; { debug!("tls handshake timed out"); return; }
+};</code></pre>
+  <p>This deadline is <strong>not optional</strong>. Without it, slowloris simply moves one layer down. A connection stuck mid-handshake never produces a request head, so Level 1's <code>HEAD_READ_TIMEOUT</code> never <em>arms</em> &mdash; it only starts counting once there is a head to read, and there never is. The two deadlines cover disjoint phases: the handshake deadline guards "connected but not yet a TLS session," the head deadline guards "TLS session up but no request head yet."</p>
+  <p><code>TLS_HANDSHAKE_TIMEOUT</code> is <strong>10s</strong>, deliberately tighter than the 30s head deadline. A handshake is a fixed, small number of round trips with no human think-time in it; anything slower is a broken client or an attack, not a slow-but-honest one.</p>
+  <p>A failed or timed-out handshake is logged at <code>debug</code> and the connection is dropped &mdash; there is no HTTP layer yet on which to answer. This is routine, not exceptional: a probe, a client that does not trust the cert, or (with mTLS <code>required</code>) a client with no certificate.</p>
+  <div class="callout story"><strong>Measured, not asserted:</strong> PROGRESS.md records the live proof &mdash; with <strong>three handshakes deliberately stalled</strong> (one TLS record byte, then silence), a real client was served in <strong>0.03s</strong>. And a stalled connection was closed at exactly <strong>10.0s</strong> with <code>tls handshake timed out after 10s</code>. This is the level's central claim and the one thing a unit test cannot check.</div>
+</section>
+
+<section id="mtls">
+  <h2>mTLS &amp; the Startup Guardrails</h2>
+  <p class="lead">Normal TLS authenticates the server to the client. mTLS adds the reverse direction &mdash; and the config that enables it is a minefield of half-states that must fail at boot.</p>
+
+  <h3>Three modes</h3>
+  <p>Mutual TLS asks the <em>client</em> to present a certificate that Ferrum validates against a trusted CA. It is authentication without passwords or tokens, at the transport layer &mdash; rare for humans-with-browsers, heavily used for service-to-service traffic (mesh sidecars, internal APIs, partner links). The <code>ClientAuth</code> enum in <code>tls.rs</code> has three modes, wired through rustls's <code>WebPkiClientVerifier</code> against a bundle from <code>--tls-client-ca</code>:</p>
+  <div class="grid3">
+    <div class="card"><span class="tag beg">Default</span><h4>Off</h4><p>No client certificate requested. mTLS is opt-in because turning it on before the fleet is ready is an outage.</p></div>
+    <div class="card"><span class="tag tech">Migration</span><h4>Optional</h4><p>Request a cert, validate it if presented, but still admit clients that present none. Built via <code>verifier.allow_unauthenticated()</code>.</p></div>
+    <div class="card"><span class="tag adv">Enforcing</span><h4>Required</h4><p>Reject the handshake unless a valid client cert is presented.</p></div>
+  </div>
+  <p><code>Optional</code> looks strictly weaker than <code>Required</code>, so why does it exist? Because it is the <strong>only safe migration path</strong> onto mTLS. Enable <code>optional</code>, watch the logs to learn which callers actually present certificates, <em>then</em> flip to <code>required</code>. Going straight to <code>required</code> on a live listener drops every client that has not been rolled out yet &mdash; an instant, self-inflicted outage. Skip <code>optional</code> and you have no way to see who would break before you break them.</p>
+  <p>A misspelled mode is a <strong>startup error, never a silent downgrade</strong>. <code>ClientAuth::parse</code> rejects anything it does not recognize: quietly reading <code>requried</code> as <code>off</code> would disable client authentication on a listener whose operator believes it is enforced &mdash; the single most dangerous way this feature could fail.</p>
+
+  <h3>Four startup guardrails, both directions of the trap</h3>
+  <p><code>TlsArgs::build</code> validates the whole flag combination before <code>bind</code>, exiting 1 on any incoherent state (the same discipline Level 5 used for protected headers and Level 6 for <code>require-user</code> without <code>auth=</code>). Because TLS is built <em>before</em> the socket is opened, a bad certificate fails with no listener ever announced.</p>
+  <table>
+    <thead><tr><th>#</th><th>Rejected combination</th><th>Why it is a boot failure</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td><code>--tls-cert</code> without <code>--tls-key</code></td><td>A certificate with no matching private key cannot complete any handshake.</td></tr>
+      <tr><td>2</td><td><code>--tls-key</code> without <code>--tls-cert</code></td><td>A key with no certificate to present is equally useless.</td></tr>
+      <tr><td>3</td><td>client-auth <code>optional</code>/<code>required</code> with no <code>--tls-client-ca</code></td><td>There is nothing to validate client certificates against &mdash; mTLS with no CA would accept any certificate that merely parses.</td></tr>
+      <tr><td>4</td><td><code>--tls-client-ca</code> with client-auth <code>off</code></td><td>The <em>inverse, easier-to-miss</em> trap: the bundle would be loaded, never consulted, and read as enforcement by whoever wrote the config.</td></tr>
+    </tbody>
+  </table>
+  <p>Guardrail #4 is the interesting one. Guardrails #1&ndash;#3 catch a <em>missing</em> thing; #4 catches a <em>present</em> thing that does nothing. It is worth an exit-1 rather than a warning precisely because the operator's mental model is wrong: they supplied a CA, so they believe client-auth is on. A warning scrolls past in a log; a refused boot forces them to reconcile the two flags. (There is also a fifth message inside guardrail #1's arm &mdash; client-auth alone with no cert/key at all names the missing <em>cert</em> first, since server identity is the more fundamental omission. PROGRESS.md counts "all 8 startup guardrails" across the whole binary; four of them are these TLS ones.)</p>
+  <div class="callout warn"><strong>Watch out &mdash; a key permission is a warning, not a refusal.</strong> <code>warn_if_key_is_readable</code> logs loudly if the private key file is group- or world-readable (<code>mode &amp; 0o077 != 0</code>), then starts anyway. A hard failure would be wrong here: key material legitimately arrives group-readable from plenty of secret managers, and a proxy that will not start over a permission bit it merely dislikes is one operators route around. The rule of thumb: refuse on <em>incoherent</em> config, warn on <em>suboptimal</em> config.</div>
+</section>
+
+<section id="connlimiter">
+  <h2>ConnLimiter: Global Ceiling + Per-IP Cap</h2>
+  <p class="lead">A per-connection deadline cannot help when the attacker simply opens more connections. That is the gap this fills.</p>
+  <p>Level 1 already shipped the head-read deadline and the 16 KB head byte cap &mdash; two-thirds of the slowloris answer. But a deadline does nothing against an attacker who opens <em>thousands</em> of connections, each perfectly polite, each holding a slot. <code>ConnLimiter</code> (in <code>security.rs</code>) is the missing third: a <strong>global ceiling</strong> (<code>DEFAULT_MAX_CONNS</code> = 10,000, the C10K reference point) plus a <strong>per-source-IP cap</strong> (<code>DEFAULT_MAX_CONNS_PER_IP</code> = 64). A browser opens ~6 parallel connections per host; 64 leaves headroom for a NAT'd office while still meaning one attacker needs 157 distinct source addresses to reach the global ceiling.</p>
+  <p>It is checked in the accept loop <strong>before the spawn</strong> &mdash; the check has to be cheaper than the attack, or it becomes the attack. An over-limit connection is <strong>dropped without a response</strong>: writing a 503 would mean allocating and doing I/O on behalf of exactly the traffic we decided to shed.</p>
+
+  <h3>The RAII guard &mdash; the Level 3 <code>Lease</code> pattern, sharper</h3>
+  <p><code>try_acquire</code> returns a <code>ConnGuard</code> whose <code>Drop</code> releases <em>both</em> counters. There is no public <code>release()</code> &mdash; <code>release</code> is private and its only caller is <code>ConnGuard::drop</code>. That is the point: there is no way to decrement without having held a guard. The guard is moved into the connection's task, so its lifetime is <em>exactly</em> the connection's lifetime with no bookkeeping at any exit point.</p>
+  <p>This is the Level 3 <code>Lease</code> pattern for a sharper reason. A connection ends on many paths &mdash; clean close, parse error, head-read timeout, <em>failed TLS handshake</em>, a task unwinding from a panic. An explicit <code>release()</code> would eventually be missed on one of them. And a leaked <em>connection slot</em> is worse than a leaked in-flight count: a leaked in-flight count merely biases least-connections, but a leaked slot is <strong>permanent</strong>, and enough of them wedge the listener shut for good.</p>
+
+  <h3>Three subtleties a naive limiter gets wrong</h3>
+  <ol class="flow">
+    <li><strong>Claim with <code>fetch_update</code>, not <code>load</code>-then-<code>fetch_add</code>.</strong> <code>fetch_update</code> makes "claim-if-under-limit" a single atomic step. A bare <code>load</code> then <code>fetch_add</code> would let two accepts both observe <code>total == max - 1</code> and both proceed &mdash; the ceiling would not hold. This is the key contrast with Level 4's breaker, which happily uses <code>Relaxed</code> atomics: there, a lost increment merely delays a state change; here, a lost increment means the limit is <em>wrong</em>.</li>
+    <li><strong>A per-IP refusal rolls back the global claim.</strong> The global counter is claimed first; if the per-IP check then fails, the code does <code>self.total.fetch_sub(1)</code> before returning <code>PerIpLimit</code>. Without the rollback, a source hammering its own per-IP cap would leak the global counter toward exhaustion and take the whole listener down &mdash; the refusal path itself becoming the outage. Claiming global first (and rolling back) is cheaper than holding the map lock across both checks.</li>
+    <li><strong>The map entry is removed on last close, not left at zero.</strong> When a source's last connection drops, <code>release</code> calls <code>map.remove(&amp;ip)</code> rather than leaving a <code>0</code>. Otherwise the <code>HashMap</code> grows one permanent entry per source address ever seen &mdash; a slow memory leak reachable by a spoofed-source scan.</li>
+  </ol>
+  <p>The map is guarded by a plain <code>std::sync::Mutex</code>, not <code>tokio::sync::Mutex</code> and not Level 6's 16 shards. The critical section is a <code>HashMap</code> increment with no <code>.await</code> inside it, so an async mutex would buy a scheduler hop for nothing. Sharding is skipped because the access pattern is genuinely light: exactly one lock per accept (from the single accept loop) and one per teardown &mdash; unlike Level 6's rate-limiter, which locked on <em>every request</em> from <em>every</em> task.</p>
+  <figure>
+<pre class="mermaid">
+flowchart TD
+  A["try_acquire(ip)"] --> G{"fetch_update:<br/>total &lt; max_total?"}
+  G -->|"no"| RG["return Err(GlobalLimit)"]
+  G -->|"yes, total += 1"| L["lock per_ip map"]
+  L --> P{"entry(ip) &lt; max_per_ip?"}
+  P -->|"no"| RB["total -= 1 (rollback)<br/>return Err(PerIpLimit)"]
+  P -->|"yes, slot += 1"| OK["return ConnGuard{ ip }"]
+  OK -.->|"task ends, any path"| DROP["Drop: total -= 1;<br/>slot -= 1 or map.remove(ip)"]
+</pre>
+<figcaption>The two-counter claim-and-rollback in <code>try_acquire</code>, and the single <code>Drop</code> that releases everything. The dashed edge is RAII: it fires on clean close, error, timeout, failed handshake, or panic-unwind alike.</figcaption>
+  </figure>
+</section>
+
+<section id="cidr">
+  <h2>Hand-Rolled CIDR Allow/Deny</h2>
+  <p class="lead">A prefix comparison over 4 or 16 bytes is smaller than half the primitives this project already hand-rolls, so it takes no new dependency.</p>
+  <p>Ferrum already hand-rolls FNV-1a (L3), duration parsing (L4), base64 and constant-time compare (L6). A CIDR match is smaller than any of those, and <code>IpAddr</code> already does the genuinely fiddly part (parsing the address, including IPv6 forms). So <code>Cidr</code> and <code>CidrList</code> in <code>security.rs</code> are built by hand rather than pulling an <code>ipnet</code>-style crate.</p>
+
+  <h3>How matching works</h3>
+  <p><code>Cidr::parse</code> takes <code>ADDR[/BITS]</code>; a bare address is a host route (<code>/32</code> for IPv4, <code>/128</code> for IPv6). The network address is <strong>masked at parse time</strong>, so two spellings of the same block compare equal and matching never has to re-mask that side. <code>mask</code> gives <code>/0</code> its own arm because <code>u32 &lt;&lt; 32</code> is a debug panic in Rust (and UB-adjacent in C); the same care handles <code>/128</code>. <code>contains</code> compares only within an address family &mdash; an IPv4 address never matches an IPv6 block or vice versa.</p>
+
+  <h3>Two semantics that make the lists mean something</h3>
+  <div class="grid2">
+    <div class="card">
+      <span class="tag adv">Precedence</span>
+      <h4>Deny beats allow</h4>
+      <p>In <code>CidrList::permits</code>, the deny list is checked first and short-circuits. An address on both lists is being explicitly called out as bad. Honoring the allow entry instead would mean a broad <code>--allow-cidr 10.0.0.0/8</code> silently re-admitted a specific host the operator had just banned.</p>
+    </div>
+    <div class="card">
+      <span class="tag adv">Default posture</span>
+      <h4>A non-empty allow list is default-deny</h4>
+      <p>If the allow list is non-empty and the address matches nothing in it, it is refused. This is what makes an allow list <em>mean</em> anything: the alternative (allow merely grants, absence is permitted) would make <code>--allow-cidr</code> a no-op.</p>
+    </div>
+  </div>
+  <pre><code>pub fn permits(&amp;self, ip: IpAddr) -&gt; bool {
+    if self.deny.iter().any(|c| c.contains(ip)) { return false; }  // deny wins
+    if self.allow.is_empty() { return true; }                       // no allow list = allow all
+    self.allow.iter().any(|c| c.contains(ip))                       // else default-deny
+}</code></pre>
+
+  <h3>Matched on the socket peer, never a header</h3>
+  <p><code>ip</code> must be the <strong>socket peer address</strong>, never a value out of <code>X-Forwarded-For</code> or any client-supplied header. A deny list keyed on something the client controls is not a deny list &mdash; the banned party simply sends a different value. Level 5 took this stance for <code>X-Real-IP</code>, Level 6 for the rate-limit key; this is the third application of the same rule, and it is why <code>normalize_peer</code> takes a <code>SocketAddr</code> rather than a string.</p>
+
+  <h3>IPv4-mapped normalization at the edge</h3>
+  <p>A listener bound to <code>[::]</code> reports an IPv4 client as <code>::ffff:203.0.113.7</code>. Without collapsing that, an operator's perfectly reasonable <code>--deny-cidr 203.0.113.0/24</code> matches <em>nothing</em> &mdash; a deny list that appears configured and enforces nothing, the worst available failure mode for this feature (worse than an outright error, because it fails silently and looks like it is working). <code>normalize_peer</code> collapses the mapped form to plain IPv4 <strong>once, at the edge</strong>, in the accept loop, so every downstream comparison sees one canonical form. Genuine IPv6 peers are left alone.</p>
+
+  <h3>The reversed decision: a denied CIDR closes with no response</h3>
+  <p>This is the design decision the team <em>reversed</em>, and the reversal is the lesson. nginx's <code>deny</code> answers <code>403</code>, so 403 was the obvious default &mdash; and it is exactly what an earlier draft of the spec said. But on a TLS listener the proxy cannot send <em>any</em> HTTP status without first completing a handshake, and completing a handshake for an address already refused means spending an RSA/ECDHE operation on the attacker's behalf. That turns the cheapest rejection in the system into one of the most expensive &mdash; a DoS amplifier.</p>
+  <p>Both alternatives were worse:</p>
+  <ul>
+    <li><strong>403 on plaintext, drop on TLS:</strong> the same config behaving two different ways depending on a flag &mdash; exactly how operators get surprised.</li>
+    <li><strong>Handshake-then-403 everywhere:</strong> pay the crypto cost for every refused connection &mdash; the amplifier.</li>
+  </ul>
+  <p>So the CIDR check sits <em>before</em> the handshake and <em>before</em> the task spawn, and the connection simply closes. The connection limits shed load the same way for the same reason, which keeps the two gates consistent with each other &mdash; the property the earlier design lacked.</p>
+  <div class="callout"><strong>Verified:</strong> PROGRESS.md records both semantics live &mdash; <code>--deny-cidr 127.0.0.0/8</code> refused the test connection (<code>refused: address not permitted</code>), and <code>--allow-cidr 10.0.0.0/8</code> (which excludes the tester) <em>also</em> refused, confirming a non-empty allow list is default-deny rather than merely additive.</div>
+</section>
+
+<section id="limits">
+  <h2>Body &amp; Header Caps</h2>
+  <p class="lead">"Read the whole body, then check the size" is this level's named mistake #1 &mdash; by then the damage is done.</p>
+
+  <h3>Body cap enforced while streaming &mdash; 413</h3>
+  <p>The cap lives <em>inside</em> the streaming copy loop, never in a buffer-then-decide step. Level 1's windowed <code>copy_exact</code> already sees every byte, so enforcement is a running total and a comparison &mdash; not a new mechanism. The framings are handled deliberately asymmetrically, because they carry different information:</p>
+  <table>
+    <thead><tr><th>Framing</th><th>When the size is knowable</th><th>Enforcement point</th></tr></thead>
+    <tbody>
+      <tr><td><code>Content-Length: n</code></td><td>Before a single body byte moves</td><td><strong>413 before routing, before middleware, before any backend socket opens.</strong> Strictly better than stream-and-abort: the client gets a clean answer and the backend is never contacted.</td></tr>
+      <tr><td><code>Transfer-Encoding: chunked</code></td><td>Never declared &mdash; that is the point of chunked</td><td>Mid-stream, at a chunk boundary in <code>copy_body_limited</code> / <code>copy_chunked</code>. The <em>only</em> possible point, and by then the head is already at the backend.</td></tr>
+    </tbody>
+  </table>
+  <p>The chunked case is why the exchange leaves <strong>both</strong> connections unusable. By the time the cap trips, the request head has already been forwarded and a partial body streamed to the backend; the client&rarr;proxy leg is mid-body too. Neither side is at a message boundary, so neither can be cleanly reused &mdash; both must close. This is <em>unavoidable by construction</em>, not a shortcoming: with no declared length, a chunked over-cap body cannot be detected until you are already inside it.</p>
+
+  <h3><code>BodyCopy::TooLarge</code>, not an <code>io::Error</code></h3>
+  <p><code>copy_body_limited</code> returns a <code>BodyCopy { Done { reusable }, TooLarge }</code> enum rather than <code>io::Result&lt;bool&gt;</code>. "Too large" is <strong>not an I/O error</strong> and must not be handled like one: the socket is healthy, the client is well-behaved by TCP's standards, and the right answer is a specific HTTP status (413), not a dropped connection with a logged errno. A distinct variant <em>forces the caller to decide</em> &mdash; a <code>?</code> cannot silently swallow a limit breach into the generic error path. That is precisely the property you want at a security boundary: the compiler will not let you forget the case.</p>
+  <div class="callout warn"><strong>Watch out:</strong> the chunked cap counts <em>decoded payload</em>, not bytes on the wire. Framing overhead is attacker-controlled &mdash; a million 1-byte chunks carry a megabyte of framing around a megabyte of data &mdash; so a wire-byte cap would reject honest large-chunk requests while admitting pathological small-chunk ones. The overhead is separately bounded by <code>read_line</code>'s buffer check.</div>
+
+  <h3>Header count capped at 431</h3>
+  <p>Level 1's 16 KB <code>MAX_HEAD_BYTES</code> bounds head <em>size</em> but not field <em>count</em>: roughly 8,000 one-byte header lines fit inside that budget. Every one of them multiplies the linear header scans this proxy performs per request &mdash; routing, hop-by-hop stripping, rewriting, framing, the middleware chain. So <code>serve_one</code> checks <code>req.headers.len() &gt; limits.max_headers</code> (default 100) <strong>before routing</strong>, answering <code>431 Request Header Fields Too Large</code> (RFC 6585) so the work is refused before it starts.</p>
+  <p>The two limits differ in tunability by design: <code>max_body</code> is per-route-overridable via <code>;max-body=</code> (an upload route legitimately allows more than a JSON API), while <code>max_headers</code> is global &mdash; a request needing more than a hundred header fields is pathological on <em>every</em> route, so making it per-route would only widen the attack surface.</p>
+  <div class="callout"><strong>Verified:</strong> with <code>--max-body 100 --max-headers 5</code>, PROGRESS.md records a 50-byte body &rarr; 200, a 500-byte body &rarr; <code>413 Payload Too Large</code>, and 12 headers &rarr; <code>431</code>. A baseline-versus-after hit count proved the backend saw <em>only</em> the two measurement probes &mdash; zero rejected requests reached it.</div>
+</section>
+
+<section id="code-map">
+  <h2>Code Map</h2>
+  <p>What Level 8 added or changed, verified against <code>rproxy/src/</code>. The two new modules are <code>tls.rs</code> and <code>security.rs</code>; the rest are seams touched in existing files.</p>
+  <table>
+    <thead><tr><th>File / item</th><th>Kind</th><th>Responsibility</th></tr></thead>
+    <tbody>
+      <tr><td><code>tls.rs</code> &middot; <code>build_server_config</code></td><td>new</td><td>Assemble a rustls <code>ServerConfig</code> from PEM files: <code>ring</code> provider, TLS 1.3+1.2, ALPN <code>http/1.1</code>, optional client-cert verifier.</td></tr>
+      <tr><td><code>tls.rs</code> &middot; <code>TlsArgs::build</code></td><td>new</td><td>Validate the flag combination (the four guardrails) and return <code>Option&lt;Arc&lt;ServerConfig&gt;&gt;</code>; <code>None</code> = plaintext.</td></tr>
+      <tr><td><code>tls.rs</code> &middot; <code>ClientAuth</code></td><td>new</td><td><code>Off</code>/<code>Optional</code>/<code>Required</code> enum; <code>parse</code> rejects typos, <code>needs_ca</code> gates the CA requirement.</td></tr>
+      <tr><td><code>tls.rs</code> &middot; <code>TLS_HANDSHAKE_TIMEOUT</code></td><td>new</td><td>10s handshake deadline constant.</td></tr>
+      <tr><td><code>tls.rs</code> &middot; <code>load_certs</code> / <code>load_private_key</code> / <code>load_root_store</code></td><td>new</td><td>PEM loading with filename-in-error and empty-file rejection; PKCS#8/PKCS#1/SEC1 keys; partial-CA-bundle rejection.</td></tr>
+      <tr><td><code>tls.rs</code> &middot; <code>warn_if_key_is_readable</code></td><td>new</td><td>Warn (not refuse) when the key file is group/world-readable (<code>mode &amp; 0o077</code>).</td></tr>
+      <tr><td><code>security.rs</code> &middot; <code>ConnLimiter</code> / <code>ConnGuard</code></td><td>new</td><td>Global + per-IP connection accounting; <code>try_acquire</code> claims/rolls back, <code>Drop</code> releases.</td></tr>
+      <tr><td><code>security.rs</code> &middot; <code>Cidr</code> / <code>CidrList</code> / <code>normalize_peer</code></td><td>new</td><td>Hand-rolled prefix match; deny-beats-allow, default-deny; IPv4-mapped normalization at the edge.</td></tr>
+      <tr><td><code>security.rs</code> &middot; <code>Limits</code> / <code>parse_size</code></td><td>new</td><td>Body + header caps and their defaults; <code>k</code>/<code>m</code>/<code>g</code> size parsing.</td></tr>
+      <tr><td><code>proxy.rs</code> &middot; <code>handle_client&lt;S&gt;</code> / <code>serve_one&lt;S&gt;</code></td><td>changed</td><td>Made generic over <code>S: AsyncRead+AsyncWrite+Unpin</code> so the same core runs over <code>TcpStream</code> or <code>TlsStream</code>.</td></tr>
+      <tr><td><code>proxy.rs</code> &middot; <code>BodyCopy</code> / <code>copy_body_limited</code></td><td>new</td><td>Mid-stream body cap; <code>TooLarge</code> variant forces a 413 decision instead of an errno.</td></tr>
+      <tr><td><code>proxy.rs</code> &middot; 431 header-count check + <code>scheme</code></td><td>changed</td><td>Header-count cap before routing; <code>scheme</code> now reports the listener's real protocol into <code>X-Forwarded-Proto</code>.</td></tr>
+      <tr><td><code>main.rs</code> &middot; accept loop</td><td>changed</td><td>CIDR gate, conn-limit gate, <code>set_nodelay</code> on raw socket, spawn, then handshake-inside-task with <code>TLS_HANDSHAKE_TIMEOUT</code>.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="industry">
+  <h2>How the Industry Does It</h2>
+  <p>Every production proxy solves these same problems; the interesting part is which trade-offs each one took. Ferrum is a teaching build &mdash; it terminates TLS correctly and armors sensibly, but it deliberately skips whole subsystems (ACME, session-store tuning, backend re-encrypt) that the incumbents ship. As of the mid-2020s:</p>
+  <table>
+    <thead><tr><th>Concern</th><th>nginx</th><th>Apache httpd</th><th>HAProxy</th><th>Envoy</th><th>Ferrum</th></tr></thead>
+    <tbody>
+      <tr><td>TLS library</td><td>OpenSSL (C)</td><td>OpenSSL (C)</td><td>OpenSSL / others</td><td>BoringSSL (C++)</td><td><strong>rustls + ring</strong> (pure Rust, memory-safe)</td></tr>
+      <tr><td>Protocol floor</td><td><code>ssl_protocols</code> (can widen to TLS 1.0)</td><td><code>SSLProtocol</code> directive</td><td><code>ssl-min-ver</code></td><td>configurable min/max</td><td><strong>1.2 floor, no path older</strong> &mdash; unsafe versions cannot be typed</td></tr>
+      <tr><td>Handshake vs accept</td><td>event loop; handshake is non-blocking state in the reactor</td><td>worker/event MPM; per-connection</td><td>event-driven; non-blocking</td><td>event-driven; non-blocking</td><td><strong>one task per connection</strong> + explicit handshake deadline</td></tr>
+      <tr><td>mTLS</td><td><code>ssl_verify_client on|optional</code></td><td><code>SSLVerifyClient</code></td><td><code>verify required|optional</code></td><td>full validation context</td><td><strong>off / optional / required</strong> via <code>WebPkiClientVerifier</code></td></tr>
+      <tr><td>Conn limits</td><td><code>limit_conn</code> zones</td><td><code>mod_qos</code> / MPM caps</td><td><code>maxconn</code> + stick-tables per-IP</td><td>connection-limit filters</td><td><strong><code>ConnLimiter</code></strong>: global + per-IP, RAII-released</td></tr>
+      <tr><td>IP allow/deny</td><td><code>allow</code>/<code>deny</code> (answers 403)</td><td><code>Require ip</code></td><td>ACLs on <code>src</code></td><td>RBAC filter</td><td><strong>hand-rolled CIDR</strong>, closes with no response on TLS</td></tr>
+      <tr><td>Auto certificates</td><td>via <code>certbot</code> (external)</td><td><code>mod_md</code> (ACME)</td><td>external</td><td>via control plane</td><td><strong>out of scope</strong> (Caddy's headline feature)</td></tr>
+    </tbody>
+  </table>
+  <p>The honest contrasts:</p>
+  <ul>
+    <li><strong>Memory safety is Ferrum's one genuine edge.</strong> rustls + ring means no <code>Heartbleed</code>-class buffer over-read is reachable in the TLS path &mdash; the incumbents' C/C++ stacks have each shipped such CVEs. This is not a teaching-build compromise; it is a real advantage of the language choice.</li>
+    <li><strong>The "no path older than TLS 1.2" posture is stricter than the incumbents by design.</strong> nginx, httpd, and HAProxy all let an operator widen the floor back to TLS 1.0 under legacy-client pressure. Ferrum cannot &mdash; the unsafe option is not merely defaulted-off, it does not exist in the library.</li>
+    <li><strong>Everything else, Ferrum does more crudely.</strong> HAProxy's stick-tables track per-IP state with far more nuance than a single <code>HashMap</code>; nginx's event loop multiplexes handshakes without a task per connection; Envoy's RBAC filter is a general policy engine where Ferrum has two <code>Vec&lt;Cidr&gt;</code>. The point of the level is the <em>reasoning</em> behind each gate, not parity with a decade-hardened appliance.</li>
+    <li><strong>The 403-vs-drop choice is a real divergence.</strong> nginx answers 403 on a denied address; Ferrum closes silently. On a plaintext listener that is arguably worse UX; on a TLS listener it is the only choice that does not spend crypto on refused traffic &mdash; which is exactly why Ferrum makes both gates behave identically rather than split by protocol.</li>
+  </ul>
+</section>
+
+<section id="quiz">
+  <h2>Quiz</h2>
+  <p class="muted">Copied verbatim from PROGRESS.md &mdash; <code>### Level 8 quiz &mdash; Vessey to answer before Level 9</code>. Answers are Vessey's to fill in.</p>
+  <div class="qa">
+  <ol class="flow">
+    <li><code>Conn&lt;S&gt;</code> was generic from Level 1 and this level finally used it. Name the two signatures that had to change, and explain why <code>set_nodelay</code> could not stay where it was.</li>
+    <li>The TLS handshake is awaited inside the spawned task, not in the accept loop. Describe the exact attack the other placement enables, and say why every functional test would still pass.</li>
+    <li>There are now two deadlines that both defend against slowloris (<code>HEAD_READ_TIMEOUT</code> and <code>TLS_HANDSHAKE_TIMEOUT</code>). Why does the first one not cover the case the second one does?</li>
+    <li><code>ClientAuth::Optional</code> looks strictly weaker than <code>Required</code>. What is it for, and what breaks if you skip it?</li>
+    <li>Two of the four TLS startup guardrails catch a <em>missing</em> thing; one catches a <em>present</em> thing (<code>--tls-client-ca</code> with client-auth off). Why is that third one worth an exit-1 rather than a warning?</li>
+    <li><code>try_acquire</code> claims the global counter with <code>fetch_update</code> rather than <code>load</code> then <code>fetch_add</code>. Level 4's breaker happily uses <code>Relaxed</code> atomics and tolerates lost increments. What makes this counter different?</li>
+    <li>A per-IP refusal rolls back the global claim. Construct the outage that happens if it does not.</li>
+    <li>The per-IP map removes an entry when a source's last connection closes, rather than leaving a zero. What attack does that prevent?</li>
+    <li>A denied CIDR closes the connection instead of answering 403, even though nginx answers 403. Give the TLS-specific reason, and say why "403 on plaintext, drop on TLS" would be worse than either consistent choice.</li>
+    <li><code>Content-Length</code> over the cap is refused before routing, but a chunked body over the cap is only caught mid-stream. Explain why the second case leaves <em>both</em> connections unusable, and why that is unavoidable rather than a shortcoming of the implementation.</li>
+    <li>The chunked cap counts decoded payload rather than bytes on the wire. Construct the request that would defeat a wire-byte cap.</li>
+    <li>Body-too-large is a <code>BodyCopy::TooLarge</code> variant rather than an <code>io::Error</code>. What specifically goes wrong if it were an error that callers reach with <code>?</code>?</li>
+    <li>Level 1 already caps the head at 16 KB. Why was a separate header-<em>count</em> cap still needed, and what does the count protect that the byte cap does not?</li>
+    <li><code>X-Forwarded-Proto</code> is set from the listener's scheme rather than from anything the client sent. Name a concrete backend behaviour that becomes a vulnerability if you trust the client's value instead.</li>
+    <li>An IPv4 client on a <code>[::]</code> listener arrives as <code>::ffff:a.b.c.d</code>. Describe the failure an operator would see if <code>normalize_peer</code> did not exist, and why it is more dangerous than an outright error.</li>
+  </ol>
+  </div>
+</section>
+
+<section id="cheatsheet">
+  <h2>Cheat Sheet &amp; Glossary</h2>
+
+  <h3>Constants, defaults, and flags</h3>
+  <table>
+    <thead><tr><th>Name</th><th>Value</th><th>Where</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>TLS_HANDSHAKE_TIMEOUT</code></td><td>10s</td><td><code>tls.rs</code></td><td>Deadline for a client to finish the handshake; tighter than the 30s head deadline.</td></tr>
+      <tr><td><code>DEFAULT_MAX_CONNS</code></td><td>10,000</td><td><code>security.rs</code></td><td>Global connection ceiling (C10K reference point).</td></tr>
+      <tr><td><code>DEFAULT_MAX_CONNS_PER_IP</code></td><td>64</td><td><code>security.rs</code></td><td>Per-source-IP cap; one attacker needs 157 IPs to hit the global ceiling.</td></tr>
+      <tr><td><code>DEFAULT_MAX_BODY</code></td><td>10 MiB</td><td><code>security.rs</code></td><td>Body-byte cap; per-route-overridable via <code>;max-body=</code>.</td></tr>
+      <tr><td><code>DEFAULT_MAX_HEADERS</code></td><td>100</td><td><code>security.rs</code></td><td>Header-field count cap; global, not per-route.</td></tr>
+      <tr><td>TLS protocol floor</td><td>1.2 (1.3 preferred)</td><td>rustls default</td><td>No path to TLS 1.0/1.1 or SSLv3 &mdash; not implemented at all.</td></tr>
+      <tr><td>ALPN</td><td><code>http/1.1</code></td><td><code>tls.rs</code></td><td>The only protocol advertised.</td></tr>
+      <tr><td>413</td><td>Payload Too Large</td><td><code>proxy.rs</code></td><td>Body over cap (before routing for <code>Content-Length</code>; mid-stream for chunked).</td></tr>
+      <tr><td>431</td><td>Request Header Fields Too Large</td><td><code>proxy.rs</code></td><td>Header count over cap; checked before routing (RFC 6585).</td></tr>
+    </tbody>
+  </table>
+  <h4>CLI flags added</h4>
+  <table>
+    <thead><tr><th>Flag</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>--tls-cert</code> / <code>--tls-key</code></td><td>Server certificate chain and private key (PEM). Both required together.</td></tr>
+      <tr><td><code>--tls-client-ca</code></td><td>CA bundle to validate client certificates (mTLS). Required with optional/required; forbidden with off.</td></tr>
+      <tr><td><code>--tls-client-auth</code></td><td><code>off</code> (default) / <code>optional</code> / <code>required</code>. A typo is a startup error.</td></tr>
+      <tr><td><code>--max-conns</code> / <code>--max-conns-per-ip</code></td><td>Global ceiling and per-IP cap.</td></tr>
+      <tr><td><code>--max-body</code> / <code>--max-headers</code></td><td>Body-byte cap (<code>10m</code>, <code>512k</code>&hellip;) and header-count cap.</td></tr>
+      <tr><td><code>--allow-cidr</code> / <code>--deny-cidr</code></td><td>Allow/deny lists on the socket peer address. Deny wins; a non-empty allow list is default-deny.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Glossary</h3>
+  <dl>
+    <p><strong>TLS termination</strong> &mdash; the proxy holds the private key, performs the handshake, and decrypts; backends receive plain HTTP. Required for an L7 proxy: you cannot route on a path or header you cannot read.</p>
+    <p><strong>mTLS (mutual TLS)</strong> &mdash; the client also presents a certificate the proxy validates against a CA. Transport-layer authentication with no passwords or tokens.</p>
+    <p><strong>ALPN</strong> &mdash; Application-Layer Protocol Negotiation; the handshake extension where client and server agree on the wire protocol (here pinned to <code>http/1.1</code>).</p>
+    <p><strong>SNI</strong> &mdash; Server Name Indication; the hostname the client sends in cleartext during the handshake, letting one IP serve certificates for many domains.</p>
+    <p><strong>RAII / <code>Drop</code> guard</strong> &mdash; tie a resource's release to the end of a value's scope, so it fires on every exit path (clean, error, panic) with no explicit call to miss. Ferrum's <code>ConnGuard</code> and Level 3's <code>Lease</code>.</p>
+    <p><strong>CIDR</strong> &mdash; Classless Inter-Domain Routing notation, <code>address/prefix-bits</code>, describing a block of IP addresses.</p>
+    <p><strong>Slowloris</strong> &mdash; an attack that holds many connections open while sending data byte-by-byte, exhausting connection slots without ever completing a request. Answered here by the per-IP cap and the handshake/head deadlines together.</p>
+    <p><strong>IPv4-mapped IPv6</strong> &mdash; the <code>::ffff:a.b.c.d</code> form a dual-stack (<code>[::]</code>) listener reports for IPv4 clients; normalized to plain IPv4 at the edge so v4 CIDR rules apply.</p>
+    <p><strong>static dispatch / monomorphization</strong> &mdash; the compiler generates a specialized copy of generic code per concrete type, eliminating runtime branching. Why Ferrum chose generics over an <code>enum Stream</code>.</p>
+    <p><strong>TOCTOU</strong> &mdash; time-of-check to time-of-use; a race where state changes between checking it and acting on it. <code>fetch_update</code> closes the one in the global connection claim.</p>
+  </dl>
+</section>
+</main>
+</div>
+
+<footer>
+  <p>Ferrum &mdash; Level 8: Security &amp; TLS &bull; Knowledge Base &bull; Built 2026-09-02</p>
+  <p class="muted">A teaching reverse proxy in Rust. Grounded in <code>rproxy/src/</code>, PROGRESS.md, and the Level 8 design spec. Industry comparisons are the author's own knowledge of nginx/httpd/HAProxy/Envoy, qualified where uncertain.</p>
+</footer>
+</body>
+</html>

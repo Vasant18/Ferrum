@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ferrum KB — Level 13: Basic WAF</title>
+<meta name="description" content="A complete, plain-English map of the Barracuda Networks product portfolio: every product family (Email, Application, Network, Data Protection, Managed XDR, MSP) and the BarracudaONE platform — what each product is, what it does, and what problem it solves." />
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    flowchart: { htmlLabels: true, useMaxWidth: true, padding: 12, nodeSpacing: 55, rankSpacing: 55 },
+    startOnLoad: true, theme: 'base', securityLevel: 'loose',
+    themeVariables: {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '15px',
+      primaryColor: '#e7e8ea', primaryTextColor: '#15203a', primaryBorderColor: '#7e848c',
+      lineColor: '#6a6f77', secondaryColor: '#dddfe2', tertiaryColor: '#f3f4f6',
+      noteBkgColor: '#fff3d6', noteTextColor: '#3a2f12', noteBorderColor: '#caa84a',
+      actorBkg: '#e7e8ea', actorTextColor: '#15203a', actorBorder: '#7e848c',
+      clusterBkg: '#eef0f2', clusterBorder: '#a0a4aa'
+    }
+  });
+</script>
+<style>
+  :root{--bg:#0f1320;--panel:#161c2e;--panel-2:#1d2540;--ink:#e8ecf5;--muted:#9aa6c4;--accent:#7c5cff;--accent-2:#22d3a6;--warn:#ffb454;--danger:#ff6b81;--line:#2a3354;--code-bg:#0b0f1a;--max:1100px;}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:linear-gradient(180deg,#0c1020,#0f1320 40%);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  a{color:var(--accent-2);text-decoration:none}a:hover{text-decoration:underline}
+  header.hero{padding:56px 24px 40px;text-align:center;background:radial-gradient(1200px 400px at 50% -10%,rgba(255,107,129,.18),transparent 60%);border-bottom:1px solid var(--line);}
+  header.hero .eyebrow{letter-spacing:.25em;text-transform:uppercase;color:var(--accent-2);font-size:.75rem;font-weight:700}
+  header.hero h1{font-size:clamp(1.9rem,4vw,3rem);margin:.3em 0 .2em;line-height:1.1}
+  header.hero p.sub{color:var(--muted);max-width:790px;margin:0 auto;font-size:1.05rem}
+  .badges{margin-top:18px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .badge{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);padding:4px 12px;border-radius:999px;font-size:.8rem}
+  .layout{display:grid;grid-template-columns:260px 1fr;gap:32px;align-items:start;max-width:1320px;margin:0 auto;padding:0 22px}
+  nav.toc{position:sticky;top:0;max-height:100vh;overflow:auto;padding:28px 10px 60px;border-right:1px solid var(--line);font-size:.9rem;}
+  nav.toc h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.18em;color:var(--muted);margin:18px 8px 6px}
+  nav.toc a{display:block;color:var(--muted);padding:5px 10px;border-radius:8px;border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--panel);color:var(--ink);text-decoration:none;border-left-color:var(--accent)}
+  main{padding:34px 0 80px;min-width:0}
+  section{margin:0 0 46px;scroll-margin-top:18px}
+  section>h2{font-size:1.7rem;margin:0 0 .5em;padding-bottom:.3em;border-bottom:2px solid var(--line);display:flex;align-items:center;gap:.5em;}
+  h3{font-size:1.25rem;margin:1.6em 0 .4em;color:#fff}
+  h4{font-size:1.02rem;margin:1.2em 0 .3em;color:var(--accent-2);text-transform:uppercase;letter-spacing:.04em}
+  p,li{color:var(--ink)}.muted{color:var(--muted)}
+  article.concept{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin:22px 0}
+  article.concept>h3:first-child{margin-top:0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr} .layout{grid-template-columns:1fr} nav.toc{position:static;max-height:none;border-right:none;border-bottom:1px solid var(--line)}}
+  .card{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card h4{margin-top:.2em}
+  .callout{border-left:4px solid var(--accent);background:var(--panel-2);padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  .callout.analogy{border-left-color:var(--accent-2)}.callout.warn{border-left-color:var(--warn)}.callout.danger{border-left-color:var(--danger)}.callout.story{border-left-color:#5ec2ff}
+  .tag{display:inline-block;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:2px 8px;border-radius:6px;margin-bottom:6px}
+  .tag.beg{background:rgba(34,211,166,.15);color:var(--accent-2)}.tag.tech{background:rgba(124,92,255,.18);color:#b9a6ff}.tag.adv{background:rgba(255,107,129,.15);color:var(--danger)}
+  code{background:var(--code-bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.86em;color:#ffd9a0}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.85rem;line-height:1.55}
+  pre code{background:none;border:none;padding:0;color:#d7e0f5}
+  pre.art{color:#ffd9a0;font-size:.95rem;line-height:1.4;letter-spacing:.04em}
+  pre.mermaid{background:#f7f8fc;color:#111;text-align:center}
+  .mermaid svg text,.mermaid text{fill:#15203a !important}
+  .mermaid .nodeLabel,.mermaid .edgeLabel,.mermaid .label,.mermaid span,.mermaid p,.mermaid div,.mermaid foreignObject *{color:#15203a !important;fill:#15203a !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p{background:#f3f5fc !important}
+  .mermaid .cluster-label .nodeLabel,.mermaid .cluster-label p,.mermaid .cluster span,.mermaid .cluster p{color:#3c4046 !important}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.92rem;overflow:hidden;border-radius:10px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel-2);color:#fff}
+  tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  details{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:12px 0}
+  details summary{cursor:pointer;font-weight:600;color:var(--accent-2);padding:6px 0}
+  details[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px}
+  figure{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  figcaption{color:var(--muted);font-size:.85rem;text-align:center;margin-top:8px;font-style:italic}
+  .qa{margin:10px 0}.qa .q{font-weight:600}.qa .a{color:var(--muted);margin:2px 0 0}
+  ol.flow{counter-reset:step;list-style:none;padding-left:0}
+  ol.flow>li{counter-increment:step;position:relative;padding:10px 0 10px 52px;border-bottom:1px dashed var(--line)}
+  ol.flow>li::before{content:counter(step);position:absolute;left:0;top:8px;width:34px;height:34px;background:var(--accent);color:#fff;border-radius:50%;display:grid;place-items:center;font-weight:700}
+  .rank{font-weight:800;color:var(--accent);margin-right:6px}
+  footer{border-top:1px solid var(--line);padding:30px 22px;text-align:center;color:var(--muted);font-size:.88rem}
+  .lead{font-size:1.08rem}
+  .formula{background:var(--code-bg);border:1px dashed var(--accent);border-radius:10px;padding:12px 16px;font-family:monospace;color:#ffd9a0;text-align:center;margin:14px 0}
+
+  /* KB-THEME START */
+  /* Azure (blue palette) */
+  :root{--bg:#0e1c30;--panel:#152740;--panel-2:#1d3458;--ink:#e6edf7;--muted:#93a6c4;--accent:#1a8ae5;--accent-2:#41a7f5;--warn:#d6a96a;--danger:#d98a8a;--line:#264064;--code-bg:#0b1626;}
+  body{background:linear-gradient(180deg,var(--bg),var(--bg))}
+  header.hero{background:radial-gradient(1100px 400px at 50% -10%,rgba(20,119,210,.26),transparent 60%)}
+  h3,.parthead{color:var(--ink)}
+  th{color:var(--ink)}
+  .tag.tech{background:rgba(65,167,245,.16);color:var(--accent-2)}
+  ol.flow>li::before{color:#0b1626}
+  /* KB-THEME END */
+  /* prevent node/edge label clipping */
+  .mermaid foreignObject{overflow:visible !important}
+  .mermaid .nodeLabel,.mermaid .label,.mermaid foreignObject>div,.mermaid foreignObject span,.mermaid foreignObject p{white-space:nowrap !important;overflow:visible !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p,.mermaid .edgeLabel span{white-space:nowrap !important;overflow:visible !important;padding:1px 4px}
+  .mermaid svg{max-width:100%;height:auto}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyebrow">Ferrum KB &middot; Level 13 of 14 &middot; Basic WAF</div>
+  <h1>Basic WAF<br/><span style="font-size:.6em;color:var(--muted)">the reverse proxy grows an immune system</span></h1>
+  <p class="sub">The KB's one-liner <em>is</em> the architecture: "you already built the platform — the WAF is middleware with opinions." Ferrum gains a normalizer that decodes evasion games before judging, ~16 scored signature rules over four request surfaces, CRS-style anomaly scoring instead of hair-triggers, and an IP-reputation layer that is the Level 4 circuit breaker pointed inward at hostile clients. Honest about what a signature WAF can and cannot promise.</p>
+  <div class="badges">
+    <span class="badge">Audience: Vessey (built it) + the curious</span>
+    <span class="badge">Scope: head-only signature WAF, memory-only reputation</span>
+    <span class="badge">Key file: waf.rs</span>
+    <span class="badge">Reading time: ~24 min</span>
+  </div>
+  <p class="muted" style="margin-top:18px">
+    <a href="index.html">&larr; Course index</a> &nbsp;&middot;&nbsp;
+    <a href="Level-12-Production-Features.html">&larr; Level 12: Production Features</a> &nbsp;&middot;&nbsp;
+    <a href="Level-14-Scalability.html">Level 14: Scalability &rarr;</a>
+  </p>
+</header>
+
+<div class="layout">
+<nav class="toc">
+  <h2>Orientation</h2>
+  <a href="#exec-summary">Executive Summary</a>
+  <a href="#big-picture">The Big Picture</a>
+  <h2>Core</h2>
+  <a href="#normalization">Normalization: 80% of Quality</a>
+  <a href="#canonicalize">Canonicalize &amp; the Climb Flag</a>
+  <a href="#rules">The Rule Table: Data, Not Code</a>
+  <a href="#scoring">Anomaly Scoring &amp; Conviction</a>
+  <a href="#reputation">Reputation: the Breaker Inward</a>
+  <a href="#middleware">A WAF Is a Middleware</a>
+  <a href="#honesty">The Honesty Checkpoint</a>
+  <a href="#code-map">Code Map</a>
+  <h2>Compare</h2>
+  <a href="#industry">How Industry Does It</a>
+  <h2>Reference</h2>
+  <a href="#quiz">Quiz</a>
+  <a href="#cheatsheet">Cheat Sheet &amp; Glossary</a>
+</nav>
+
+<main>
+  <section id="exec-summary">
+    <h2>Executive Summary</h2>
+    <p class="lead">Level 13 gives Ferrum a <strong>Web Application Firewall</strong> — but not as a new subsystem bolted on the side. A WAF is a reverse proxy that grew an immune system, and because Level 6 already built the middleware chain, the WAF is just <em>middleware with opinions</em>: <code>impl Middleware for Waf</code> in <code>waf.rs</code>, slotted into the fixed chain.</p>
+    <p>The lesson, per the KB, is that <strong>normalization is 80% of WAF quality</strong>. Evasion is mostly encoding games, so <code>normalize()</code> percent-decodes up to twice (a second pass that changes anything <em>is</em> double-encoding — flagged and scored, because legitimate clients single-encode), targeted-entity-decodes the handful of forms attackers use to smuggle angle brackets and quotes, lowercases, and collapses whitespace runs so one <code>union select</code> pattern matches every spacing. Broken escapes stay literal — a WAF must never 500 on hostile input. <code>canonicalize_path()</code> resolves <code>.</code>/<code>..</code> and flags any <em>attempt</em> to climb above root, even when the resolved path lands innocently: we cannot know how the backend resolves paths, so the attempt is the conviction-worthy fact.</p>
+    <p>On top sits detection: ~16 rules in a <code>const</code> array — <strong>data, not code</strong> — scanned linearly over four normalized surfaces (canonicalized path, query string, User-Agent, Referer). Following the ModSecurity CRS model, each hit adds points and conviction happens only at a threshold (default 10). A lone quote is 2 points (O'Brien buys coffee too); <code>union</code>+<code>select</code> co-occurring is 10, because that conjunction has no benign URL reading. Benign lookalikes are first-class tests. A <strong>reputation</strong> layer turns convictions into strikes and repeat offenders into temporary bans with doubling backoff — the Level 4 breaker's philosophy pointed inward at clients. Every WAF ships watching first: <code>;waf=detect</code> logs and forwards; <code>;waf=block</code> returns a generic 403. Rule names are log-only in both modes — a response that names the rule that fired is a payload-tuning oracle. 280 unit tests (261 kept green, +19), live verification all green.</p>
+  </section>
+
+  <section id="big-picture">
+    <h2>The Big Picture</h2>
+    <p class="lead">Where the WAF sits: after request-id, before ratelimit and auth. Hostility is refused before it can consume a rate token or trigger a credential comparison.</p>
+    <p>Chain order is fixed in code — never config — inside <code>MiddlewareConfig::build</code>, the invariant Level 6 established. The WAF is deliberately <strong>early</strong>: <strong>after</strong> request-id (so a blocked request still carries an id and an access-log line on the way out — the onion unwinds correctly) but <strong>before</strong> ratelimit and auth (a detected attack should never spend a rate token or reach a password comparison, and <code>rejected_by:"waf"</code> must attribute correctly). The ban check runs first of all, before any inspection: a banned IP is refused for roughly one hash and one short lock — no normalization, no rule scan. Cheap refusal of known offenders is most of what reputation buys.</p>
+    <figure>
+<pre class="mermaid">
+flowchart TD
+  C["Client request"] --> ACC["Accept + parse head (L1)"]
+  ACC --> ROUTE["Route match (L2)"]
+  ROUTE --> LOG["log (access log)"]
+  LOG --> RID["request-id"]
+  RID --> WAF{"WAF (L13 — THIS LEVEL)"}
+  WAF -->|"banned IP"| B403["403 — refused uninspected<br/>(one hash + one lock)"]
+  WAF -->|"score &ge; threshold, block"| C403["403 generic body<br/>+ strike, maybe ban"]
+  WAF -->|"score &lt; threshold, or detect"| RL["ratelimit"]
+  RL --> AUTH["auth"]
+  AUTH --> AZ["authz"]
+  AZ --> BE["Balancer + backend (L3/L4)"]
+  B403 --> OUT["Response (still id'd + logged)"]
+  C403 --> OUT
+  BE --> OUT
+</pre>
+    <figcaption>The request path with the WAF stage highlighted. Two refusal branches (banned, convicted) short-circuit before a backend socket is ever touched — the L6 rejection invariant. A clean or detect-mode request flows on to ratelimit/auth/authz.</figcaption>
+    </figure>
+    <div class="callout analogy"><strong>Analogy:</strong> the WAF is a bouncer at the door who has read the guest list of known troublemakers (reputation) and also watches how you <em>talk</em> as you walk up. Someone already banned is turned away at a glance — no pat-down needed. Everyone else gets listened to: one muttered curse word is nothing, but "I'm going to <em>union</em> the vault and <em>select</em> the cash" trips the meter. He writes down exactly what you said in his logbook (the error log) but tells you only "not tonight" (a generic 403) — never which words gave you away, because that would just teach you to rephrase.</div>
+  </section>
+
+  <section id="normalization">
+    <h2>Normalization: 80% of WAF Quality</h2>
+    <p class="lead">Attackers do not send you <code>&lt;script&gt;</code>; they send <code>%3Cscript%3E</code>, or <code>%253Cscript</code>, or <code>&amp;lt;script&amp;gt;</code>, or <code>UNION&nbsp;/**/&nbsp;SELECT</code>. Naive regex on raw bytes catches only the lazy. Decode first, judge after.</p>
+    <p>The KB's central claim: normalization is 80% of WAF quality, because <strong>evasion is mostly encoding games</strong>. The whole point of <code>normalize(raw, plus_is_space)</code> in <code>waf.rs</code> is to render every equivalent spelling of a payload into one canonical form <em>before</em> a single rule runs. It returns the normalized text plus a small struct of <strong>evasion receipts</strong> — flags that are themselves scored, because the act of evading is a signal independent of what was hidden.</p>
+
+    <h3>The decode pipeline, in order</h3>
+    <ol class="flow">
+      <li><strong>Percent-decode, pass one.</strong> <code>%27</code> becomes <code>'</code>, <code>%20</code> a space. In query strings only, <code>+</code> becomes a space (<code>plus_is_space</code>); in a path, <code>+</code> is literal data.</li>
+      <li><strong>Percent-decode, pass two.</strong> Run it again. If the second pass <em>changes anything</em>, the input was <strong>double-encoded</strong> — <code>%252e</code> → <code>%2e</code> → <code>.</code> — and the <code>double_encoded</code> flag is raised. Legitimate clients single-encode, so a changed second pass is suspicious in itself.</li>
+      <li><strong>Targeted entity decode.</strong> Not an HTML parser — a de-cloaking of the specific forms attackers use to smuggle angle brackets and quotes past byte filters: <code>&amp;lt; &amp;gt; &amp;quot; &amp;apos; &amp;#x27; &amp;#39; &amp;#x3c; &amp;#60; &amp;#x3e; &amp;#62;</code>.</li>
+      <li><strong>Lowercase.</strong> <code>UNION</code>, <code>Union</code>, <code>uNiOn</code> collapse to one, so rules are written in lowercase once.</li>
+      <li><strong>Null-byte flag &amp; strip.</strong> A <code>\0</code> in a URL has no honest use (it is a classic filter-terminator trick); the <code>null_byte</code> flag is raised and the byte removed so it cannot split later matching.</li>
+      <li><strong>Whitespace collapse.</strong> Runs of tabs/newlines/spaces collapse to a single space, so one <code>union select</code> pattern matches <code>UNION\t\nSELECT</code> and every other spacing.</li>
+    </ol>
+
+    <div class="callout warn"><strong>Watch out — a WAF must never 500.</strong> Broken escapes stay <em>literal</em>. <code>percent_decode_once</code> keeps <code>%zz</code> and a truncated <code>%2</code> exactly as-is rather than erroring: <code>normalize("100%zz%2")</code> returns <code>100%zz%2</code> unchanged. Hostile input that crashes the firewall is a worse outcome than hostile input that passes — a crash is a denial of service you built yourself. The normalizer is total: every byte sequence has a defined, non-panicking result.</div>
+
+    <h4>Why the double-encoding flag scores on its own</h4>
+    <p>The flag is worth <code>DOUBLE_ENCODED_POINTS = 4</code> <em>per surface where it was raised</em>, regardless of what the decoded text turned out to be. The reasoning: single-encoding is normal (every browser does it); double-encoding is a deliberate attempt to slip a payload past a filter that decodes only once. Punishing single-encoding would flag the entire honest internet; punishing double-encoding flags almost exclusively people trying to hide something. So the evasion <em>attempt</em> convicts even before the traversal or SQLi rule underneath it matches.</p>
+
+    <div class="callout analogy"><strong>Analogy:</strong> a letter addressed in plain handwriting is normal. A letter where the address is written, photographed, printed, and re-photographed before mailing is not more legible — it is someone trying to defeat an automated sorter. You don't need to open it to be suspicious of the wrapping.</div>
+
+    <details>
+      <summary>Worked example: <code>%252e%252e%2fetc/passwd</code> through both passes</summary>
+      <p>Pass one decodes <code>%25</code>→<code>%</code> and <code>%2f</code>→<code>/</code>, giving <code>%2e%2e/etc/passwd</code>. Pass two decodes the surviving <code>%2e</code>→<code>.</code>, giving <code>../etc/passwd</code> — and because pass two changed the string, <code>double_encoded</code> is raised (<strong>+4</strong>). Then canonicalization sees the <code>..</code> and, since it pops above root, raises the climb flag (<strong>+8</strong>), and the literal <code>../</code> also matches <code>traversal:dotdot</code> (<strong>+8</strong>) plus <code>/etc/passwd</code> matches the sensitive-file rule (<strong>+8</strong>). The evasion receipts alone (4) plus the climb (8) already clear nothing on their own — but stacked with the traversal grammar the request is far over threshold. This is quiz question 1.</p>
+    </details>
+  </section>
+
+  <section id="canonicalize">
+    <h2>Canonicalize &amp; the Climb Flag</h2>
+    <p class="lead">The Level 2 normalization lesson, weaponized: canonicalize first, judge the result — but here the <em>attempt</em> to climb above root is also recorded, because a path that resolves innocently can still have probed how far up it could walk.</p>
+    <p><code>canonicalize_path(path)</code> walks the segments of an already-percent-decoded path, keeping a stack. Empty segments and <code>.</code> are dropped; <code>..</code> pops the stack; anything else is pushed. If a <code>..</code> ever tries to pop an <em>empty</em> stack, that is an attempt to climb above the root, and the boolean <code>climbed</code> is set — <strong>even if later segments descend again and the final path looks harmless</strong>.</p>
+
+    <table>
+      <thead><tr><th>Input path</th><th>Canonical result</th><th>climbed?</th></tr></thead>
+      <tbody>
+        <tr><td><code>/a/./b/../c</code></td><td><code>/a/c</code></td><td>false</td></tr>
+        <tr><td><code>/a/../../etc/passwd</code></td><td><code>/etc/passwd</code></td><td><strong>true</strong></td></tr>
+        <tr><td><code>/..//../x</code></td><td><code>/x</code></td><td><strong>true</strong></td></tr>
+        <tr><td><code>/normal/path</code></td><td><code>/normal/path</code></td><td>false</td></tr>
+      </tbody>
+    </table>
+
+    <div class="callout"><strong>Why convict the attempt when the result is innocent?</strong> Ferrum cannot know how the <em>backend</em> resolves paths. A framework, a static-file server, and a CGI script all disagree on what <code>/a/../../b</code> means; some collapse it to <code>/b</code>, others follow symlinks or resolve against a different root and escape the document tree. The one thing we <em>can</em> observe is that the client wrote a segment sequence that tries to walk above the root. The conservative choice — convict the attempt, worth <code>CLIMB_POINTS = 8</code> — is correct precisely because the unknown (backend resolution semantics) makes the innocent-looking result untrustworthy. This is quiz question 3.</div>
+
+    <p>The <code>inspect</code> function scans <em>both</em> the decoded path (pre-canonicalization) and the canonical form when they differ. Scanning the decoded text means literal <code>../</code> sequences score via <code>traversal:dotdot</code> even when canonicalization would have absorbed them; scanning the canonical form catches sensitive-file paths like <code>/etc/passwd</code> that only assemble cleanly after resolution. Two cheap passes over a short string, belt and suspenders.</p>
+
+    <figure>
+<pre class="mermaid">
+flowchart LR
+  R["raw path segment"] --> D["percent-decode<br/>(2 passes, flags)"]
+  D --> S1["scan decoded text<br/>(catches literal ../)"]
+  D --> CAN["canonicalize_path()<br/>stack of segments"]
+  CAN -->|"popped past root"| CLB["climb flag +8"]
+  CAN --> S2["scan canonical text<br/>(catches /etc/passwd)"]
+  S1 --> V["accumulate into Verdict"]
+  S2 --> V
+  CLB --> V
+</pre>
+    <figcaption>Path handling: decode, then scan the decoded form AND the canonical form, with the climb attempt scored independently of either scan.</figcaption>
+    </figure>
+  </section>
+
+  <section id="rules">
+    <h2>The Rule Table: Data, Not Code</h2>
+    <p class="lead">~16 rules in a <code>static RULES: &amp;[Rule]</code> array. Data, not code — so the quiz can ask "add a rule" meaningfully, and so an operator can read the table by eye and answer "why did this block?"</p>
+    <p>Each <code>Rule</code> is a name, a point value, and a match kind. Matching is deliberately plain: a <code>Pat</code> enum with three shapes, scanned linearly over the normalized buffer. This is a rejected-alternative worth naming — the KB suggests production shape is <code>RegexSet</code> + Aho-Corasick pre-filters. We already have the <code>regex</code> crate from Level 2, but at ~16 rules a linear pass over an already-normalized string beats the setup cost of set-matching machinery, and the <em>lesson</em> is normalization + scoring, not matcher engineering. Production CRS has thousands of rules; that scale is exactly what the fancier machinery is for. Different scale, different tool.</p>
+
+    <div class="grid3">
+      <div class="card">
+        <span class="tag tech">Pat::Sub</span>
+        <h4>Substring</h4>
+        <p><strong>What:</strong> the string is present anywhere. <code>text.contains(s)</code>.</p>
+        <p><strong>Used for:</strong> <code>'</code>, <code>&lt;script</code>, <code>javascript:</code>, <code>../</code>, <code>information_schema</code>.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Pat::All</span>
+        <h4>Conjunction</h4>
+        <p><strong>What:</strong> <em>all</em> substrings present, order-free. Cheaper and clearer than a regex with lookaheads.</p>
+        <p><strong>Used for:</strong> <code>union</code>+<code>select</code> — the co-occurrence is the signature.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Pat::Re</span>
+        <h4>Compiled regex</h4>
+        <p><strong>What:</strong> for the few shapes where structure matters. Compiled once via <code>OnceLock</code> at first use.</p>
+        <p><strong>Used for:</strong> tautologies, stacked queries, event handlers, scanner UAs.</p>
+      </div>
+    </div>
+
+    <h3>What the rules catch</h3>
+    <table>
+      <thead><tr><th>Rule name</th><th>Points</th><th>Kind</th><th>Catches</th></tr></thead>
+      <tbody>
+        <tr><td><code>sqli:union-select</code></td><td>10</td><td>All</td><td><code>union</code>&amp;<code>select</code> co-occurring</td></tr>
+        <tr><td><code>sqli:stacked-query</code></td><td>10</td><td>Re</td><td><code>;</code> then drop/insert/update/delete/create/alter</td></tr>
+        <tr><td><code>sqli:tautology</code></td><td>8</td><td>Re</td><td><code>or</code>/<code>and</code> + <code>N=N</code> or <code>'x'='y'</code></td></tr>
+        <tr><td><code>sqli:sleep-bench</code></td><td>8</td><td>Re</td><td><code>sleep(</code>, <code>benchmark(</code>, <code>pg_sleep(</code>, <code>waitfor</code></td></tr>
+        <tr><td><code>sqli:info-schema</code></td><td>6</td><td>Sub</td><td><code>information_schema</code></td></tr>
+        <tr><td><code>sqli:comment-seq</code></td><td>4</td><td>Re</td><td>trailing <code>--</code>/<code>#</code>/<code>/*</code>, or <code>/* … */</code></td></tr>
+        <tr><td><code>sqli:quote</code></td><td>2</td><td>Sub</td><td>a lone <code>'</code></td></tr>
+        <tr><td><code>xss:script-tag</code></td><td>10</td><td>Sub</td><td><code>&lt;script</code></td></tr>
+        <tr><td><code>xss:event-handler</code></td><td>8</td><td>Re</td><td><code>onerror=</code>, <code>onload=</code>, <code>onclick=</code>, …</td></tr>
+        <tr><td><code>xss:js-url</code></td><td>8</td><td>Sub</td><td><code>javascript:</code></td></tr>
+        <tr><td><code>xss:vector-tag</code></td><td>6</td><td>Re</td><td><code>&lt;img/svg/iframe/object/embed/body</code></td></tr>
+        <tr><td><code>xss:eval-family</code></td><td>6</td><td>Re</td><td><code>eval</code>, <code>settimeout</code>, <code>document.cookie</code>, …</td></tr>
+        <tr><td><code>traversal:dotdot</code></td><td>8</td><td>Sub</td><td>literal <code>../</code></td></tr>
+        <tr><td><code>traversal:sensitive-file</code></td><td>8</td><td>Re</td><td><code>/etc/passwd</code>, <code>proc/self</code>, <code>boot.ini</code>, <code>win.ini</code></td></tr>
+        <tr><td><code>scanner:tool-ua</code></td><td>10</td><td>Re</td><td>sqlmap/nikto/nessus/acunetix/gobuster/…</td></tr>
+      </tbody>
+    </table>
+    <p class="muted">Plus four evasion-flag scores applied per surface, not in the table: double-encoding (4), null-byte (6), climb-above-root (8), and no-User-Agent (1).</p>
+
+    <h4>The tautology rule &amp; the no-backreferences constraint</h4>
+    <p>The precise SQL tautology is <code>(\d+)=\1</code> — a backreference asserting the two numbers are <em>equal</em>. Rust's <code>regex</code> crate <strong>rejects backreferences by design</strong>. That refusal is not a limitation to route around; it is the same guarantee that makes it safe to run regexes per request at all. Backreferences force backtracking, and backtracking is how a regex becomes a denial-of-service (catastrophic exponential blowup on a crafted input). The <code>regex</code> crate's linear-time promise is exactly what Level 9's blocking audit relied on when it cleared Level 2's <code>~regex</code> routes of being a per-request DoS vector.</p>
+    <div class="callout"><strong>The over-match is correct.</strong> Without backreferences, the rule uses the looser <code>\b(or|and)\s+(\d+\s*=\s*\d+|'[^']*'\s*=\s*'[^']*')</code>, which matches <code>or 1=2</code> — a <em>false</em> tautology — as well as <code>or 1=1</code>. That "imprecision" convicts exactly the right people: <code>or 1=2</code> in a query string is how attackers probe <strong>blind</strong> injection (they compare a true-predicate response to a false-predicate response). The looser pattern catches the probe correctly. This is quiz question 5.</div>
+  </section>
+
+  <section id="scoring">
+    <h2>Anomaly Scoring &amp; Conviction</h2>
+    <p class="lead">The ModSecurity CRS model: rules don't block, points do. Each hit adds to a running score; conviction happens only at a threshold. This is the single difference between a WAF and a false-positive generator that ops disables within a week.</p>
+    <p><code>inspect(req) -&gt; Verdict</code> normalizes each of the four surfaces once, scans each against the whole rule table, and accumulates one <code>Verdict { score, hits }</code>. Points sum <em>across</em> surfaces: a quote in the query, a comment sequence, and a scanner UA are three separate hits whose points add up. The threshold (default <code>DEFAULT_THRESHOLD = 10</code>, tunable per route) is the conviction line. Below it, <code>Continue</code>.</p>
+
+    <h3>Why these weights</h3>
+    <p>Points follow the CRS spirit: <strong>ambient-noise patterns score low, unambiguous attack grammar scores at-or-near threshold.</strong></p>
+    <div class="grid2">
+      <div class="card">
+        <span class="tag beg">2 points — a nudge</span>
+        <h4>A lone quote <code>'</code></h4>
+        <p>O'Brien buys coffee too. Apostrophes appear in millions of legitimate query strings — names, possessives, search terms. A lone quote can <em>never</em> convict alone (2 &lt; 10), but stacked on real signals it tips a borderline score. That is exactly what CRS does with it.</p>
+      </div>
+      <div class="card">
+        <span class="tag adv">10 points — a conviction</span>
+        <h4><code>union</code> + <code>select</code></h4>
+        <p>"Union station" alone scores nothing; "select a plan" alone scores nothing. The <em>conjunction</em> of both words in one normalized surface has no benign URL reading — it is the <code>UNION SELECT</code> exfiltration grammar itself. So the co-occurrence is worth the full threshold on its own.</p>
+      </div>
+    </div>
+    <div class="callout warn"><strong>What breaks if you swap them?</strong> Score a lone quote at 10 and you convict O'Brien, union station, and every apostrophe on the internet — ops disables the WAF by Friday. Score <code>union select</code> at 2 and a live exfiltration attempt sails under the threshold — the WAF is decorative. The weights encode how much benign traffic <em>looks like</em> each pattern; inverting them inverts the false-positive/false-negative trade in the worst direction on both ends. This is quiz question 4.</div>
+
+    <h3>Benign lookalikes are first-class tests</h3>
+    <p>A scoring model is only as trustworthy as its false-positive suite. These are all asserted to stay <strong>under</strong> threshold in <code>waf.rs</code>'s tests, and they are the reason the weights are what they are:</p>
+    <table>
+      <thead><tr><th>Benign request</th><th>Why it looks scary</th><th>Why it passes</th></tr></thead>
+      <tbody>
+        <tr><td><code>/search?q=O'Brien</code></td><td>contains a quote</td><td>quote = 2, nothing else fires</td></tr>
+        <tr><td><code>/directions?to=union+station</code></td><td>the word "union"</td><td><code>select</code> absent → conjunction fails</td></tr>
+        <tr><td><code>/pricing?cta=select+a+plan</code></td><td>the word "select"</td><td><code>union</code> absent → conjunction fails</td></tr>
+        <tr><td><code>/blog?tag=script+kiddie+culture</code></td><td>the word "script"</td><td>no <code>&lt;script</code> tag, just prose</td></tr>
+        <tr><td><code>/docs/1.2.3/api</code></td><td>dots everywhere</td><td>no <code>..</code> segment, no climb</td></tr>
+        <tr><td><code>/api/users/42?fields=name,email</code></td><td>—</td><td>scores exactly 0</td></tr>
+      </tbody>
+    </table>
+
+    <h4>The no-oracle rule</h4>
+    <p>In <strong>both</strong> modes, the rule hit-list (<code>verdict.hits</code>) goes to the error log at WARN and to metrics — and <strong>nowhere near the client</strong>. A 403 carries a generic <code>403 Forbidden\n</code> body; no <code>X-Waf-Score</code> header is added in either mode. The reason: telling an attacker <em>which</em> rule fired is a payload-tuning oracle. With a rule-naming error page, the workflow is trivial — send a payload, read which rule blocked it, tweak to dodge <em>that</em> rule, repeat until 200. A generic 403 tells them only "no," turning a guided search into blind guessing. This is quiz question 7.</p>
+    <div class="formula">score &ge; threshold  →  block mode: 403 + strike  |  detect mode: log + forward</div>
+  </section>
+
+  <section id="reputation">
+    <h2>Reputation: the Breaker Pointed Inward</h2>
+    <p class="lead">Level 4 built a circuit breaker that treats a backend which keeps 500ing as "unhealthy." Reputation is the same philosophy aimed at clients: a source that keeps attacking is unhealthy the same way, and earns a temporary ban.</p>
+    <p><code>Reputation</code> is a <strong>16-shard</strong> map (<code>Vec&lt;Mutex&lt;HashMap&lt;IpAddr, Offender&gt;&gt;&gt;</code>) keyed by client IP — the same sharded-locking idiom Level 6's rate limiter and Level 11's cache used, so concurrent clients rarely contend on the same lock. Each <code>Offender</code> tracks strikes, the timestamp of the last strike, an optional <code>banned_until</code>, and a <code>bans</code> counter for backoff.</p>
+
+    <h3>Strike → ban → doubling backoff</h3>
+    <ol class="flow">
+      <li><strong>A conviction adds a strike</strong> with the current timestamp. In block mode; in detect mode strikes are recorded but never enforced.</li>
+      <li><strong>Strikes ≥ <code>ban_after</code> (default 3)</strong> within the decay window trips a ban.</li>
+      <li><strong>Ban term = <code>ban_base</code> (default 60 s) × 2<sup>bans</sup></strong>, capped at <code>BAN_CAP = 1 h</code>. First ban 60 s, then 120 s, 240 s… — the Level 4 exponential backoff, applied to clients. On ban, strikes reset to 0 but <code>bans</code> increments, so a source that re-offends the moment a ban lifts earns geometrically longer bans.</li>
+      <li><strong>Lazy decay on lookup</strong> (the Level 11 TTL pattern): there is no sweeper task. On the next <code>is_banned</code> or <code>strike</code> touch, an expired ban lifts and strikes older than the decay window (<code>ban_base × 10</code>) reset to 0. Yesterday's fat-fingered quote doesn't count toward today's ban.</li>
+    </ol>
+
+    <div class="callout"><strong>The ban check is cheap, and that is the point.</strong> A banned IP is refused for roughly <em>one hash and one short mutex lock</em> — no normalization, no rule scan, no allocation. An inspected request runs the full decode-and-scan pipeline over four surfaces. That asymmetry is why the ban check runs <strong>before</strong> inspection and why "cheap refusal of known offenders is most of what reputation buys": under a scanner flood, the expensive work is skipped entirely for the IPs generating the most traffic. This is quiz question 9.</div>
+
+    <figure>
+<pre class="mermaid">
+flowchart TD
+  N["new strike (conviction)"] --> DEC{"last strike<br/>&gt; decay window?"}
+  DEC -->|"yes"| RST["reset strikes = 0"]
+  DEC -->|"no"| KEEP["keep count"]
+  RST --> INC["strikes += 1"]
+  KEEP --> INC
+  INC --> THR{"enforce AND<br/>strikes &ge; ban_after?"}
+  THR -->|"no"| CLEAR["no ban (Continue)"]
+  THR -->|"yes"| BAN["banned_until = now + base &times; 2^bans<br/>(cap 1h); bans += 1; strikes = 0"]
+  BAN --> LATER["future request:<br/>is_banned() → 403 uninspected"]
+  LATER --> EXP{"now &ge; banned_until?"}
+  EXP -->|"no"| REF["refuse (ban_refused++)"]
+  EXP -->|"yes"| LIFT["lift ban, strikes = 0,<br/>bans NOT reset"]
+</pre>
+    <figcaption>The reputation state machine. Decay and ban-lift are both lazy — evaluated only when the IP is next touched. <code>bans</code> survives a lifted ban so re-offense doubles the term.</figcaption>
+    </figure>
+
+    <h3>Process-wide, memory-only, reload-surviving</h3>
+    <p>The store is a single <code>OnceLock&lt;Arc&lt;Reputation&gt;&gt;</code> (<code>REPUTATION</code>), configured once in <code>main.rs</code> before any route is built and handed to every waf-enabled route via <code>shared_reputation()</code>. This is a deliberate design choice with three consequences:</p>
+    <div class="grid3">
+      <div class="card">
+        <span class="tag tech">One offender</span>
+        <h4>Shared across routes</h4>
+        <p>An attacker probing <code>/api</code> and <code>/admin</code> is <strong>one</strong> offender, not two. A per-route store would let them spread their strikes thin.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Survives reload</span>
+        <h4>Not amnesty</h4>
+        <p>A Level 12 config reload rebuilds the middleware chains but <em>not</em> this store. Strikes and bans persist — rerouting is not an amnesty, and an operator reloading a route change would not want their active bans wiped.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Restart amnesties</span>
+        <h4>Honest limit</h4>
+        <p>Memory-only: a process restart clears everyone. Honest for a teaching proxy — persistent, cross-customer reputation feeds are precisely the commercial vendors' moat.</p>
+      </div>
+    </div>
+    <div class="callout analogy"><strong>Analogy:</strong> the bouncer's memory of troublemakers lasts the whole shift and survives a change of the guest list (reload), but he goes home at close and starts fresh tomorrow (restart). A real security firm keeps a shared, permanent blocklist across every venue it staffs — that persistence is the product you pay for. Reload-survival and restart-amnesty are quiz question 10.</div>
+
+    <div class="callout warn"><strong>Fail open, always.</strong> If a shard's mutex is poisoned (a thread panicked while holding it), <code>is_banned</code> and <code>strike</code> return "not banned / no ban" rather than propagating the panic. A WAF that panics the whole proxy is a worse outcome than one skipped reputation check — the same fail-open stance Levels 6 and 11 took.</div>
+  </section>
+
+  <section id="middleware">
+    <h2>A WAF Is a Middleware — Literally</h2>
+    <p class="lead">No new subsystem. <code>impl Middleware for Waf</code> and the existing Level 6 chain machinery supplies everything a WAF needs: short-circuit rejection, response-phase unwind, per-route config, and <code>rejected_by</code> attribution.</p>
+    <p>Detection is pure sync functions over the request head — exactly the shape the Level 6 trait demands, and the Level 9 "small state machine" pattern. The <code>on_request</code> handler is the whole enforcement path:</p>
+    <ol class="flow">
+      <li><strong>Ban check (block mode only).</strong> <code>reputation.is_banned(ip, now)</code> — if banned, increment <code>ban_refused</code> and <code>Reject(forbidden())</code> immediately, uninspected.</li>
+      <li><strong>Inspect.</strong> <code>inspect(req)</code> → <code>Verdict</code>. If <code>score == 0</code>, <code>Continue</code> — the overwhelmingly common case, cheap.</li>
+      <li><strong>Record the score.</strong> <code>ctx.waf_score = Some(score)</code> so the access log carries it (only when &gt; 0; <code>null</code> otherwise).</li>
+      <li><strong>Convict or not.</strong> <code>score &ge; threshold</code> → block mode: count <code>convicted</code>, WARN-log the hits, <code>strike(ip, now, true)</code> (may ban), <code>Reject</code>. Detect mode: count <code>detected</code>, WARN-log, <code>strike(ip, now, false)</code> (never bans), <code>Continue</code>.</li>
+    </ol>
+
+    <h3>Chain order, and the two orderings rejected</h3>
+    <p>Fixed in <code>MiddlewareConfig::build</code>: <strong>log → request-id → waf → ratelimit → auth → authz</strong>. Two alternatives were considered and rejected, each for a concrete reason (quiz question 6):</p>
+    <table>
+      <thead><tr><th>Rejected ordering</th><th>The concrete failure</th></tr></thead>
+      <tbody>
+        <tr><td><strong>WAF before request-id</strong></td><td>A blocked request's 403 would have no request-id and no clean access-log line — the response-phase unwind that stamps and logs a rejection would have nothing to stamp. You'd lose the ability to correlate a block with the rest of the trace.</td></tr>
+        <tr><td><strong>WAF after ratelimit</strong></td><td>A detected attack would consume a rate token before being refused — an attacker could exhaust a route's rate budget with payloads the WAF was going to reject anyway, and the ban check (cheap refusal) would come <em>after</em> the expensive token accounting. Hostility should be refused before it costs anything.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Per-route options &amp; the boot guardrail</h3>
+    <p><code>waf</code> and <code>waf-threshold</code> joined the Level 6 option keys (<code>L6_KEYS</code> in <code>middleware/mod.rs</code>) because they configure a middleware. Usage: <code>;waf=block</code> or <code>;waf=detect</code>, and <code>;waf-threshold=N</code> (default 10). Off by default, like every security opt-in since Level 8's TLS.</p>
+    <div class="callout warn"><strong>Guardrail:</strong> <code>;waf-threshold=</code> without a <code>;waf=</code> on the same route is a <strong>startup error</strong> ("waf-threshold= needs a waf= on the same route"), not a silent no-op. Tuning a threshold for a WAF that isn't enabled is incoherent config, and the Level 5/6 posture is to fail loudly at boot rather than mislead the operator. An unknown mode or a non-numeric/zero threshold is likewise a boot error.</div>
+  </section>
+
+  <section id="honesty">
+    <h2>The Honesty Checkpoint</h2>
+    <p class="lead">Signature WAFs are a speed bump, not a wall. Build it knowing exactly what it can and cannot promise — the KB kept this verbatim in spirit, and so does the module doc-comment.</p>
+    <p>Determined attackers bypass regex rules; vendors know it, which is why the commercial layers above signatures exist. The real injection fixes live in the <em>application</em>: parameterized queries defeat SQLi structurally, output encoding defeats XSS structurally. No WAF replaces them. What this level honestly buys:</p>
+    <div class="grid3">
+      <div class="card"><span class="tag beg">Buys</span><h4>The automated 99%</h4><p>Blocks the constant background noise of scanners and script-kiddie payloads that make up most hostile traffic.</p></div>
+      <div class="card"><span class="tag beg">Buys</span><h4>Time during 0-days</h4><p>A virtual patch — a new rule — can hold the line for hours or days while the application fix ships.</p></div>
+      <div class="card"><span class="tag beg">Buys</span><h4>Visibility</h4><p>Metrics and logs turn "we might be under attack" into a counter and a hit-list.</p></div>
+    </div>
+
+    <div class="callout danger"><strong>Body inspection is absent by architecture, not by omission.</strong> Ferrum streams request bodies in 16 KB windows — Level 1's flat-memory guarantee. A body-inspecting WAF must instead <em>buffer</em> the whole body to scan it, which is a fundamentally different memory architecture (and a DoS surface of its own). So this WAF sees request <strong>heads</strong> only, and says so rather than pretending otherwise. The consequence it structurally cannot see: an injection payload carried in a <code>POST</code> body (e.g. a form-encoded or JSON SQLi in the request body) passes untouched. This is quiz question 11.</div>
+
+    <h4>The three commercial layers above signatures (quiz 14)</h4>
+    <table>
+      <thead><tr><th>Layer</th><th>Catches what signatures structurally cannot</th></tr></thead>
+      <tbody>
+        <tr><td><strong>ML / behavioral models</strong></td><td>Novel payloads with no signature — anomalous request shapes, parameter distributions, and sequences that no static rule was written for.</td></tr>
+        <tr><td><strong>Shared reputation feeds</strong></td><td>An IP's hostility observed <em>elsewhere</em> — cross-customer, persistent intelligence, so a source is "known bad" on its first request to you, and across restarts.</td></tr>
+        <tr><td><strong>JS challenges / managed rules</strong></td><td>Bots that don't run JavaScript (challenges), and a vendor-maintained ruleset updated faster than any single team can — the human research operation behind the rules.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="code-map">
+    <h2>Code Map</h2>
+    <p class="lead">What Level 13 added or changed. The WAF is one new file plus small edits to wire it into the existing chain, CLI, and metrics.</p>
+    <table>
+      <thead><tr><th>File / unit</th><th>Responsibility</th></tr></thead>
+      <tbody>
+        <tr><td><code>waf.rs</code> — <code>normalize</code>, <code>percent_decode_once</code>, <code>entity_decode</code>, <code>canonicalize_path</code></td><td>Decode/canonicalize + raise evasion flags (<code>NormFlags</code>: double-encoded, null-byte, traversal-attempt). New file.</td></tr>
+        <tr><td><code>waf.rs</code> — <code>RULES</code>, <code>Pat</code>, <code>Rule</code>, <code>compiled</code>, <code>scan</code>, <code>inspect</code>, <code>Verdict</code></td><td>The ~16-rule <code>const</code> table, the <code>OnceLock</code> regex cache, and scoring across four surfaces into one <code>Verdict</code>.</td></tr>
+        <tr><td><code>waf.rs</code> — <code>Reputation</code>, <code>Offender</code>, <code>WafStats</code>, <code>REPUTATION</code>, <code>shared_reputation</code></td><td>16-shard strikes/bans, lazy decay, doubling backoff; process-wide <code>OnceLock</code> store; <code>render_prometheus</code> for <code>ferrum_waf_events_total</code>.</td></tr>
+        <tr><td><code>waf.rs</code> — <code>Waf</code>, <code>WafMode</code>, <code>impl Middleware for Waf</code>, <code>forbidden</code></td><td>The middleware itself: ban-check → inspect → verdict → block/detect; generic 403; log-only hit list.</td></tr>
+        <tr><td><code>middleware/mod.rs</code> (edit)</td><td><code>waf</code>/<code>waf-threshold</code> in <code>L6_KEYS</code>; <code>ReqCtx.waf_score</code> field; WAF slotted into <code>build</code> after request-id, before ratelimit; boot guardrail; banner summary line.</td></tr>
+        <tr><td><code>main.rs</code> (edit)</td><td><code>--waf-ban-after</code> / <code>--waf-ban-secs</code> CLI flags; <code>configure_reputation</code> called once at boot before routes are built.</td></tr>
+        <tr><td><code>metrics.rs</code>, <code>observe.rs</code>, <code>admin.rs</code> (edit)</td><td>Append <code>waf_events_total</code> to <code>/metrics</code>; <code>waf_score</code> in the access log (only when &gt; 0).</td></tr>
+      </tbody>
+    </table>
+    <div class="callout"><strong>Two gaps found in live verification, both fixed:</strong> the WAF counters were rendered by <code>render_prometheus</code> but never appended to <code>/metrics</code> (caught because the function showed up as dead code in the warning baseline), and the startup banner's middleware summary omitted the WAF layer (the banner exists precisely so execution order is readable at boot). Verifying against the real binary caught both.</div>
+  </section>
+
+  <section id="industry">
+    <h2>How Industry Does It</h2>
+    <p class="lead">The reference-grade signature WAF is ModSecurity with the OWASP Core Rule Set. Ferrum borrows its <em>model</em> — anomaly scoring, normalization-first — at a teaching scale.</p>
+    <div class="grid2">
+      <div class="card">
+        <span class="tag tech">ModSecurity + OWASP CRS</span>
+        <h4>The reference</h4>
+        <p>An engine (originally an Apache module, now libmodsecurity for nginx/Envoy too) plus a community ruleset of <strong>thousands</strong> of rules. Same anomaly-scoring model we borrowed — paranoia levels, per-rule scores, a blocking threshold. Rich transformation pipeline (t:urlDecode, t:htmlEntityDecode, t:normalizePath, …) that our <code>normalize()</code> is a miniature of.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Cloud WAFs (Cloudflare, AWS WAF, Azure)</span>
+        <h4>Managed + ML</h4>
+        <p>Managed rule groups updated by a vendor research team, ML/bot-scoring, and — the real moat — <strong>shared reputation</strong> across every customer's traffic. This is exactly the commercial layer our honesty checkpoint names as above signatures.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Envoy / Coraza</span>
+        <h4>Sidecar / library WAF</h4>
+        <p>Envoy runs WAF logic via a filter (often libmodsecurity or the Go-native Coraza) in the L7 filter chain — structurally the same idea as our WAF-as-middleware, at production maturity. Coraza is CRS-compatible Go.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">nginx / Apache / HAProxy</span>
+        <h4>Bolt-on</h4>
+        <p>None ship a WAF in core. nginx and Apache load ModSecurity as a module; HAProxy typically uses SPOE to an external agent (or Coraza-SPOA). The WAF is always a <em>layer</em>, which is precisely the framing Ferrum takes literally: middleware with opinions.</p>
+      </div>
+    </div>
+    <div class="callout warn"><strong>Be honest: ours is a teaching build.</strong> ~16 rules against CRS's thousands; a linear string scan against RegexSet + Aho-Corasick pre-filters; head-only against full body inspection; a memory-only per-process reputation store against persistent cross-customer feeds. The value here is understanding the <em>model</em> — normalization, scoring, reputation, the honesty about limits — not the rule count. A production deployment fronts Ferrum with a real WAF; this level teaches what that WAF is doing.</div>
+  </section>
+
+  <section id="quiz">
+    <h2>Quiz</h2>
+    <p class="lead">Copied verbatim from PROGRESS.md — Vessey to answer before Level 14. No answers here; the point is to reconstruct the reasoning from the sections above.</p>
+    <div class="qa"><p class="q">1. The KB calls normalization 80% of WAF quality. Take <code>%252e%252e%2fetc/passwd</code> and walk it through both decode passes: what does each pass produce, which flag is raised where, and what total score accrues before any traversal rule even matches?</p></div>
+    <div class="qa"><p class="q">2. Why does the double-encoding flag itself score points, independent of what was hidden? What legitimate client behavior would be punished if single-encoding also scored, and why doesn't it?</p></div>
+    <div class="qa"><p class="q">3. <code>canonicalize_path("/a/../../b")</code> returns <code>/b</code> with the climb flag set. Why is the ATTEMPT convicted when the resolved path is harmless, and which unknown makes the conservative choice correct?</p></div>
+    <div class="qa"><p class="q">4. A lone <code>'</code> scores 2; <code>union</code>+<code>select</code> scores 10. Reconstruct the reasoning for each weight, then explain what breaks operationally if you swap them.</p></div>
+    <div class="qa"><p class="q">5. The tautology rule matches <code>or 1=2</code> — a FALSE tautology. Why is that over-match actually correct, and what does Rust's regex crate refuse to support that forced the looser pattern? Connect that refusal to a safety property L9 identified in the router.</p></div>
+    <div class="qa"><p class="q">6. Chain order puts the WAF after request-id but before ratelimit and auth. Give one concrete consequence of each of the two orderings it rejected (WAF-before-request-id; WAF-after-ratelimit).</p></div>
+    <div class="qa"><p class="q">7. The 403 body is generic and the rule hit-list is log-only, in both modes. What attack workflow does a rule-naming error page (or an X-Waf-Score header) enable? Walk it.</p></div>
+    <div class="qa"><p class="q">8. Why does detect mode record strikes but never ban? What operational sequence is that designed for, and what state advantage does it hand the operator at the moment enforcement flips on?</p></div>
+    <div class="qa"><p class="q">9. The ban check runs before inspection. Quantify what a banned IP costs the proxy per request versus an inspected one, and explain why that asymmetry is "most of what reputation buys."</p></div>
+    <div class="qa"><p class="q">10. The reputation store survives an L12 config reload but not a restart. Defend both halves of that sentence — why is reload-survival correct and why is restart-amnesty acceptable?</p></div>
+    <div class="qa"><p class="q">11. Body inspection is absent by architecture. Name the L1 guarantee that conflicts with it, describe what a body-inspecting WAF must do instead, and name one attack class this WAF consequently cannot see.</p></div>
+    <div class="qa"><p class="q">12. The rules live in a <code>const</code> table, not code. Add (on paper) a rule catching <code>&lt;base href=</code> injection: pattern kind, points, and the justification for your weight against the benign-lookalike test.</p></div>
+    <div class="qa"><p class="q">13. Reputation keys on <code>ctx.peer.ip()</code> — the socket address. Three levels made the same choice for three different features. Name them and the shared reason.</p></div>
+    <div class="qa"><p class="q">14. The KB's honesty checkpoint says signature WAFs are a speed bump. Name the three commercial layers above signatures, and for each, what it catches that this level structurally cannot.</p></div>
+  </section>
+
+  <section id="cheatsheet">
+    <h2>Cheat Sheet &amp; Glossary</h2>
+    <h3>Numbers, flags, defaults</h3>
+    <table>
+      <thead><tr><th>Constant / flag</th><th>Value</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>DEFAULT_THRESHOLD</code></td><td>10</td><td>Conviction line; tunable per route via <code>;waf-threshold=N</code></td></tr>
+        <tr><td><code>DEFAULT_BAN_AFTER</code></td><td>3</td><td>Strikes within decay window before a ban (<code>--waf-ban-after</code>)</td></tr>
+        <tr><td><code>DEFAULT_BAN_BASE</code></td><td>60 s</td><td>First ban length (<code>--waf-ban-secs</code>); doubles per repeat</td></tr>
+        <tr><td><code>BAN_CAP</code></td><td>3600 s (1 h)</td><td>Maximum ban length after backoff doubling</td></tr>
+        <tr><td>decay window</td><td><code>ban_base × 10</code></td><td>Strikes older than this reset lazily on next touch</td></tr>
+        <tr><td>shards</td><td>16</td><td>Mutex-guarded map shards keyed by client IP</td></tr>
+        <tr><td>surfaces</td><td>4</td><td>Canonicalized path, query string, User-Agent, Referer</td></tr>
+        <tr><td>rules</td><td>~16</td><td><code>const RULES</code> table (data, not code)</td></tr>
+        <tr><td>DOUBLE_ENCODED_POINTS</td><td>4</td><td>Per surface where a second decode pass changed the text</td></tr>
+        <tr><td>NULL_BYTE_POINTS</td><td>6</td><td>Per surface containing a <code>\0</code></td></tr>
+        <tr><td>CLIMB_POINTS</td><td>8</td><td>A <code>..</code> tried to pop above path root</td></tr>
+        <tr><td>NO_UA_POINTS</td><td>1</td><td>No User-Agent header — a nudge, never a conviction alone</td></tr>
+      </tbody>
+    </table>
+    <h3>Route options</h3>
+    <table>
+      <thead><tr><th>Option</th><th>Effect</th></tr></thead>
+      <tbody>
+        <tr><td><code>;waf=block</code></td><td>Convict at threshold → 403 + strike + maybe ban</td></tr>
+        <tr><td><code>;waf=detect</code></td><td>Log + count + record strike, but forward the request; never bans</td></tr>
+        <tr><td><code>;waf-threshold=N</code></td><td>Override the default-10 conviction line (needs a <code>waf=</code> or boot error)</td></tr>
+      </tbody>
+    </table>
+    <h3>Glossary</h3>
+    <div class="qa"><p class="q">Normalization</p><p class="a">Rendering every encoded/cased/spaced spelling of a payload into one canonical form before matching. The KB's "80% of WAF quality."</p></div>
+    <div class="qa"><p class="q">Evasion flag / receipt</p><p class="a">A boolean raised during normalization (double-encoded, null-byte, traversal-attempt) that is itself scored — the act of evading is a signal.</p></div>
+    <div class="qa"><p class="q">Anomaly scoring</p><p class="a">The CRS model: rules add points; block only at a threshold. Distinguishes a WAF from a false-positive generator.</p></div>
+    <div class="qa"><p class="q">Conviction</p><p class="a">A verdict whose accumulated score meets or exceeds the threshold.</p></div>
+    <div class="qa"><p class="q">Strike</p><p class="a">A recorded conviction against a client IP; <code>ban_after</code> strikes in the decay window trip a ban.</p></div>
+    <div class="qa"><p class="q">Oracle</p><p class="a">Any response signal (rule name, score header) that helps an attacker tune payloads. Ferrum gives none — generic 403, log-only hits.</p></div>
+    <div class="qa"><p class="q">Detect vs block mode</p><p class="a">Detect logs and forwards (watching first); block returns a 403 and enforces bans. Every WAF ships in detect mode.</p></div>
+    <div class="qa"><p class="q">Lazy decay</p><p class="a">Expiring strikes/bans on the next lookup rather than via a sweeper task — the Level 11 TTL pattern.</p></div>
+  </section>
+</main>
+</div>
+
+<footer>
+  <p>Ferrum KB &mdash; Level 13: Basic WAF &bull; Built 2026-09-02</p>
+  <p class="muted">A teaching reverse proxy in Rust. Claims verified against <code>rproxy/src/waf.rs</code>, <code>middleware/mod.rs</code>, <code>router.rs</code>, <code>main.rs</code> and PROGRESS.md. Where ours is crude next to production WAFs, the page says so.</p>
+</footer>
+</body>
+</html>

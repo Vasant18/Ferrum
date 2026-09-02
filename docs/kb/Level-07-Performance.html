@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ferrum KB — Level 7: Performance</title>
+<meta name="description" content="A complete, plain-English map of the Barracuda Networks product portfolio: every product family (Email, Application, Network, Data Protection, Managed XDR, MSP) and the BarracudaONE platform — what each product is, what it does, and what problem it solves." />
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    flowchart: { htmlLabels: true, useMaxWidth: true, padding: 12, nodeSpacing: 55, rankSpacing: 55 },
+    startOnLoad: true, theme: 'base', securityLevel: 'loose',
+    themeVariables: {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '15px',
+      primaryColor: '#e7e8ea', primaryTextColor: '#15203a', primaryBorderColor: '#7e848c',
+      lineColor: '#6a6f77', secondaryColor: '#dddfe2', tertiaryColor: '#f3f4f6',
+      noteBkgColor: '#fff3d6', noteTextColor: '#3a2f12', noteBorderColor: '#caa84a',
+      actorBkg: '#e7e8ea', actorTextColor: '#15203a', actorBorder: '#7e848c',
+      clusterBkg: '#eef0f2', clusterBorder: '#a0a4aa'
+    }
+  });
+</script>
+<style>
+  :root{--bg:#0f1320;--panel:#161c2e;--panel-2:#1d2540;--ink:#e8ecf5;--muted:#9aa6c4;--accent:#7c5cff;--accent-2:#22d3a6;--warn:#ffb454;--danger:#ff6b81;--line:#2a3354;--code-bg:#0b0f1a;--max:1100px;}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:linear-gradient(180deg,#0c1020,#0f1320 40%);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  a{color:var(--accent-2);text-decoration:none}a:hover{text-decoration:underline}
+  header.hero{padding:56px 24px 40px;text-align:center;background:radial-gradient(1200px 400px at 50% -10%,rgba(255,107,129,.18),transparent 60%);border-bottom:1px solid var(--line);}
+  header.hero .eyebrow{letter-spacing:.25em;text-transform:uppercase;color:var(--accent-2);font-size:.75rem;font-weight:700}
+  header.hero h1{font-size:clamp(1.9rem,4vw,3rem);margin:.3em 0 .2em;line-height:1.1}
+  header.hero p.sub{color:var(--muted);max-width:790px;margin:0 auto;font-size:1.05rem}
+  .badges{margin-top:18px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .badge{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);padding:4px 12px;border-radius:999px;font-size:.8rem}
+  .layout{display:grid;grid-template-columns:260px 1fr;gap:32px;align-items:start;max-width:1320px;margin:0 auto;padding:0 22px}
+  nav.toc{position:sticky;top:0;max-height:100vh;overflow:auto;padding:28px 10px 60px;border-right:1px solid var(--line);font-size:.9rem;}
+  nav.toc h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.18em;color:var(--muted);margin:18px 8px 6px}
+  nav.toc a{display:block;color:var(--muted);padding:5px 10px;border-radius:8px;border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--panel);color:var(--ink);text-decoration:none;border-left-color:var(--accent)}
+  main{padding:34px 0 80px;min-width:0}
+  section{margin:0 0 46px;scroll-margin-top:18px}
+  section>h2{font-size:1.7rem;margin:0 0 .5em;padding-bottom:.3em;border-bottom:2px solid var(--line);display:flex;align-items:center;gap:.5em;}
+  h3{font-size:1.25rem;margin:1.6em 0 .4em;color:#fff}
+  h4{font-size:1.02rem;margin:1.2em 0 .3em;color:var(--accent-2);text-transform:uppercase;letter-spacing:.04em}
+  p,li{color:var(--ink)}.muted{color:var(--muted)}
+  article.concept{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin:22px 0}
+  article.concept>h3:first-child{margin-top:0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr} .layout{grid-template-columns:1fr} nav.toc{position:static;max-height:none;border-right:none;border-bottom:1px solid var(--line)}}
+  .card{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card h4{margin-top:.2em}
+  .callout{border-left:4px solid var(--accent);background:var(--panel-2);padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  .callout.analogy{border-left-color:var(--accent-2)}.callout.warn{border-left-color:var(--warn)}.callout.danger{border-left-color:var(--danger)}.callout.story{border-left-color:#5ec2ff}
+  .tag{display:inline-block;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:2px 8px;border-radius:6px;margin-bottom:6px}
+  .tag.beg{background:rgba(34,211,166,.15);color:var(--accent-2)}.tag.tech{background:rgba(124,92,255,.18);color:#b9a6ff}.tag.adv{background:rgba(255,107,129,.15);color:var(--danger)}
+  code{background:var(--code-bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.86em;color:#ffd9a0}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.85rem;line-height:1.55}
+  pre code{background:none;border:none;padding:0;color:#d7e0f5}
+  pre.art{color:#ffd9a0;font-size:.95rem;line-height:1.4;letter-spacing:.04em}
+  pre.mermaid{background:#f7f8fc;color:#111;text-align:center}
+  .mermaid svg text,.mermaid text{fill:#15203a !important}
+  .mermaid .nodeLabel,.mermaid .edgeLabel,.mermaid .label,.mermaid span,.mermaid p,.mermaid div,.mermaid foreignObject *{color:#15203a !important;fill:#15203a !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p{background:#f3f5fc !important}
+  .mermaid .cluster-label .nodeLabel,.mermaid .cluster-label p,.mermaid .cluster span,.mermaid .cluster p{color:#3c4046 !important}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.92rem;overflow:hidden;border-radius:10px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel-2);color:#fff}
+  tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  details{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:12px 0}
+  details summary{cursor:pointer;font-weight:600;color:var(--accent-2);padding:6px 0}
+  details[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px}
+  figure{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  figcaption{color:var(--muted);font-size:.85rem;text-align:center;margin-top:8px;font-style:italic}
+  .qa{margin:10px 0}.qa .q{font-weight:600}.qa .a{color:var(--muted);margin:2px 0 0}
+  ol.flow{counter-reset:step;list-style:none;padding-left:0}
+  ol.flow>li{counter-increment:step;position:relative;padding:10px 0 10px 52px;border-bottom:1px dashed var(--line)}
+  ol.flow>li::before{content:counter(step);position:absolute;left:0;top:8px;width:34px;height:34px;background:var(--accent);color:#fff;border-radius:50%;display:grid;place-items:center;font-weight:700}
+  .rank{font-weight:800;color:var(--accent);margin-right:6px}
+  footer{border-top:1px solid var(--line);padding:30px 22px;text-align:center;color:var(--muted);font-size:.88rem}
+  .lead{font-size:1.08rem}
+  .formula{background:var(--code-bg);border:1px dashed var(--accent);border-radius:10px;padding:12px 16px;font-family:monospace;color:#ffd9a0;text-align:center;margin:14px 0}
+
+  /* KB-THEME START */
+  /* Azure (blue palette) */
+  :root{--bg:#0e1c30;--panel:#152740;--panel-2:#1d3458;--ink:#e6edf7;--muted:#93a6c4;--accent:#1a8ae5;--accent-2:#41a7f5;--warn:#d6a96a;--danger:#d98a8a;--line:#264064;--code-bg:#0b1626;}
+  body{background:linear-gradient(180deg,var(--bg),var(--bg))}
+  header.hero{background:radial-gradient(1100px 400px at 50% -10%,rgba(20,119,210,.26),transparent 60%)}
+  h3,.parthead{color:var(--ink)}
+  th{color:var(--ink)}
+  .tag.tech{background:rgba(65,167,245,.16);color:var(--accent-2)}
+  ol.flow>li::before{color:#0b1626}
+  /* KB-THEME END */
+  /* prevent node/edge label clipping */
+  .mermaid foreignObject{overflow:visible !important}
+  .mermaid .nodeLabel,.mermaid .label,.mermaid foreignObject>div,.mermaid foreignObject span,.mermaid foreignObject p{white-space:nowrap !important;overflow:visible !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p,.mermaid .edgeLabel span{white-space:nowrap !important;overflow:visible !important;padding:1px 4px}
+  .mermaid svg{max-width:100%;height:auto}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyebrow">Ferrum KB &middot; Level 7 of 14 &middot; Performance</div>
+  <h1>Performance<br/><span style="font-size:.6em;color:var(--muted)">Stop paying a fresh TCP handshake for every request &mdash; and the cross-task bug that hid inside the fix</span></h1>
+  <p class="sub">Levels 1&ndash;6 close the backend connection after every exchange. Correct, but slow: at any real concurrency, every request pays ~1 RTT to the backend before byte one, purely to build a socket that gets thrown away one response later. Level 7 closes that gap with a <strong>per-<code>Server</code> bounded LIFO idle-connection pool</strong> &mdash; a <code>Mutex&lt;Vec&lt;PooledConn&gt;&gt;</code> with lazy idle-timeout eviction, no sweeper task. It also fills two timeout holes (a hung backend that blocked forever; an idle bound on pooled sockets), and pools the whole <code>Conn&lt;TcpStream&gt;</code> so buffer reuse comes for free. The real story of this level is a <strong>TOCTOU bug that every per-task review passed</strong> &mdash; a pooled connection that died between check and write left the client with <em>no response at all</em>, caught only by a whole-branch review, fixed by serializing the head once and retrying only the write.</p>
+  <div class="badges">
+    <span class="badge">Audience: Vessey (revising the build)</span>
+    <span class="badge">Scope: pooling, buffer reuse, timeouts, keep-alive</span>
+    <span class="badge">Reading time: ~26 min</span>
+  </div>
+  <p class="muted" style="margin-top:18px">
+    <a href="index.html">&larr; Course index</a> &nbsp;&middot;&nbsp;
+    <a href="Level-06-Middleware.html">&larr; Level 6: Middleware</a> &nbsp;&middot;&nbsp;
+    <a href="Level-08-Security-TLS.html">Level 8: Security &amp; TLS &rarr;</a>
+  </p>
+</header>
+
+<div class="layout">
+<nav class="toc">
+  <h2>Orientation</h2>
+  <a href="#exec-summary">Executive Summary</a>
+  <a href="#big-picture">The Big Picture</a>
+  <h2>Core</h2>
+  <a href="#pool">The Per-Server LIFO Pool</a>
+  <a href="#lease">Checkout &amp; Return on the Lease</a>
+  <a href="#poolable">The Five-Condition Predicate</a>
+  <a href="#timeout">The Backend Response Timeout</a>
+  <a href="#serialize">Serialize Once, Retry the Write</a>
+  <a href="#toctou">The TOCTOU Bug That Hid</a>
+  <a href="#theory">Theory, Documented Not Built</a>
+  <a href="#code-map">Code Map</a>
+  <h2>Compare</h2>
+  <a href="#industry">How the Industry Does It</a>
+  <h2>Reference</h2>
+  <a href="#quiz">Quiz</a>
+  <a href="#cheatsheet">Cheat Sheet &amp; Glossary</a>
+</nav>
+
+<main>
+<section id="exec-summary">
+  <h2>Executive Summary</h2>
+  <p class="lead">Reuse the socket you already dialed &mdash; and prove the reuse never leaks a byte or drops a request.</p>
+  <p>Levels 1&ndash;6 send the backend <code>Connection: close</code> after every exchange, so each proxied request first pays a full TCP handshake &mdash; about one round-trip &mdash; before a single byte of the request even leaves. Level 7 removes that tax with a <strong>connection pool</strong>: after a clean, reusable exchange, the backend socket goes into an idle stack instead of being closed, and the next request to that backend takes it back out and skips the connect entirely.</p>
+  <p>The pool lives on <code>Server</code> in <code>balancer.rs</code> &mdash; the struct that already owns the per-backend <code>inflight</code>, <code>ewma_us</code>, and <code>breaker</code>. It is one new field, <code>idle: Mutex&lt;Vec&lt;PooledConn&gt;&gt;</code>: a <strong>bounded LIFO stack</strong> guarded by a plain <code>std::sync::Mutex</code> (the critical section is a <code>Vec::pop</code>/<code>push</code> with no <code>.await</code> in it). Eviction is <strong>lazy</strong> &mdash; there is no background sweeper; <code>take_conn</code> discards anything past <code>POOL_IDLE_TIMEOUT</code> as it pops, and <code>return_conn</code> caps the stack at <code>POOL_MAX_IDLE</code> by dropping the <em>newest</em> connection on overflow. LIFO is deliberate: it keeps the warmest connection in play and lets the coldest age out.</p>
+  <p>What gets pooled is the whole <code>Conn&lt;TcpStream&gt;</code>, not the bare socket &mdash; so its already-allocated read buffer comes back with it and buffer reuse is free, no separate buffer-pool abstraction required. A connection is only returned if it passes a <strong>five-condition <code>is_poolable</code> predicate</strong>: framing was not read-until-close, the backend did not say <code>Connection: close</code>, the backend spoke HTTP/1.1, no I/O error occurred, and the read buffer is fully drained. Two of those conditions (<code>backend_sent_close</code>, <code>backend_is_http11</code>) are captured <em>immediately</em> after the response head is parsed, because the client-leg rewrite later clobbers the same fields.</p>
+  <p>Level 7 also fills two timeout holes. <code>BACKEND_RESPONSE_TIMEOUT</code> wraps the response-head read: a hung backend that accepts the connection and never answers used to block that task forever with no client error and no breaker signal &mdash; now it produces a <strong>504 and <code>mark_failure()</code></strong>, making a hang ejectable exactly like a refused connect. And the pool's <code>POOL_IDLE_TIMEOUT</code> is the keep-alive bound that stops a pooled socket outliving the backend's own patience.</p>
+  <p>The level's real lesson is a bug in the <em>fix</em>. A pooled connection can die between the idle-check and the first write &mdash; a genuine TOCTOU race. The first draft broke out of the retry loop on a pool hit, so a first-write failure hit a bare <code>?</code> and the client got <strong>no HTTP response at all</strong>. Every per-task review passed; only a whole-branch review caught it. The fix: run the non-idempotent XFF rewrite <em>once</em> above the loop, serialize <code>head_bytes</code> once, and extend the acquire loop so a head-write failure retries like a connect failure &mdash; scoped strictly to the head, never the body.</p>
+</section>
+
+<section id="big-picture">
+  <h2>The Big Picture</h2>
+  <p>Level 7 does not add a stage to the request pipeline &mdash; it changes where the backend socket <em>comes from</em> and adds one deadline in the middle. The route match, the balancer pick, the header rewrites, the body streaming: all unchanged. What changes is a fork right before the dial: try the pool first (0-RTT hit), and only connect on a miss. At the far end, after the response is relayed, a fork decides whether the socket is clean enough to go back into the pool or must be closed.</p>
+  <p>The ordering is what makes it correct. The non-idempotent request rewrite runs <strong>once, above</strong> the acquire loop, producing a single serialized <code>head_bytes</code>. The acquire loop then picks a server, takes-or-dials a connection, and writes that same head &mdash; and a failure at <em>any</em> of those steps (pick, dial, or head-write) retries identically. Only once the head is safely on the wire does the exchange leave the loop and begin streaming the body, past which nothing may be retried.</p>
+  <figure>
+<pre class="mermaid">
+flowchart TD
+  A["route match (L2/L3/L4/L6 chain)"] --> RW["rewrite request head ONCE<br/>(X-Forwarded-For etc.) -&gt; head_bytes"]
+  RW --> LOOP["acquire loop (retry budget = MAX_RETRIES)"]
+  LOOP --> PICK["lease = upstream.pick(peer.ip())"]
+  PICK --> TAKE{"lease.take_conn()?"}
+  TAKE -->|"Some(conn)"| HIT["POOL HIT: skip connect + its timeout<br/>reused socket AND reused buffer"]
+  TAKE -->|"None"| DIAL["timeout(BACKEND_CONNECT_TIMEOUT,<br/>TcpStream::connect)"]
+  HIT --> WR{"write_all(head_bytes)?"}
+  DIAL --> WR
+  WR -->|"Err (dead pooled sock / connect fail)"| RETRY["mark_failure; retry if idempotent<br/>&amp; attempts remain, else 502"]
+  RETRY -.->|"loop"| PICK
+  WR -->|"Ok"| BODY["stream request body (NO retry past here)"]
+  BODY --> RESP["timeout(BACKEND_RESPONSE_TIMEOUT,<br/>backend.read_head())"]
+  RESP -->|"timeout"| T504["mark_failure + 504 to client"]
+  RESP -->|"head in hand"| REL["relay response head + body (L1/L5)"]
+  REL --> POOLQ{"is_poolable(5 conditions)?"}
+  POOLQ -->|"yes"| RET["lease.return_conn(conn)"]
+  POOLQ -->|"no"| CLOSE["conn drops = closed"]
+</pre>
+<figcaption>Level 7's changes (highlighted logic): a pool-first fork before the dial, a serialize-once rewrite above the retry loop, a response-head deadline, and a poolability fork at the end. The head-write retries like a connect failure; the body does not.</figcaption>
+  </figure>
+  <div class="callout analogy"><strong>Analogy:</strong> A taxi rank outside a hotel, one rank per destination (per <code>Server</code>). Instead of phoning for a brand-new cab on every trip (a fresh handshake), a returning cab that is still in good shape pulls to the <em>front</em> of the rank &mdash; LIFO &mdash; so the next passenger takes the warmest, most-recently-driven cab. Cabs that have sat too long (idle timeout) are waved off when someone finally looks; the rank only holds so many (max idle), and an extra returning cab past the cap is simply sent home rather than bumping one already parked. Crucially, a passenger who climbs into a cab whose engine has secretly died (the TOCTOU race) doesn't get stranded &mdash; the dispatcher just flags that cab dead and calls the next one, because no luggage was loaded yet.</div>
+</section>
+
+<section id="pool">
+  <h2>The Per-<code>Server</code> LIFO Pool</h2>
+  <p class="lead">One new field on an existing struct, chosen to sit exactly where the balancer already shards its state.</p>
+  <p>The pool is a field on <code>Server</code> (<code>balancer.rs</code>), the struct that already owns <code>inflight</code>, <code>ewma_us</code>, and <code>breaker</code>. The whole addition is:</p>
+  <pre><code>pub struct Server {
+    addr: String,
+    inflight: AtomicUsize,
+    ewma_us: AtomicU64,
+    breaker: Breaker,
+    idle: Mutex&lt;Vec&lt;PooledConn&gt;&gt;,   // NEW
+}
+
+struct PooledConn {
+    conn: crate::proxy::Conn&lt;TcpStream&gt;,  // socket + its read buffer, together
+    idle_since: Instant,
+}</code></pre>
+
+  <h3>Why <code>Server</code>, not <code>Upstream</code> or a global pool</h3>
+  <p>A pool per <code>Server</code> means the per-server breaker/EWMA data and the new idle pool <strong>live and die together</strong>: when a server leaves the config, its idle connections go with it &mdash; no separate cleanup pass. It also makes the lock-contention story trivial. <code>Server</code> is <em>already</em> the unit of concurrency the balancer fans requests across, so sharding the pool by server means a busy backend's pool traffic never serializes behind an unrelated backend's pool traffic: they are different mutexes entirely. A single global <code>Mutex&lt;HashMap&lt;Addr, Vec&lt;Idle&gt;&gt;&gt;</code> would force every checkout and return across every backend through one lock &mdash; the classic contention bottleneck this level uses as its worked example (see <a href="#theory">Theory</a>).</p>
+
+  <h3>Why <code>std::sync::Mutex</code>, not <code>tokio::sync::Mutex</code></h3>
+  <p>The critical section is a <code>Vec::pop</code> or <code>Vec::push</code> with <strong>no <code>.await</code> inside it</strong>. An async mutex only earns its keep when the lock is held across an await point (so the task can yield while holding it); here the lock is taken, the vector is poked, and the lock is released, all synchronously. Using <code>tokio::sync::Mutex</code> would buy a scheduler hop and a heavier lock for nothing. This is the same reasoning Level 6's rate limiter used for its shard locks.</p>
+
+  <h3>LIFO, and why "warmest first" matters</h3>
+  <p>The stack is <strong>last-in, first-out</strong>: <code>return_conn</code> pushes onto the back, <code>take_conn</code> pops from the back. So the connection handed out next is the one returned <em>most recently</em> &mdash; the warmest, least likely to have been closed by the backend's own idle timer in the meantime. The connections that sit unused drift to the bottom and are the ones the lazy idle-timeout eviction reaps. A FIFO queue would do the opposite: hand out the coldest connection first, maximizing the chance of drawing one the backend already killed. LIFO minimizes the TOCTOU window that <a href="#toctou">the story below</a> is about.</p>
+  <div class="callout"><strong>Verified:</strong> constants in <code>balancer.rs</code> &mdash; <code>POOL_MAX_IDLE = 4</code>, <code>POOL_IDLE_TIMEOUT = Duration::from_secs(60)</code>. The runtime values are threaded through a <code>PoolConfig { max_idle, idle_timeout }</code> whose <code>Default</code> reads exactly those two constants, so the CLI flags override the same numbers the tests assert against.</div>
+</section>
+
+<section id="lease">
+  <h2>Checkout &amp; Return on the <code>Lease</code></h2>
+  <p class="lead">Pooling becomes two more methods on an RAII type that already exists, not a second parallel guard with its own lifecycle.</p>
+  <p>One RAII object already exists per exchange: <code>Lease</code>, which holds an in-flight count on the chosen server and feeds the breaker/EWMA on <code>Drop</code> (Level 3). Level 7 adds two methods to it &mdash; <code>take_conn</code> and <code>return_conn</code> &mdash; rather than inventing a second guard type with a parallel lifecycle to reason about. The <code>Lease</code> already borrows the <code>Server</code> for its whole lifetime, so it is the natural handle for that server's pool.</p>
+
+  <h3><code>take_conn</code>: pop the warmest live connection, discard the stale</h3>
+  <p>Checkout pops from the back (LIFO) and skips anything older than the idle timeout, looping until it finds a live connection or the stack empties:</p>
+  <pre><code>fn take_conn(&amp;self) -&gt; Option&lt;Conn&lt;TcpStream&gt;&gt; {
+    let mut guard = self.idle.lock().unwrap();
+    let now = Instant::now();
+    while let Some(pc) = guard.pop() {
+        if now.saturating_duration_since(pc.idle_since) &lt; self.pool.idle_timeout {
+            return Some(pc.conn);
+        }
+        // else: stale, `pc` drops here (closes the socket), loop continues.
+    }
+    None
+}</code></pre>
+  <p>A stale entry costs <em>nothing</em> until something actually looks &mdash; the same "nobody pays until somebody looks" principle as Level 6's lazy token-bucket refill. Note <code>saturating_duration_since</code> rather than <code>elapsed()</code>: it is monotonic-clock-safe and cannot panic on a backwards clock reading.</p>
+
+  <h3><code>return_conn</code>: bounded at return, drop the newest on overflow</h3>
+  <pre><code>fn return_conn(&amp;self, conn: Conn&lt;TcpStream&gt;) {
+    let mut guard = self.idle.lock().unwrap();
+    if guard.len() &lt; self.pool.max_idle {
+        guard.push(PooledConn { conn, idle_since: Instant::now() });
+    }
+    // else: `conn` is dropped here (closes the socket) — pool stays capped.
+}</code></pre>
+  <p>The cap is enforced <strong>at return, not at checkout</strong>, and on overflow it drops the <em>new</em> connection rather than evicting an existing one. Why prefer the residents? There is no reason to favor a fresh-idle connection over ones already parked &mdash; they are equally valid, and evicting a resident would mean closing a socket you were about to keep only to keep one you were about to close. Dropping the newcomer is strictly less work and keeps the pool's contents stable.</p>
+  <p>These methods are private on <code>Server</code>; the public <code>Lease::take_conn</code>/<code>Lease::return_conn</code> forward to them. That keeps the pool's internals encapsulated behind the lease the caller already holds.</p>
+</section>
+
+<section id="poolable">
+  <h2>The Five-Condition <code>is_poolable</code> Predicate</h2>
+  <p class="lead">Derived from state <code>serve_one</code> already computes for the client-leg keep-alive decision &mdash; plus one condition the client leg never needs.</p>
+  <p>A connection is eligible to go back into the pool if and only if all five hold. It is a pure, synchronous function in <code>proxy.rs</code> taking plain values, so it is trivially unit-tested (six tests: each condition independently forces <code>false</code>, all-true forces <code>true</code>):</p>
+  <pre><code>fn is_poolable(
+    resp_framing: BodyFraming,
+    backend_sent_close: bool,
+    backend_is_http11: bool,
+    exchange_errored: bool,
+    buffer_empty: bool,
+) -&gt; bool {
+    if resp_framing == BodyFraming::UntilClose { return false; }  // 1
+    if backend_sent_close                       { return false; }  // 2
+    if !backend_is_http11                       { return false; }  // 3
+    if exchange_errored                         { return false; }  // 4
+    buffer_empty                                                    // 5
+}</code></pre>
+  <table>
+    <thead><tr><th>#</th><th>Condition</th><th>Why it disqualifies</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>framing is not <code>UntilClose</code></td><td><code>UntilClose</code> means "read until the backend closes the socket" &mdash; the backend itself told us the connection is single-use.</td></tr>
+      <tr><td>2</td><td>backend did not send <code>Connection: close</code></td><td>An explicit refusal to persist. We asked for keep-alive; the backend is free to decline.</td></tr>
+      <tr><td>3</td><td>backend spoke HTTP/1.1</td><td>An HTTP/1.0 backend doesn't support persistent connections at all by default.</td></tr>
+      <tr><td>4</td><td>no I/O error in the exchange</td><td>An errored socket is in an unknown state; reusing it courts a desync.</td></tr>
+      <tr><td>5</td><td>read buffer is fully drained</td><td>The genuinely new one &mdash; see below.</td></tr>
+    </tbody>
+  </table>
+  <p>Conditions 1&ndash;4 mirror the client-leg keep-alive check applied symmetrically to the backend leg. There is <strong>no new state to track</strong> for them &mdash; <code>resp_framing</code>, the response headers, and <code>resp.version</code> are all in hand when the response is relayed, and error-freedom is structural (see <a href="#serialize">the error model</a>): only the one success path that reaches the poolability decision with no error ever calls <code>return_conn</code>.</p>
+
+  <h3>Condition 5: the buffer must be empty, and why only the backend leg needs it</h3>
+  <p>Condition 5 &mdash; <code>Conn::buffer_is_empty()</code>, a one-line read of the private <code>filled == 0</code> &mdash; has no client-leg analogue. On the <em>client</em> leg, extra buffered bytes after a message correctly mean <em>the next pipelined request</em> and must be preserved (Level 1's <code>preserves_pipelined_bytes_after_head</code>). On the <em>backend</em> leg there is no pipelining: this proxy sends one request per checkout and waits for its response before sending another. So any bytes still sitting in the buffer after the body was fully consumed are <strong>not</strong> a next message &mdash; they are either backend misbehavior or a framing-accounting bug, and pooling them forward would hand the next checkout's <code>read_head</code> a mix of stale and fresh bytes: the exact connection-desync failure mode Level 1 closed for the client leg, now on the backend leg.</p>
+
+  <h3>The ordering trap: capture two fields <em>before</em> the client-leg rewrite</h3>
+  <p>This is the subtle part, and the whole reason <code>is_poolable</code> takes plain <code>bool</code>s instead of the response head. Later in <code>serve_one</code>, <code>resp.headers</code> passes through <code>strip_hop_by_hop</code> (which strips <code>Connection</code>) and the client-leg framing block pushes a <em>new</em> <code>Connection</code> header describing what <strong>we</strong> tell the client; <code>resp.version</code> gets force-set to <code>Http11</code> for the client leg regardless of what the backend actually spoke. By the time the pooling decision happens, both fields describe the <em>client</em> leg, not the backend's original response. So they are captured the instant the head is parsed:</p>
+  <pre><code>let resp_framing = http::response_body_framing(&amp;method, &amp;resp)?;
+// captured NOW, before any client-leg rewrite clobbers resp.headers / resp.version:
+let backend_sent_close = http::header(&amp;resp.headers, "connection")
+    .map(|v| v.split(',').any(|t| t.trim().eq_ignore_ascii_case("close")))
+    .unwrap_or(false);
+let backend_is_http11 = resp.version == Version::Http11;</code></pre>
+  <p>Making <code>is_poolable</code> take <code>bool</code>s rather than <code>&amp;Response</code> is defensive by design: it makes it <em>impossible</em> to read these fields late from inside the function &mdash; the caller is forced to capture the right values at the right time, at the call site. Every implementer and reviewer in this level's build re-verified this ordering by tracing the actual code, not trusting the comment.</p>
+  <div class="callout warn"><strong>Watch out:</strong> the backend leg now asks for <code>Connection: keep-alive</code> (the head-rewrite pushes it) instead of <code>close</code> &mdash; pooling can never find a live connection if every request tells the backend to hang up. But that invitation alone does <em>not</em> decide poolability: condition 2 still independently checks the backend's own response <code>Connection</code> header, because a backend is free to ignore the invitation and close anyway.</div>
+</section>
+
+<section id="timeout">
+  <h2>The Backend Response Timeout</h2>
+  <p class="lead">The one genuinely new <em>behavior</em> of the level: a hung backend becomes ejectable, not eternal.</p>
+  <p>Before Level 7, a backend that accepted the TCP connection and then <strong>never responded</strong> was a black hole: <code>backend.read_head()</code> awaited forever, blocking that connection task with no client-visible error and no signal to the circuit breaker. The backend looked healthy to the balancer (it accepted the connect!) while silently swallowing requests. <code>BACKEND_RESPONSE_TIMEOUT</code> closes that gap, following the exact <code>tokio::time::timeout(DURATION, future)</code> pattern <code>HEAD_READ_TIMEOUT</code> and <code>BACKEND_CONNECT_TIMEOUT</code> already use:</p>
+  <pre><code>let resp_bytes = match tokio::time::timeout(backend_timeout, backend.read_head()).await {
+    Err(_) =&gt; {
+        // Hung backend: connect succeeded and the request was sent, so this
+        // is as real a failure as a refused connect — indict the server.
+        lease.mark_failure();
+        crate::warn!("[{peer}] backend {} response timed out", lease.addr());
+        respond_error(client, 504, "Gateway Timeout").await?;
+        metrics.record_request(m_id, 504, t_start.elapsed());
+        return Ok(false);
+    }
+    // ... Ok(Ok(None)) => backend closed before responding; Ok(Ok(Some)) => head in hand
+};</code></pre>
+  <p>On expiry the client gets a <strong>504 Gateway Timeout</strong> and the lease fires <code>mark_failure()</code>, which feeds the passive breaker <em>exactly</em> like a refused connect. So a backend that "hangs" now becomes ejectable the same way a backend that "refuses" already was &mdash; to the breaker, a backend that never answers looks like a backend that never connects.</p>
+  <p>The default is <strong>30s</strong> (<code>DEFAULT_BACKEND_RESPONSE_TIMEOUT = Duration::from_secs(30)</code>), tunable via <code>--backend-timeout</code>. It bounds only <strong>time-to-first-byte</strong> &mdash; the response <em>head</em> read &mdash; not total body-transfer time. That is deliberate: total transfer time is size- and route-dependent and stays unbounded, matching the KB's framing of this timeout as protecting against <em>hung application code</em> up to first byte, not against slow-but-alive transfers. A separate body-streaming deadline would penalize a legitimately large download.</p>
+  <div class="callout story"><strong>Measured:</strong> against a backend that accepts and never answers, with <code>--backend-timeout 2s</code>, a 504 came back in <strong>~2.08s</strong>, and the breaker ejected the backend on the very next request &mdash; a repeat returned an immediate <strong>502 in 0.04s</strong> instead of hanging again. That confirms <code>mark_failure()</code> on timeout genuinely feeds the same passive breaker feed a refused connect already used.</div>
+</section>
+
+<section id="serialize">
+  <h2>Serialize Once, Retry Only the Write</h2>
+  <p class="lead">Pooling introduces no new failure <em>category</em> &mdash; a pooled connection is just an alternate source of a <code>TcpStream</code>, fed into the same retry machinery. But making that true required restructuring the loop.</p>
+  <p>The request-head rewrite (<code>route.rules.apply_request</code> &mdash; appends <code>X-Forwarded-For</code>, sets the host, adds <code>Connection: keep-alive</code>, etc.) is <strong>non-idempotent</strong>: run it twice and you double-append XFF. So it must run <em>once</em>. The connect, by contrast, must be <em>retryable</em> &mdash; a refused backend should fall to another server. Level 7 resolves the tension by splitting the two: the rewrite and serialization happen <strong>once, above</strong> the loop; the loop then re-uses the identical bytes on every attempt.</p>
+  <pre><code>// ONCE, above the loop — the non-idempotent rewrite:
+req.headers.push(("Connection".to_string(), "keep-alive".to_string()));
+// ... other apply_request rewrites (X-Forwarded-For, host, ...) ...
+let head_bytes = http::write_request_head(&amp;req);   // the single serialization
+
+let (mut lease, mut backend, from_pool) = loop {
+    let mut lease = upstream.pick(peer.ip()) /* or 502 if no healthy server */;
+    // acquire: pooled first (0-RTT), else dial fresh
+    let (mut conn, from_pool) = if let Some(conn) = lease.take_conn() {
+        (conn, true)                                   // POOL HIT: skip connect
+    } else {
+        match timeout(BACKEND_CONNECT_TIMEOUT, TcpStream::connect(&amp;addr)).await {
+            Ok(Ok(s))          =&gt; { s.set_nodelay(true); (Conn::new(s), false) }
+            Ok(Err(_)) | Err(_) =&gt; { lease.mark_failure(); /* retry, or 502/504 */ }
+        }
+    };
+    // write the SAME pre-serialized head; a failure here is treated
+    // EXACTLY like a failed connect:
+    match conn.write_all(&amp;head_bytes).await {
+        Ok(())  =&gt; break (lease, conn, from_pool),
+        Err(e)  =&gt; { lease.mark_failure(); /* retry if idempotent, else 502 */ }
+    }
+};</code></pre>
+  <p>Retry is gated on three conditions, all required: attempts remain (<code>MAX_RETRIES</code> = 2, one shared budget &mdash; no separate pooled-retry category), the method is idempotent (safe to replay), and no request-body byte has left yet. That last point is the hard boundary: the moment the loop exits and <code>copy_body_limited</code> starts streaming, a failure is <em>no longer replayable</em> &mdash; part of a possibly non-idempotent request is already committed to a backend and can never be safely replayed. Failures past that point feed the breaker and surface to the client.</p>
+
+  <h3>Error-freedom is structural, not checked</h3>
+  <p>This structure is what makes <code>is_poolable</code>'s condition 4 (no I/O error) true <em>by construction</em>. Only the one success path that reaches the poolability decision with no error ever calls <code>return_conn</code>. Every fallible step between acquire and that decision returns early via <code>?</code> or an explicit error branch &mdash; a timed-out or errored connection is never even a candidate for pooling. "A timed-out backend connection must be dropped, not pooled" becomes true because there is <em>no code path</em> that pools one, not because a separate check rejects it.</p>
+</section>
+
+<section id="toctou">
+  <h2>The TOCTOU Bug That Hid Behind Every Passing Review</h2>
+  <p class="lead">This is the story of the level. Every per-task review passed. The bug was invisible to all of them because it lived in the <em>interaction</em> between two tasks, not inside either one.</p>
+  <p>A pool hit hands back a socket that <em>looked</em> alive at checkout &mdash; it passed the idle-age check. But the backend can close it in the window between that check and our first write. This is a genuine <strong>time-of-check to time-of-use</strong> race, inherent to any connection pool: the socket is fine when you inspect it and dead when you use it. A fresh-connect miss can never hit this; only a pool hit can.</p>
+
+  <h3>What the first draft did wrong</h3>
+  <p>The original code structured the retry loop around <code>TcpStream::connect</code> only. A pool hit <strong>broke out of that loop immediately</strong> &mdash; it had a connection, why loop? The first write then happened <em>after</em> the loop, and its failure hit a bare <code>?</code>. That <code>?</code> propagated the <code>io::Error</code> straight past the already-exited retry logic to <code>handle_client</code>'s generic handler &mdash; which just logs and drops the connection. The result for a dead-pooled-connection write failure was <strong>no HTTP response at all</strong>: not a 502, not a 504, nothing. For a case that should have retried on another server exactly like a failed connect already did.</p>
+  <div class="callout danger"><strong>Why every per-task review passed:</strong> each of the six tasks was reviewed on its own diff, and each was correct <em>in isolation</em>. The pool code (Task 1) was right. The wiring (Task 5) was right. The retry loop (pre-existing) was right. The bug only existed in the <em>seam</em>: pool-hit-breaks-loop composed with first-write-hits-bare-<code>?</code> composed with the generic handler dropping silently. A reviewer who only ever sees one task's diff at a time is structurally blind to it. It took a <strong>whole-branch review</strong> &mdash; the most capable model reading all six task-diffs as one composed feature &mdash; to see it, and the finding was confirmed by re-reading the actual source before dispatching a fix, not by trusting the reviewer's report.</div>
+
+  <h3>The fix, and its exact scope</h3>
+  <p>The fix is the <a href="#serialize">serialize-once structure above</a>: extend the acquire loop so the head-write lives <em>inside</em> it, and a write failure on either a pooled or a freshly-dialed connection is handled identically to a connect failure &mdash; <code>mark_failure</code>, log, retry-or-502. The scope is surgical: retry covers <strong>only the head-write</strong>, never body-streaming or flush, because a body byte reaching a backend commits a possibly non-idempotent side effect that can never be replayed. The non-idempotent rewrite was moved above the loop precisely so the identical <code>head_bytes</code> could be re-written on retry without double-appending X-Forwarded-For.</p>
+  <div class="callout story"><strong>Live-verified with a poisoned socket:</strong> a pooled connection was deliberately killed with a TCP RST (via <code>SO_LINGER</code>). An idempotent <strong>GET</strong> drawing that dead connection produced a <code>write failed</code> log line and a transparent retry to a healthy backend &mdash; the client saw <strong>200</strong>. A non-idempotent <strong>POST</strong> in the same situation correctly got <strong>502 with no replay</strong>. The review also swept up four stale "dead until Task 5" comments left behind when Task 5 removed the <code>#[allow(dead_code)]</code> attributes they were justifying. Scoped re-review verdict: <em>ADDRESSED, no new findings.</em></div>
+  <p>The lesson, recorded in PROGRESS.md as the explicit reason a whole-branch review is worth its cost: <strong>cross-task composition bugs are structurally invisible to a reviewer who only ever sees one task's diff at a time.</strong></p>
+</section>
+
+<section id="theory">
+  <h2>Theory, Documented Not Built</h2>
+  <p class="lead">Four of Build.md's Level 7 items are the kind the KB frames as explanation, not code &mdash; handled the same way Levels 5/6 handled their explain-only sections.</p>
+  <div class="grid2">
+    <div class="card">
+      <span class="tag tech">Explained</span>
+      <h4>Async worker model</h4>
+      <p>Level 1 <em>already</em> built task-per-connection on Tokio. Level 7 documents <em>why</em> it sidesteps C10K &mdash; no per-connection thread, no per-connection stack-sized memory cost &mdash; versus Nginx's process+epoll model, and why Rust+Tokio gives event-driven behavior with task-shaped ergonomics instead of raw callback/epoll code. No model change.</p>
+    </div>
+    <div class="card">
+      <span class="tag tech">Explained</span>
+      <h4>Zero-copy (<code>splice</code>/<code>sendfile</code>)</h4>
+      <p>Explained with the KB's own caveat: an L7 proxy mostly can't use it for headers (it must inspect them), and it needs measurement first. No unsafe syscalls added &mdash; there is no benchmark yet showing <code>Conn::copy_body_to</code> is the bottleneck, and building for an unmeasured problem is the "measure, don't guess" mistake.</p>
+    </div>
+    <div class="card">
+      <span class="tag tech">Worked example</span>
+      <h4>Lock contention</h4>
+      <p>Explained using <em>this level's own pool</em> as the example rather than an abstract discussion: sharding per-<code>Server</code> versus one global <code>Mutex&lt;HashMap&lt;Addr, Vec&lt;Idle&gt;&gt;&gt;</code> is exactly the "shard the state" lesson &mdash; a busy backend's pool traffic never serializes behind an unrelated backend's, because they're different mutexes.</p>
+    </div>
+    <div class="card">
+      <span class="tag beg">Verified, not built</span>
+      <h4>Request pipelining</h4>
+      <p><code>Conn::read_head</code>'s buffering already carries bytes past one request's boundary into the next (Level 1's <code>preserves_pipelined_bytes_after_head</code>). Level 7 re-verified this holds with pooling active &mdash; a pooled connection's buffer must not leak a prior exchange's bytes (condition 5). No backend-leg pipelining exists and none was added.</p>
+    </div>
+  </div>
+  <p>Buffer reuse is likewise a <em>consequence</em> of the design, not separate work: because <code>PooledConn</code> holds a whole <code>Conn&lt;TcpStream&gt;</code> &mdash; the struct that already owns the read buffer &mdash; reusing the connection reuses the buffer automatically. The per-connection memory model shifts from <code>requests &times; buffers</code> under sustained keep-alive load toward <code>min(pool occupancy, historical concurrency) &times; buffers</code>: <strong>fewer allocations per request, not a smaller peak</strong> (the pool is still bounded per server by <code>POOL_MAX_IDLE</code>, so worst-case memory is unchanged). A standalone buffer-pool abstraction would have had to reimplement exactly this life-cycle by hand.</p>
+</section>
+
+<section id="code-map">
+  <h2>Code Map</h2>
+  <p>What Level 7 added or changed, verified against <code>rproxy/src/</code>. No new modules &mdash; one new field on <code>Server</code>, two new methods on <code>Lease</code>, a new predicate and timeout in <code>proxy.rs</code>, three CLI flags in <code>main.rs</code>.</p>
+  <table>
+    <thead><tr><th>File / item</th><th>Kind</th><th>Responsibility</th></tr></thead>
+    <tbody>
+      <tr><td><code>balancer.rs</code> &middot; <code>Server.idle</code> + <code>PooledConn</code></td><td>new</td><td>Per-server bounded LIFO idle stack, <code>Mutex&lt;Vec&lt;PooledConn&gt;&gt;</code>; each entry carries <code>idle_since: Instant</code>.</td></tr>
+      <tr><td><code>balancer.rs</code> &middot; <code>Server::take_conn</code> / <code>return_conn</code></td><td>new</td><td>Private pool ops: pop-newest-live (discarding stale), push bounded at <code>max_idle</code> (dropping the newest on overflow).</td></tr>
+      <tr><td><code>balancer.rs</code> &middot; <code>Lease::take_conn</code> / <code>return_conn</code></td><td>new</td><td>Public forwarding methods on the existing per-exchange RAII lease.</td></tr>
+      <tr><td><code>balancer.rs</code> &middot; <code>POOL_MAX_IDLE</code> / <code>POOL_IDLE_TIMEOUT</code> / <code>PoolConfig</code></td><td>new</td><td>Defaults (4, 60s) and the config struct threaded through <code>Upstream::build</code>/<code>from_spec_with_health</code> like <code>HealthConfig</code>.</td></tr>
+      <tr><td><code>proxy.rs</code> &middot; <code>is_poolable</code></td><td>new</td><td>Pure five-condition predicate over plain values; can't be misused to read fields late.</td></tr>
+      <tr><td><code>proxy.rs</code> &middot; <code>Conn::buffer_is_empty</code></td><td>new</td><td>One-line read of private <code>filled == 0</code> for poolability condition 5.</td></tr>
+      <tr><td><code>proxy.rs</code> &middot; <code>DEFAULT_BACKEND_RESPONSE_TIMEOUT</code></td><td>new</td><td>30s default for the response-head deadline.</td></tr>
+      <tr><td><code>proxy.rs</code> &middot; <code>serve_one</code> acquire loop</td><td>changed</td><td>Rewrite-once above the loop; pool-hit-else-dial fork; head-write retries like connect; response-head timeout; capture <code>backend_sent_close</code>/<code>backend_is_http11</code> pre-rewrite; <code>return_conn</code> on the poolable success path.</td></tr>
+      <tr><td><code>main.rs</code> &middot; <code>--pool-max-idle</code> / <code>--pool-idle-timeout</code> / <code>--backend-timeout</code></td><td>new</td><td>Three global CLI flags following the <code>--hc-*</code> pattern; parsed into <code>PoolConfig</code> and <code>backend_timeout</code>.</td></tr>
+    </tbody>
+  </table>
+  <p class="muted">Test count moved 152 &rarr; 168 (+16): LIFO/cap/idle-timeout mechanics, the predicate's five independent conditions, the buffer-drain guard, the configured-vs-default pool bound, a write-failure-retries-like-connect test, and a multi-threaded concurrency test.</p>
+</section>
+
+<section id="industry">
+  <h2>How the Industry Does It</h2>
+  <p>Backend connection reuse is table stakes for every production proxy; the interesting part is which trade-offs each took. Ferrum is a teaching build &mdash; a per-<code>Server</code> <code>Vec</code> with a single mutex is deliberately crude next to a decade-hardened keep-alive subsystem. As of the mid-2020s:</p>
+  <table>
+    <thead><tr><th>Concern</th><th>nginx</th><th>Apache httpd</th><th>HAProxy</th><th>Envoy</th><th>Ferrum</th></tr></thead>
+    <tbody>
+      <tr><td>Backend keep-alive</td><td><code>keepalive</code> in <code>upstream{}</code> (per-worker idle cache)</td><td><code>mod_proxy</code> reuse (<code>ttl</code>, <code>max</code>)</td><td><code>http-reuse</code> (never/safe/aggressive/always)</td><td>connection pool per cluster, HTTP/1 &amp; HTTP/2</td><td><strong>per-<code>Server</code> bounded LIFO <code>Vec</code></strong></td></tr>
+      <tr><td>Idle eviction</td><td>idle timeout, per-worker</td><td><code>ttl</code></td><td>idle-timeout + pool-purge</td><td>idle timeout, active sweep</td><td><strong>lazy on take, no sweeper</strong></td></tr>
+      <tr><td>Pool sizing</td><td><code>keepalive N</code> per worker</td><td><code>max=</code></td><td>dynamic, per-server</td><td>circuit-breaker max-connections</td><td><strong><code>POOL_MAX_IDLE</code> = 4, per server</strong></td></tr>
+      <tr><td>Response timeout</td><td><code>proxy_read_timeout</code></td><td><code>ProxyTimeout</code></td><td><code>timeout server</code></td><td>per-route timeout</td><td><strong><code>--backend-timeout</code>, head only</strong></td></tr>
+      <tr><td>Dead-conn on reuse</td><td>reconnect transparently</td><td>retry per <code>mod_proxy</code></td><td><code>http-reuse safe</code> retries idempotent</td><td>retry policy</td><td><strong>retry head-write like a connect fail (idempotent only)</strong></td></tr>
+      <tr><td>Multiplexing</td><td>HTTP/2 &amp; HTTP/3 upstream</td><td>HTTP/2 proxy</td><td>HTTP/2 backend</td><td>full HTTP/2/3 mux</td><td><strong>HTTP/1.1 only, one req/checkout</strong></td></tr>
+    </tbody>
+  </table>
+  <p>The honest contrasts:</p>
+  <ul>
+    <li><strong>Ours is a single <code>Vec</code> behind one mutex per server.</strong> HAProxy's <code>http-reuse</code> has four graded modes and tracks per-server pool health with far more nuance; Envoy's cluster connection pools integrate with its circuit breakers and support HTTP/2 multiplexing, where one connection carries many concurrent streams. Ferrum sends exactly one request per checkout and waits &mdash; no multiplexing at all.</li>
+    <li><strong>Lazy eviction is a genuine simplification, not just a shortcut.</strong> The incumbents run active idle sweeps; Ferrum pays nothing until a <code>take_conn</code> walks past a stale entry. For a teaching build with modest pools that is the right trade &mdash; but at very large idle-pool sizes an active sweep reclaims sockets sooner, which matters for the backend's own connection budget.</li>
+    <li><strong>The dead-connection-on-reuse handling is the one place Ferrum is genuinely careful.</strong> HAProxy's <code>http-reuse safe</code> makes the same distinction Ferrum landed on the hard way: only idempotent requests may be transparently retried on a connection that turns out dead. Ferrum arrived there via a whole-branch review of a real silent-failure bug &mdash; the incumbents encoded it as a config knob years ago.</li>
+    <li><strong>HTTP/1.1-only is the ceiling.</strong> Every incumbent multiplexes over HTTP/2 (or /3) to backends, amortizing far more setup than keep-alive alone. Ferrum's pool is the HTTP/1.1 answer &mdash; the right first lesson, and explicitly not the last word.</li>
+  </ul>
+</section>
+
+<section id="quiz">
+  <h2>Quiz</h2>
+  <p class="muted">Copied verbatim from PROGRESS.md &mdash; <code>### Level 7 quiz &mdash; Vessey to answer before Level 8</code>. Answers are Vessey's to fill in.</p>
+  <div class="qa">
+  <ol class="flow">
+    <li>The poolability predicate needed a fifth condition beyond the four the client-leg keep-alive check already makes. What is it, and why does the backend leg need it when the client leg doesn't?</li>
+    <li>Two of the five poolability conditions had to be captured <em>before</em> certain lines in <code>serve_one</code>, not read at the point where <code>return_conn</code> is called. Which two, and what specifically would go wrong reading them late?</li>
+    <li>Why does <code>Server::return_conn</code> drop the <em>new</em> connection past the size cap instead of evicting an older one?</li>
+    <li>Why is there no background task sweeping idle connections for staleness? What would such a task cost that the lazy check avoids?</li>
+    <li><code>Server.idle</code> uses <code>std::sync::Mutex</code>, not <code>tokio::sync::Mutex</code>. What property of <code>take_conn</code>/<code>return_conn</code> makes that correct?</li>
+    <li>The pool is per-<code>Server</code>, not per-<code>Upstream</code> or global. Explain the lock-contention argument for that choice concretely &mdash; what would a single global pool mutex cost under load that per-server pools don't?</li>
+    <li>Changing the backend's <code>Connection</code> header from <code>close</code> to <code>keep-alive</code> was necessary but not sufficient for pooling to work. What's the second, independent thing that has to be true for a connection to actually get reused?</li>
+    <li><code>BACKEND_RESPONSE_TIMEOUT</code> only wraps the response-head read, not the body. Why is bounding total-transfer time out of scope for this timeout specifically?</li>
+    <li>A write to a pooled connection can still fail (the backend closed it between our idle check and our write). How does that failure get handled &mdash; does it need its own retry-budget category?</li>
+    <li>Why does storing a whole <code>Conn&lt;TcpStream&gt;</code> in the pool (not just the raw socket) give buffer reuse "for free," and what would a separate buffer-pool abstraction have needed to reimplement?</li>
+  </ol>
+  </div>
+</section>
+
+<section id="cheatsheet">
+  <h2>Cheat Sheet &amp; Glossary</h2>
+
+  <h3>Constants, defaults, and flags</h3>
+  <table>
+    <thead><tr><th>Name</th><th>Value</th><th>Where</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>POOL_MAX_IDLE</code></td><td>4</td><td><code>balancer.rs</code></td><td>Max idle connections kept per server; the newest is dropped on overflow.</td></tr>
+      <tr><td><code>POOL_IDLE_TIMEOUT</code></td><td>60s</td><td><code>balancer.rs</code></td><td>Max idle age; a stale entry is discarded lazily by the next <code>take_conn</code>.</td></tr>
+      <tr><td><code>DEFAULT_BACKEND_RESPONSE_TIMEOUT</code></td><td>30s</td><td><code>proxy.rs</code></td><td>Deadline on the response-<em>head</em> read; on expiry, 504 + <code>mark_failure()</code>.</td></tr>
+      <tr><td><code>BACKEND_CONNECT_TIMEOUT</code></td><td>5s</td><td><code>proxy.rs</code></td><td>Existing dial deadline; skipped entirely on a pool hit.</td></tr>
+      <tr><td><code>HEAD_READ_TIMEOUT</code></td><td>30s</td><td><code>proxy.rs</code></td><td>Existing client-head deadline (Level 1); unchanged here.</td></tr>
+      <tr><td><code>MAX_RETRIES</code></td><td>2</td><td><code>proxy.rs</code></td><td>One shared budget covering both connect and head-write failures; no separate pooled-retry category.</td></tr>
+      <tr><td>504</td><td>Gateway Timeout</td><td><code>proxy.rs</code></td><td>Backend accepted but did not answer within the response timeout.</td></tr>
+      <tr><td>502</td><td>Bad Gateway</td><td><code>proxy.rs</code></td><td>Connect or head-write failed and retries are exhausted / not allowed.</td></tr>
+    </tbody>
+  </table>
+  <h4>CLI flags added</h4>
+  <table>
+    <thead><tr><th>Flag</th><th>Default</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>--pool-max-idle N</code></td><td>4</td><td>Idle connections kept per server.</td></tr>
+      <tr><td><code>--pool-idle-timeout DUR</code></td><td>60s</td><td>Idle bound before a pooled connection is discarded on next take.</td></tr>
+      <tr><td><code>--backend-timeout DUR</code></td><td>30s</td><td>Response-head (time-to-first-byte) deadline; not total transfer time.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Glossary</h3>
+  <dl>
+    <p><strong>Connection pool</strong> &mdash; a cache of live backend sockets kept open between requests so the next request skips the TCP handshake. Here: a bounded LIFO <code>Vec</code> per <code>Server</code>.</p>
+    <p><strong>LIFO (last-in, first-out)</strong> &mdash; the pool hands out the most-recently-returned connection first, keeping the warmest socket in play and letting cold ones age out; minimizes the reuse-a-dead-socket window.</p>
+    <p><strong>Lazy eviction</strong> &mdash; no background sweeper; a stale connection is discarded only when <code>take_conn</code> walks past it. "Nobody pays until somebody looks."</p>
+    <p><strong>Poolability</strong> &mdash; the five-condition predicate deciding whether a finished exchange's connection may be reused: not <code>UntilClose</code>, no backend <code>close</code>, HTTP/1.1, no error, drained buffer.</p>
+    <p><strong>Keep-alive</strong> &mdash; HTTP/1.1's persistent-connection mechanism; the backend leg now asks for it (<code>Connection: keep-alive</code>) so a socket becomes a pooling candidate.</p>
+    <p><strong>Idempotent method</strong> &mdash; a request safe to replay (GET, HEAD, PUT, DELETE&hellip;); only these may be retried after a connect or head-write failure. POST is not.</p>
+    <p><strong>TOCTOU</strong> &mdash; time-of-check to time-of-use; the race where a pooled socket passes the idle-age check and then turns out dead on the first write. The level's central bug.</p>
+    <p><strong>Time-to-first-byte</strong> &mdash; the interval from sending the request to receiving the first byte of the response head; the only thing <code>BACKEND_RESPONSE_TIMEOUT</code> bounds.</p>
+    <p><strong><code>Conn&lt;S&gt;</code></strong> &mdash; the connection wrapper owning a stream and its read buffer; pooling the whole <code>Conn</code> (not the raw socket) is what gives buffer reuse for free.</p>
+    <p><strong>RAII / <code>Lease</code></strong> &mdash; tie resource release to scope end; <code>Lease</code> already fed inflight/breaker on <code>Drop</code>, and now carries the two pool methods.</p>
+    <p><strong>Whole-branch review</strong> &mdash; reviewing all task diffs together as one composed feature; the only review that could catch this level's cross-task composition bug.</p>
+  </dl>
+</section>
+</main>
+</div>
+
+<footer>
+  <p>Ferrum &mdash; Level 7: Performance &bull; Knowledge Base &bull; Built 2026-09-02</p>
+  <p class="muted">A teaching reverse proxy in Rust. Grounded in <code>rproxy/src/</code>, PROGRESS.md, and the Level 7 design spec (<code>2026-08-10-level-7-performance-design.md</code>). Industry comparisons are the author's own knowledge of nginx/httpd/HAProxy/Envoy, qualified where uncertain.</p>
+</footer>
+</body>
+</html>

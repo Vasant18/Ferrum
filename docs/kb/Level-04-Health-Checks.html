@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ferrum KB — Level 4: Health Checks</title>
+<meta name="description" content="A complete, plain-English map of the Barracuda Networks product portfolio: every product family (Email, Application, Network, Data Protection, Managed XDR, MSP) and the BarracudaONE platform — what each product is, what it does, and what problem it solves." />
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    flowchart: { htmlLabels: true, useMaxWidth: true, padding: 12, nodeSpacing: 55, rankSpacing: 55 },
+    startOnLoad: true, theme: 'base', securityLevel: 'loose',
+    themeVariables: {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '15px',
+      primaryColor: '#e7e8ea', primaryTextColor: '#15203a', primaryBorderColor: '#7e848c',
+      lineColor: '#6a6f77', secondaryColor: '#dddfe2', tertiaryColor: '#f3f4f6',
+      noteBkgColor: '#fff3d6', noteTextColor: '#3a2f12', noteBorderColor: '#caa84a',
+      actorBkg: '#e7e8ea', actorTextColor: '#15203a', actorBorder: '#7e848c',
+      clusterBkg: '#eef0f2', clusterBorder: '#a0a4aa'
+    }
+  });
+</script>
+<style>
+  :root{--bg:#0f1320;--panel:#161c2e;--panel-2:#1d2540;--ink:#e8ecf5;--muted:#9aa6c4;--accent:#7c5cff;--accent-2:#22d3a6;--warn:#ffb454;--danger:#ff6b81;--line:#2a3354;--code-bg:#0b0f1a;--max:1100px;}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:linear-gradient(180deg,#0c1020,#0f1320 40%);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  a{color:var(--accent-2);text-decoration:none}a:hover{text-decoration:underline}
+  header.hero{padding:56px 24px 40px;text-align:center;background:radial-gradient(1200px 400px at 50% -10%,rgba(255,107,129,.18),transparent 60%);border-bottom:1px solid var(--line);}
+  header.hero .eyebrow{letter-spacing:.25em;text-transform:uppercase;color:var(--accent-2);font-size:.75rem;font-weight:700}
+  header.hero h1{font-size:clamp(1.9rem,4vw,3rem);margin:.3em 0 .2em;line-height:1.1}
+  header.hero p.sub{color:var(--muted);max-width:790px;margin:0 auto;font-size:1.05rem}
+  .badges{margin-top:18px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .badge{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);padding:4px 12px;border-radius:999px;font-size:.8rem}
+  .layout{display:grid;grid-template-columns:260px 1fr;gap:32px;align-items:start;max-width:1320px;margin:0 auto;padding:0 22px}
+  nav.toc{position:sticky;top:0;max-height:100vh;overflow:auto;padding:28px 10px 60px;border-right:1px solid var(--line);font-size:.9rem;}
+  nav.toc h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.18em;color:var(--muted);margin:18px 8px 6px}
+  nav.toc a{display:block;color:var(--muted);padding:5px 10px;border-radius:8px;border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--panel);color:var(--ink);text-decoration:none;border-left-color:var(--accent)}
+  main{padding:34px 0 80px;min-width:0}
+  section{margin:0 0 46px;scroll-margin-top:18px}
+  section>h2{font-size:1.7rem;margin:0 0 .5em;padding-bottom:.3em;border-bottom:2px solid var(--line);display:flex;align-items:center;gap:.5em;}
+  h3{font-size:1.25rem;margin:1.6em 0 .4em;color:#fff}
+  h4{font-size:1.02rem;margin:1.2em 0 .3em;color:var(--accent-2);text-transform:uppercase;letter-spacing:.04em}
+  p,li{color:var(--ink)}.muted{color:var(--muted)}
+  article.concept{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin:22px 0}
+  article.concept>h3:first-child{margin-top:0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr} .layout{grid-template-columns:1fr} nav.toc{position:static;max-height:none;border-right:none;border-bottom:1px solid var(--line)}}
+  .card{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card h4{margin-top:.2em}
+  .callout{border-left:4px solid var(--accent);background:var(--panel-2);padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  .callout.analogy{border-left-color:var(--accent-2)}.callout.warn{border-left-color:var(--warn)}.callout.danger{border-left-color:var(--danger)}.callout.story{border-left-color:#5ec2ff}
+  .tag{display:inline-block;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:2px 8px;border-radius:6px;margin-bottom:6px}
+  .tag.beg{background:rgba(34,211,166,.15);color:var(--accent-2)}.tag.tech{background:rgba(124,92,255,.18);color:#b9a6ff}.tag.adv{background:rgba(255,107,129,.15);color:var(--danger)}
+  code{background:var(--code-bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.86em;color:#ffd9a0}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.85rem;line-height:1.55}
+  pre code{background:none;border:none;padding:0;color:#d7e0f5}
+  pre.art{color:#ffd9a0;font-size:.95rem;line-height:1.4;letter-spacing:.04em}
+  pre.mermaid{background:#f7f8fc;color:#111;text-align:center}
+  .mermaid svg text,.mermaid text{fill:#15203a !important}
+  .mermaid .nodeLabel,.mermaid .edgeLabel,.mermaid .label,.mermaid span,.mermaid p,.mermaid div,.mermaid foreignObject *{color:#15203a !important;fill:#15203a !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p{background:#f3f5fc !important}
+  .mermaid .cluster-label .nodeLabel,.mermaid .cluster-label p,.mermaid .cluster span,.mermaid .cluster p{color:#3c4046 !important}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.92rem;overflow:hidden;border-radius:10px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel-2);color:#fff}
+  tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  details{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:12px 0}
+  details summary{cursor:pointer;font-weight:600;color:var(--accent-2);padding:6px 0}
+  details[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px}
+  figure{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  figcaption{color:var(--muted);font-size:.85rem;text-align:center;margin-top:8px;font-style:italic}
+  .qa{margin:10px 0}.qa .q{font-weight:600}.qa .a{color:var(--muted);margin:2px 0 0}
+  ol.flow{counter-reset:step;list-style:none;padding-left:0}
+  ol.flow>li{counter-increment:step;position:relative;padding:10px 0 10px 52px;border-bottom:1px dashed var(--line)}
+  ol.flow>li::before{content:counter(step);position:absolute;left:0;top:8px;width:34px;height:34px;background:var(--accent);color:#fff;border-radius:50%;display:grid;place-items:center;font-weight:700}
+  .rank{font-weight:800;color:var(--accent);margin-right:6px}
+  footer{border-top:1px solid var(--line);padding:30px 22px;text-align:center;color:var(--muted);font-size:.88rem}
+  .lead{font-size:1.08rem}
+  .formula{background:var(--code-bg);border:1px dashed var(--accent);border-radius:10px;padding:12px 16px;font-family:monospace;color:#ffd9a0;text-align:center;margin:14px 0}
+
+  /* KB-THEME START */
+  /* Azure (blue palette) */
+  :root{--bg:#0e1c30;--panel:#152740;--panel-2:#1d3458;--ink:#e6edf7;--muted:#93a6c4;--accent:#1a8ae5;--accent-2:#41a7f5;--warn:#d6a96a;--danger:#d98a8a;--line:#264064;--code-bg:#0b1626;}
+  body{background:linear-gradient(180deg,var(--bg),var(--bg))}
+  header.hero{background:radial-gradient(1100px 400px at 50% -10%,rgba(20,119,210,.26),transparent 60%)}
+  h3,.parthead{color:var(--ink)}
+  th{color:var(--ink)}
+  .tag.tech{background:rgba(65,167,245,.16);color:var(--accent-2)}
+  ol.flow>li::before{color:#0b1626}
+  /* KB-THEME END */
+  /* prevent node/edge label clipping */
+  .mermaid foreignObject{overflow:visible !important}
+  .mermaid .nodeLabel,.mermaid .label,.mermaid foreignObject>div,.mermaid foreignObject span,.mermaid foreignObject p{white-space:nowrap !important;overflow:visible !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p,.mermaid .edgeLabel span{white-space:nowrap !important;overflow:visible !important;padding:1px 4px}
+  .mermaid svg{max-width:100%;height:auto}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyebrow">Ferrum KB &middot; Level 4 of 14 &middot; Health Checks</div>
+  <h1>Health Checks<br/><span style="font-size:.6em;color:var(--muted)">One circuit breaker per server, fed from two directions</span></h1>
+  <p class="sub">Level 4 stops sending traffic to backends that are down, routes around them automatically, and lets them rejoin once they recover &mdash; with no manual intervention. Seven Build.md items (active checks, passive checks, retries, exponential backoff, circuit breaker, failure detection, recovery) collapse into <em>one</em> three-state breaker per server, grounded in <code>balancer.rs</code>, <code>health.rs</code>, and <code>proxy.rs</code>.</p>
+  <div class="badges">
+    <span class="badge">Audience: Vessey (built it) + curious engineers</span>
+    <span class="badge">Scope: balancer.rs / health.rs / proxy.rs</span>
+    <span class="badge">Reading time: ~22 min</span>
+  </div>
+  <p class="muted" style="margin-top:18px">
+    <a href="index.html">&larr; Course index</a>
+    &nbsp;&middot;&nbsp; <a href="Level-03-Load-Balancing.html">&larr; Level 3: Load Balancing</a>
+    &nbsp;&middot;&nbsp; <a href="Level-05-Proxy-Headers.html">Level 5: Proxy Headers &rarr;</a>
+  </p>
+</header>
+
+<div class="layout">
+<nav class="toc">
+  <h2>Orientation</h2>
+  <a href="#exec-summary">Executive Summary</a>
+  <a href="#big-picture">The Big Picture</a>
+  <h2>Core</h2>
+  <a href="#breaker">The Circuit Breaker</a>
+  <a href="#feeds">Passive &amp; Active Feeds</a>
+  <a href="#backoff">Exponential Backoff</a>
+  <a href="#prober">The Active Prober</a>
+  <a href="#retry">The Retry Loop</a>
+  <a href="#deadlock">The HalfOpen Deadlock Bug</a>
+  <a href="#code-map">Code Map</a>
+  <h2>Compare</h2>
+  <a href="#industry">Industry Comparison</a>
+  <h2>Reference</h2>
+  <a href="#quiz">Quiz</a>
+  <a href="#cheatsheet">Cheat Sheet &amp; Glossary</a>
+</nav>
+
+<main>
+
+<section id="exec-summary">
+  <h2>Executive Summary</h2>
+  <p class="lead">Level 3 left a deliberate seam: <code>Server::available()</code> was hardcoded <code>true</code> but already consulted by every selection branch. Level 4 fills that seam with a real circuit breaker &mdash; and ejection "just worked" with zero changes to the <code>select</code> logic.</p>
+  <p>The insight that shapes the whole level: active checks, passive checks, failure detection, recovery, circuit breaking, and backoff are <strong>not seven independent features</strong>. They are facets of <em>one circuit breaker per server</em>. Failure detection and recovery are its transitions; the breaker <em>is</em> the circuit breaker; backoff paces its recovery attempts; and active/passive checks are just two feeders of the same success/failure signal. Only <strong>retry</strong> is genuinely separate &mdash; it acts on the breaker's verdict.</p>
+  <p>The <code>Breaker</code> (in <code>balancer.rs</code>) is a three-state machine: <strong>Closed</strong> (serving), <strong>Open</strong> (tripped, cooling down), <strong>HalfOpen</strong> (exactly one recovery trial outstanding). It is pure sync &mdash; all <code>Relaxed</code> atomics, every method takes an injected <code>now: Instant</code> &mdash; so it unit-tests without sockets or sleeping, the same discipline that kept Level 3's algorithms testable.</p>
+  <p>Two feeds pour into the <em>same</em> breaker counters via <code>Server::record_success</code> / <code>record_failure</code>. <strong>Passive</strong>: real client exchanges, scored on <code>Lease</code> drop. <strong>Active</strong>: a background prober in <code>health.rs</code>, one task per upstream, issuing <code>GET /health</code>. Neither feed knows the other exists, so a trafficked server trips from client failures without waiting for a probe, and an idle server still recovers via probes &mdash; each feed covers the other's blind spot.</p>
+  <p>The <strong>retry loop</strong> in <code>proxy.rs</code> makes a dead backend invisible to clients. It re-picks on connect failure, but only when three gates all hold: attempts remain (cap <code>MAX_RETRIES = 2</code>), the method is idempotent, and no request-body bytes have been forwarded yet. <strong>Exponential backoff</strong> starts at 1s, doubles on each failed HalfOpen trial, caps at 30s, and resets to base on recovery.</p>
+  <p>Building this surfaced a <strong>real bug</strong>: with the default <code>success_threshold = 2</code>, active-only recovery deadlocked. <code>probe_due</code> returned <code>None</code> for HalfOpen after the single admitted trial, so <code>consec_success</code> froze at 1 &mdash; and because clients are blocked in HalfOpen too, no passive success could finish the job. The fix and its regression test are covered in full below. 72 unit tests pass; ejection, recovery, retry, and the cap were all live-verified against Python backends with default config.</p>
+  <p>This is a teaching build. The breaker is strictly per-server and threshold-based &mdash; no outlier detection across the pool, no configurable per-request retry budgets, no hedged requests. Those honest limits are part of the lesson.</p>
+</section>
+
+<section id="big-picture">
+  <h2>The Big Picture</h2>
+  <p class="lead">Level 4 does not add a new stage to the request path so much as make an existing one <em>honest</em>: the <code>pick()</code> step now genuinely excludes dead servers, and a new retry loop wraps the connect step.</p>
+  <p>In Level 3, <code>upstream.pick()</code> returned a <code>Lease</code> and the proxy connected to <code>lease.addr()</code> exactly once; a connect failure meant a 502. Level 4 keeps that shape but adds two things around it: <code>pick()</code>'s selection now skips any server whose breaker is not <code>Closed</code>, and a <em>retry loop</em> re-picks on connect failure. Off to the side, a background prober task feeds each server's breaker independently of any client request.</p>
+  <figure>
+<pre class="mermaid">
+flowchart LR
+  C["Client"] --> A["Accept + parse<br/>(Level 1)"]
+  A --> R["Route match<br/>(Level 2)"]
+  R --> P["pick(client_ip)<br/>skips breaker != Closed<br/>Level 3 seam, now real"]
+  P --> K["connect(lease.addr())"]
+  K -->|"connect fail + gates"| P
+  K -->|"ok"| F["Forward + stream response"]
+  F --> D["Drop lease:<br/>mark_success / mark_failure<br/>(passive feed) — THIS LEVEL"]
+  D --> C
+  HP["health.rs prober task<br/>GET /health — THIS LEVEL"] -.->|"active feed"| BR["Breaker<br/>(per Server)"]
+  D -.->|"passive feed"| BR
+  BR -.->|"allows_traffic()"| P
+  style P fill:#1a8ae5,color:#fff,stroke:#0b1626
+  style BR fill:#1a8ae5,color:#fff,stroke:#0b1626
+  style HP fill:#bcd8f5,stroke:#0b1626
+  style D fill:#bcd8f5,stroke:#0b1626
+</pre>
+<figcaption>Where Level 4 lives. The breaker (center) is the single source of truth; the prober and the lease-drop both feed it, and <code>pick()</code> reads its verdict. The dashed loop from <code>connect</code> back to <code>pick</code> is the retry.</figcaption>
+  </figure>
+  <div class="callout analogy">
+    <strong>Analogy:</strong> think of each backend as a circuit in your house. Under a fault, the breaker <em>trips</em> (Open) &mdash; not because someone flipped it, but because too much current flowed. You don't immediately shove it back on; you wait, then flip it <em>halfway</em> and watch (HalfOpen). If the light stays on for a beat, you commit it fully (Closed). If it sparks again, back off &mdash; and wait <em>longer</em> this time. The prober is the person testing the switch; the client traffic is the current the breaker was protecting.
+  </div>
+</section>
+
+<section id="breaker">
+  <h2>The Circuit Breaker</h2>
+  <p class="lead">One <code>Breaker</code> per <code>Server</code>. Three states, one source of truth. It is pure sync &mdash; no sockets, no async, no sleeping &mdash; so every transition is a unit test.</p>
+
+  <article class="concept">
+    <h3>What it is</h3>
+    <p>A <strong>circuit breaker</strong> is a small state machine that sits in front of a resource and decides, cheaply, whether to let a request through. <code>Closed</code> means "healthy, serve traffic." Too many consecutive failures <em>trip</em> it to <code>Open</code> ("stop &mdash; give it a rest"). After a cooldown, it moves to <code>HalfOpen</code> and lets exactly one trial through; if the trial (and enough after it) succeeds, it closes again; if the trial fails, it re-opens and waits longer.</p>
+    <p>In our code the states are a plain enum backed by an <code>AtomicU8</code> (<code>Closed=0</code>, <code>Open=1</code>, <code>HalfOpen=2</code>) in <code>balancer.rs</code>. The name "Closed = healthy" trips people up &mdash; it is the electrical-circuit convention: a <em>closed</em> circuit conducts, an <em>open</em> one is broken.</p>
+  </article>
+
+  <figure>
+<pre class="mermaid">
+stateDiagram-v2
+  [*] --> Closed
+  Closed --> Open : record_failure x fail_threshold (3)<br/>consecutive — arm cooldown
+  Closed --> Closed : record_success<br/>(clears consec_fail)
+  Open --> HalfOpen : probe_due and now >= open_until<br/>admit one HalfOpenTrial
+  Open --> Open : now &lt; open_until<br/>(still cooling — probe_due None)
+  HalfOpen --> Closed : record_success x success_threshold (2)<br/>reset backoff to base
+  HalfOpen --> Open : record_failure (one)<br/>backoff = min(backoff x 2, max)
+  note right of Closed
+    allows_traffic() = true
+    ONLY here. Clients are
+    blocked in Open AND HalfOpen.
+  end note
+</pre>
+<figcaption>The <code>Breaker</code> state machine (<code>balancer.rs</code>). <code>allows_traffic()</code> is <code>true</code> only in <code>Closed</code>: client traffic resumes only after the prober <em>confirms</em> recovery, never speculatively.</figcaption>
+  </figure>
+
+  <article class="concept">
+    <h3>State representation &mdash; interior mutability, <code>&amp;self</code> throughout</h3>
+    <p>Every field is an interior-mutable atomic, so all methods take <code>&amp;self</code> (the breaker is shared behind an <code>Arc&lt;Upstream&gt;</code> and mutated concurrently by many request tasks plus the prober). From <code>balancer.rs</code>:</p>
+    <ul>
+      <li><code>state: AtomicU8</code> &mdash; the current state.</li>
+      <li><code>open_until_nanos: AtomicU64</code> &mdash; when the Open cooldown ends, as nanoseconds since a process-start <code>Instant</code> baseline (the same baseline trick Level 3 used for its PRNG seed). The prober reads this to answer "is this server due?"</li>
+      <li><code>backoff_nanos: AtomicU64</code> &mdash; the current cooldown length; doubles on each failed trial, capped at <code>backoff_max</code>, reset to <code>backoff_base</code> on recovery.</li>
+      <li><code>consec_fail: AtomicUsize</code>, <code>consec_success: AtomicUsize</code> &mdash; consecutive counters, each zeroed by the opposite outcome.</li>
+    </ul>
+    <div class="callout"><strong>Why an injected clock?</strong> Every transition method takes <code>now: Instant</code> rather than calling <code>Instant::now()</code> internally. That is what lets the eight breaker unit tests assert backoff-doubling and cooldown expiry <em>without sleeping</em> &mdash; they just hand the machine a fabricated future <code>Instant</code>. This is the type-of-thing that makes a state machine tractable to test: no wall-clock, no flakiness.</div>
+  </article>
+
+  <article class="concept">
+    <h3>The transitions (the meat)</h3>
+    <p><code>record_failure(now)</code>:</p>
+    <ul>
+      <li><strong>Closed</strong>: <code>consec_fail += 1</code>; when it reaches <code>fail_threshold</code> (default <strong>3</strong>) &rarr; <strong>Open</strong>, arm <code>open_until = now + backoff</code>, zero both counters. This is a <em>fresh trip</em>: it keeps the existing backoff (base), it does not double.</li>
+      <li><strong>HalfOpen</strong>: immediately &rarr; <strong>Open</strong>, <code>backoff = min(backoff*2, max)</code>. A recovery probe just failed, so wait longer.</li>
+      <li><strong>Open</strong>: no-op (already open; the cooldown governs the next attempt).</li>
+    </ul>
+    <p><code>record_success(now)</code>:</p>
+    <ul>
+      <li><strong>HalfOpen</strong>: <code>consec_success += 1</code>; when it reaches <code>success_threshold</code> (default <strong>2</strong>) &rarr; <strong>Closed</strong>, reset backoff to base, zero both counters.</li>
+      <li><strong>Closed</strong>: <code>consec_fail = 0</code> &mdash; a good result clears a partial failure run, so failures must be <em>consecutive</em> to trip.</li>
+      <li><strong>Open</strong>: no-op &mdash; shouldn't happen (traffic is blocked in Open), and we ignore it rather than let a stray success silently un-trip the breaker.</li>
+    </ul>
+    <p><code>allows_traffic() -&gt; bool</code> is simply <code>state == Closed</code>. Because <code>Server::available()</code> now calls it, <strong>every Level 3 selection algorithm already respects it</strong> &mdash; no selection-logic changes were needed.</p>
+    <div class="callout warn"><strong>Watch out:</strong> both transition methods return <code>Option&lt;(BreakerState, BreakerState)&gt;</code> &mdash; <code>Some((from, to))</code> only when a transition actually happened. That is what the caller logs as a one-line state-change message; a no-op returns <code>None</code> and logs nothing.</div>
+  </article>
+
+  <article class="concept">
+    <h3>Design decisions &amp; alternatives rejected</h3>
+    <div class="grid2">
+      <div class="card">
+        <span class="tag tech">Chosen</span>
+        <h4>Per-server, threshold-based</h4>
+        <p>Each server owns its breaker; N consecutive failures trip it. Simple, local, predictable.</p>
+      </div>
+      <div class="card">
+        <span class="tag adv">Rejected</span>
+        <h4>Outlier detection across the pool</h4>
+        <p>Ejecting the statistical outlier (like Envoy) needs cross-server aggregation. Out of scope &mdash; the breaker is strictly per-server.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Chosen</span>
+        <h4><code>Relaxed</code> atomics, no lock</h4>
+        <p>The counters guide a heuristic, not protect data. Two racing <code>record_failure</code> calls may lose an increment &mdash; acceptable: it merely delays a trip by one request.</p>
+      </div>
+      <div class="card">
+        <span class="tag adv">Rejected</span>
+        <h4>A mutex around the breaker</h4>
+        <p>Correctness never depends on the exact count, so a lock would buy nothing but contention on the hot path.</p>
+      </div>
+    </div>
+  </article>
+</section>
+
+<section id="feeds">
+  <h2>Passive &amp; Active Feeds</h2>
+  <p class="lead">Two independent sources of truth funnel into <em>one</em> set of breaker counters through <code>Server::record_success</code> / <code>record_failure</code>. Neither feed knows the other exists.</p>
+
+  <article class="concept">
+    <h3>Passive feed &mdash; real client traffic on <code>Lease</code> drop</h3>
+    <p>Level 3's RAII <code>Lease</code> already wraps every request and fires on <code>Drop</code>. Level 4 extends it with an explicit <em>outcome</em>: an <code>Option&lt;bool&gt;</code> the proxy sets before the lease drops.</p>
+    <ul>
+      <li><code>Lease::mark_success()</code> / <code>mark_failure()</code> set the outcome field.</li>
+      <li>On <code>Drop</code>: release <code>inflight</code> (unchanged, unconditional), record the EWMA if served (unchanged), and <strong>if the outcome is set</strong>, call the matching breaker method. If the outcome is <code>None</code> (task cancelled mid-flight, or we never got far enough to judge), the breaker is left untouched &mdash; <strong>we never guess an outcome</strong>.</li>
+    </ul>
+    <p>Outcome mapping at the call site (in <code>proxy.rs</code>): connect failure / connect timeout / response-read error / backend status <code>&gt;= 500</code> &rarr; <code>mark_failure()</code>. Response head parsed with status <code>&lt; 500</code> &rarr; <code>mark_success()</code>.</p>
+    <div class="callout analogy"><strong>Why <code>Option&lt;bool&gt;</code> and not just <code>bool</code>?</strong> "No opinion" (<code>None</code>) is a distinct case from "success." If a task is cancelled before we ever hear from the backend, scoring that as a success would keep a dead server Closed on phantom evidence; scoring it as failure would punish a server that never got a fair request. The honest answer is to say nothing.</div>
+  </article>
+
+  <article class="concept">
+    <h3>Why 5xx is a failure but 4xx is a success</h3>
+    <p>A <code>4xx</code> is the <em>client's</em> fault &mdash; bad request, not found, unauthorized &mdash; and the backend is perfectly healthy: it parsed the request and answered correctly. A <code>5xx</code> is the backend <em>failing</em>. Scoring health on 5xx-but-not-4xx mirrors how real proxies grade passive health; counting 404s as failures would trip a breaker every time a client mistyped a URL.</p>
+  </article>
+
+  <article class="concept">
+    <h3>Active feed &mdash; the background prober</h3>
+    <p>The prober lives in <code>health.rs</code> (covered in depth in <a href="#prober">The Active Prober</a>). It issues <code>GET &lt;health_path&gt;</code> to each due server; <code>2xx</code> &rarr; <code>record_success</code>, everything else (refused / timeout / malformed / non-2xx) &rarr; <code>record_failure</code>. The mapping lives in <code>apply_probe_result</code>.</p>
+    <div class="callout"><strong>The payoff of sharing one breaker:</strong> a server under live traffic trips <strong>Open from passive failures without waiting for a probe interval</strong>, and a server with no client traffic still <strong>recovers via active probes</strong>. The two feeds cover each other's blind spots &mdash; the whole reason they write to the same counters.</div>
+  </article>
+
+  <figure>
+<pre class="mermaid">
+flowchart TD
+  subgraph Passive["Passive feed — client traffic"]
+    LX["Lease::mark_success / mark_failure"] --> LD["Lease Drop"]
+  end
+  subgraph Active["Active feed — health.rs"]
+    PR["probe_once() GET /health"] --> AP["apply_probe_result"]
+  end
+  LD --> RS["Server::record_success"]
+  LD --> RF["Server::record_failure"]
+  AP --> RS
+  AP --> RF
+  RS --> BK["ONE Breaker<br/>per Server"]
+  RF --> BK
+  style BK fill:#1a8ae5,color:#fff,stroke:#0b1626
+</pre>
+<figcaption>Both feeds terminate at the same two methods on the same breaker. This convergence is the design's core simplification.</figcaption>
+  </figure>
+</section>
+
+<section id="backoff">
+  <h2>Exponential Backoff</h2>
+  <p class="lead">A tripped breaker should not be hammered the instant its cooldown ends if it is still sick. Backoff makes each successive probe wait longer &mdash; but forgives instantly once the server is healthy again.</p>
+
+  <article class="concept">
+    <h3>Double, cap, reset</h3>
+    <p>The cooldown length lives in <code>backoff_nanos</code>. Its lifecycle:</p>
+    <ul>
+      <li><strong>Start:</strong> <code>backoff_base</code> (default <strong>1s</strong>). The first trip uses this as-is.</li>
+      <li><strong>Double:</strong> on each <em>failed</em> HalfOpen trial, <code>backoff = min(backoff * 2, backoff_max)</code>. So the Open cooldown grows 1s &rarr; 2s &rarr; 4s &rarr; 8s &hellip;</li>
+      <li><strong>Cap:</strong> at <code>backoff_max</code> (default <strong>30s</strong>) &mdash; a saturating multiply, so it never overflows or grows unbounded.</li>
+      <li><strong>Reset:</strong> to <code>backoff_base</code> the moment the breaker returns to <code>Closed</code>.</li>
+    </ul>
+    <p>All of this lives in the Open transitions (<code>trip</code> / <code>record_failure</code>) and the recovery arm of <code>record_success</code>. Note the base defaults to 1s <em>independent</em> of <code>--hc-interval</code> (default 2s), so tuning probe frequency doesn't accidentally change recovery pacing.</p>
+  </article>
+
+  <article class="concept">
+    <h3>Why reset matters &mdash; the flapping backend</h3>
+    <p>Consider a backend that <em>flaps</em>: healthy for a while, then a burst of failures, then healthy again, repeatedly. With reset, each healthy stretch brings the backoff back to 1s, so recovery is fast when the server is genuinely up. <strong>Without</strong> reset, the backoff would ratchet upward forever &mdash; after a few flap cycles a server that is currently perfectly healthy would still be stuck behind a 30s cooldown, punished for its past. Reset says "the past is settled; judge you on now."</p>
+    <div class="callout warn"><strong>The tension:</strong> doubling protects a genuinely dead server from being probed every tick; resetting protects a recovered server from being penalized. Both are needed &mdash; that is exactly quiz question 7.</div>
+  </article>
+
+  <figure>
+<pre class="mermaid">
+flowchart LR
+  T1["Trip #1<br/>cooldown 1s"] -->|"trial fails"| T2["Re-open<br/>cooldown 2s"]
+  T2 -->|"trial fails"| T3["Re-open<br/>cooldown 4s"]
+  T3 -->|"trial fails"| T4["Re-open<br/>cooldown 8s ... cap 30s"]
+  T3 -->|"trial succeeds x2"| OK["Closed<br/>backoff RESET to 1s"]
+  style OK fill:#41a7f5,color:#fff,stroke:#0b1626
+</pre>
+<figcaption>Backoff doubles down the failure path and snaps back to base on recovery.</figcaption>
+  </figure>
+</section>
+
+<section id="prober">
+  <h2>The Active Prober</h2>
+  <p class="lead">One tokio task per upstream, in <code>health.rs</code>. It ticks on a timer, asks each server's breaker "are you due?", and probes the due ones concurrently.</p>
+
+  <article class="concept">
+    <h3>One task per upstream</h3>
+    <p><code>spawn_probers</code> launches one <code>probe_loop</code> task per <code>Upstream</code> at startup. The loop:</p>
+    <ol class="flow">
+      <li><strong>Sleep</strong> <code>hc_interval</code> (default 2s).</li>
+      <li><strong>Snapshot the due set</strong> <em>before</em> awaiting: iterate the pool, keep servers where <code>breaker.probe_due(now)</code> is <code>Some</code>. Deciding first means the breaker reads are a consistent snapshot of this tick.</li>
+      <li><strong>Probe concurrently</strong> &mdash; spawn each probe and join, so one slow server cannot delay the others within a tick.</li>
+      <li><strong>Map the result</strong> via <code>apply_probe_result</code>: <code>2xx</code> &rarr; <code>record_success</code>, else <code>record_failure</code>; log any transition.</li>
+    </ol>
+    <p>Each probe (<code>probe_once</code>) opens a TCP connection under <code>hc_timeout</code> (default 1s), sends a minimal <code>GET &lt;path&gt; HTTP/1.1</code> with <code>Host</code> and <code>Connection: close</code>, and reads the response head with the existing Level 1 helpers. The prober <strong>reuses the connect+write+read-head code</strong> rather than re-implementing HTTP; the only new concern is issuing a fixed <code>GET</code> and checking the status class.</p>
+  </article>
+
+  <article class="concept">
+    <h3>The lifecycle detail: <code>Arc</code> at L4, <code>Weak</code> after L12</h3>
+    <p>As designed at Level 4, each prober task held an <code>Arc&lt;Upstream&gt;</code> &mdash; harmless while route tables were immortal. Level 12 (hot reload) later changed each task to hold a <code>Weak&lt;Upstream&gt;</code> and re-upgrade per tick: the strong refs live in the route table(s), so when a reload swaps the table and the last request drops the old <code>Arc&lt;RouteTable&gt;</code>, the old pool's prober finds its upgrade failing and exits within one interval. The <code>Weak</code> <em>is</em> the shutdown signal &mdash; no kill channel, no registry.</p>
+    <div class="callout"><strong>Honesty note:</strong> the current <code>health.rs</code> already carries the L12 <code>Weak</code> form. At Level 4 the task simply owned the <code>Arc</code>; the <code>Weak</code> refinement is a later level's fix for a leak that only mattered once tables became mutable.</div>
+  </article>
+
+  <article class="concept">
+    <h3>Non-goals on the probe path</h3>
+    <p>The prober deliberately does <em>not</em> rewrite headers (XFF etc. &mdash; that is Level 5; probes send a bare <code>GET</code>), does <em>not</em> reuse connections (Level 7; each probe opens and closes one TCP connection), and emits no metrics (Level 10; observability here is the per-request log line plus a one-line state-transition log). Keeping the prober minimal keeps the breaker the star.</p>
+  </article>
+</section>
+
+<section id="retry">
+  <h2>The Retry Loop</h2>
+  <p class="lead">The retry loop in <code>proxy.rs</code> is the one genuinely separate piece &mdash; it <em>acts on</em> the breaker's verdict. It is what makes a dead backend invisible to a client: re-pick, reconnect, succeed, all before the client sees anything.</p>
+
+  <article class="concept">
+    <h3>Three gates, all required, every time</h3>
+    <p>A connect failure triggers a retry <strong>only</strong> when all three hold:</p>
+    <div class="grid3">
+      <div class="card">
+        <span class="tag tech">Gate 1</span>
+        <h4>Attempts remain</h4>
+        <p>Global cap <code>MAX_RETRIES = 2</code> (3 tries total). Each retry calls <code>pick()</code> fresh; the just-failed server's <code>mark_failure()</code> already ran, and the algorithm's cursor advanced, so the retry lands elsewhere.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Gate 2</span>
+        <h4>Idempotent method</h4>
+        <p><code>GET / HEAD / PUT / DELETE / OPTIONS / TRACE</code> retry (<code>is_idempotent</code>). <code>POST / PATCH</code> / unknown do not &mdash; replay could cause a second side effect.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Gate 3</span>
+        <h4>Pre-body</h4>
+        <p>Retry only while still at the connect stage, before any request-body bytes have been forwarded to any backend. Once body streaming starts, the request is committed to that backend.</p>
+      </div>
+    </div>
+  </article>
+
+  <article class="concept">
+    <h3>Only a failed <em>connect</em> retries</h3>
+    <p>A failure <em>after</em> the request head was sent &mdash; backend 5xx, mid-response I/O error &mdash; is not safely replayable: part of a possibly non-idempotent request already reached a backend. Such a failure still records into the breaker (via <code>mark_failure</code>), but the error/response is returned to the client. <code>502 Bad Gateway</code> surfaces only when attempts are exhausted or no healthy server remains.</p>
+    <div class="callout warn"><strong>Concrete pre-body danger (quiz Q4):</strong> imagine a <code>PUT /account/balance</code> that streams a large body. If we dropped the pre-body gate and the connection to backend A failed <em>after</em> half the body streamed, retrying onto backend B would send the whole body again &mdash; but A may already have applied the partial write. Even an idempotent method is only idempotent if the <em>whole</em> request is replayed exactly once; a partial-then-full double-send corrupts data. The pre-body gate is what makes "idempotent" actually safe.</div>
+  </article>
+
+  <figure>
+<pre class="mermaid">
+flowchart TD
+  S["attempt = 0"] --> PK["lease = upstream.pick()"]
+  PK -->|"None (no healthy server)"| E502["502"]
+  PK --> CN["connect(lease.addr()) under timeout"]
+  CN -->|"ok"| FW["forward head + body, stream response"]
+  CN -->|"connect fail"| MF["lease.mark_failure()"]
+  MF --> G{"attempt &lt; 2<br/>AND idempotent<br/>AND pre-body?"}
+  G -->|"yes"| INC["attempt += 1<br/>log [retry N/2]"]
+  INC --> PK
+  G -->|"no"| E502
+  FW --> OUT["mark_success / mark_failure<br/>by response outcome"]
+  style E502 fill:#d98a8a,color:#fff,stroke:#0b1626
+  style FW fill:#41a7f5,color:#fff,stroke:#0b1626
+</pre>
+<figcaption>The connect-retry loop in <code>proxy.rs</code>. The three-gate diamond is the whole safety story. The retry loop has <em>no</em> unit test &mdash; it was verified live.</figcaption>
+  </figure>
+
+  <article class="concept">
+    <h3>The retry log marker</h3>
+    <p>When a retry happens, the per-request log line carries a marker so you can watch it: <code>[retry 1/2]</code> after the first re-pick, <code>[retry 2/2]</code> after the second. Under live verification, a GET at a dead-then-healthy pool showed <code>[retry 1/2]</code> and returned 200; a POST loop returned alternating <code>502 200</code> (proving non-idempotent requests are not replayed); and the highest marker ever observed was <code>[retry 2/2]</code>, never <code>3/&hellip;</code>.</p>
+  </article>
+</section>
+
+<section id="deadlock">
+  <h2>The HalfOpen Recovery-Deadlock Bug</h2>
+  <p class="lead">Building Level 4 surfaced a real bug that the direct-call unit tests missed and only live verification (and a prober-shaped test) caught. It is the most instructive part of the level.</p>
+
+  <article class="concept">
+    <h3>The symptom</h3>
+    <p>With the <strong>default</strong> <code>success_threshold = 2</code>, a server recovering via <em>active probes only</em> (no client traffic) wedged permanently in <code>HalfOpen</code>. The log showed <code>Open-&gt;HalfOpen</code> and then &hellip; nothing. The backend was up, answering probes, but never rejoined rotation.</p>
+  </article>
+
+  <article class="concept">
+    <h3>The root cause</h3>
+    <p>The original <code>probe_due</code> admitted <strong>one</strong> <code>HalfOpenTrial</code> per cooldown and then returned <code>None</code> for any subsequent tick while HalfOpen. So the sequence was:</p>
+    <ol class="flow">
+      <li>Cooldown elapses &rarr; <code>probe_due</code> flips Open&rarr;HalfOpen, admits one trial.</li>
+      <li>The trial succeeds &rarr; <code>consec_success = 1</code>. But the threshold is 2.</li>
+      <li>Next tick: <code>probe_due</code> sees HalfOpen &rarr; returns <code>None</code>. No probe fires.</li>
+      <li><code>consec_success</code> is frozen at 1 forever. And because <code>allows_traffic()</code> is <code>false</code> in HalfOpen, <strong>no passive success can supply the second one either</strong> &mdash; clients are blocked. Deadlock.</li>
+    </ol>
+    <div class="callout danger"><strong>Why the unit test missed it:</strong> the original test drove recovery with direct back-to-back <code>record_success</code> calls, which reach the threshold trivially. Real recovery is driven by the <em>prober</em>, one success per tick, gated by <code>probe_due</code> &mdash; and <code>probe_due</code> was the broken part. The test exercised the machine in a way the real caller never would.</div>
+  </article>
+
+  <article class="concept">
+    <h3>The fix</h3>
+    <p><code>probe_due</code> now keeps admitting a <code>HalfOpenTrial</code> <em>while</em> HalfOpen (not just on the first tick), so the prober can accumulate the successes it needs. The anti-hammering ceiling still holds because a <em>failed</em> trial trips straight back to Open with a doubled backoff &mdash; so a genuinely dead backend is still probed at most once per (growing) cooldown, never once per tick. The verbatim comment from <code>balancer.rs</code> explains the trade-off:</p>
+    <pre><code>// Keep probing while HalfOpen so consecutive successes can reach
+// `success_threshold`. If we returned `None` here, a recovery that
+// needs more than one success would wedge forever ...
+// A trial that *fails* still trips us straight back to `Open`
+// (doubled backoff), preserving the one-probe-per-cooldown ceiling
+// for a server that isn't recovering.</code></pre>
+    <p>A prober-loop-shaped <strong>regression test</strong> now guards it: it drives recovery the way the prober does (alternating <code>probe_due</code> / <code>record_success</code> per tick) and asserts the breaker reaches <code>Closed</code> with the default threshold &mdash; the exact case the old direct-call test missed. Re-verified live: <code>HalfOpen-&gt;Closed</code>, backoff reset to 1s, and the recovered backend split traffic 3/3/3.</p>
+  </article>
+
+  <div class="callout analogy"><strong>The lesson (quiz Q6):</strong> "exactly one trial per cooldown" and "keep probing while HalfOpen" sound contradictory but aren't. The <em>ceiling</em> that matters is "at most one probe per cooldown <em>for a server that keeps failing</em>" &mdash; and that is enforced by a failed trial re-opening with a bigger backoff, not by refusing to re-probe. A server that is <em>answering</em> should be probed until it clears the bar. Conflating those two invariants is what caused the deadlock.</div>
+</section>
+
+<section id="code-map">
+  <h2>Code Map</h2>
+  <p class="lead">What Level 4 added or changed, verified against <code>rproxy/src/</code>.</p>
+  <table>
+    <thead><tr><th>File / item</th><th>New?</th><th>Responsibility</th></tr></thead>
+    <tbody>
+      <tr><td><code>balancer.rs</code> &middot; <code>Breaker</code></td><td>NEW</td><td>Three-state machine (<code>AtomicU8</code> + counters + backoff), all <code>Relaxed</code> atomics, every method takes <code>now: Instant</code>.</td></tr>
+      <tr><td><code>balancer.rs</code> &middot; <code>BreakerState</code> / <code>ProbeAction</code></td><td>NEW</td><td>The <code>Closed</code>/<code>Open</code>/<code>HalfOpen</code> enum and the <code>Normal</code>/<code>HalfOpenTrial</code> probe verdict.</td></tr>
+      <tr><td><code>balancer.rs</code> &middot; <code>record_failure</code> / <code>record_success</code></td><td>NEW</td><td>The transitions; return <code>Some((from,to))</code> only on an actual state change (for logging).</td></tr>
+      <tr><td><code>balancer.rs</code> &middot; <code>probe_due</code></td><td>NEW</td><td>The prober's gate; Open&rarr;HalfOpen when cooldown elapses; keeps admitting trials while HalfOpen (the bug fix).</td></tr>
+      <tr><td><code>balancer.rs</code> &middot; <code>allows_traffic</code></td><td>NEW</td><td><code>state == Closed</code>. Called by <code>Server::available()</code>.</td></tr>
+      <tr><td><code>balancer.rs</code> &middot; <code>Server::available()</code></td><td>changed</td><td>Was hardcoded <code>true</code>; now returns <code>breaker.allows_traffic()</code>. No <code>select</code> branch changed.</td></tr>
+      <tr><td><code>balancer.rs</code> &middot; <code>Server::record_*</code></td><td>NEW</td><td>The single funnel both feeds call.</td></tr>
+      <tr><td><code>balancer.rs</code> &middot; <code>Lease</code> outcome + <code>mark_success</code>/<code>mark_failure</code></td><td>changed</td><td><code>Option&lt;bool&gt;</code> outcome set by the proxy; Drop feeds the breaker only if set.</td></tr>
+      <tr><td><code>balancer.rs</code> &middot; <code>HealthConfig</code></td><td>NEW</td><td>Thresholds, interval, timeout, backoff bounds; <code>Default</code> = 3 / 2 / 2s / 1s / 1s / 30s.</td></tr>
+      <tr><td><code>health.rs</code> &middot; <code>spawn_probers</code> / <code>probe_loop</code></td><td>NEW</td><td>One task per upstream; tick, snapshot due set, probe concurrently.</td></tr>
+      <tr><td><code>health.rs</code> &middot; <code>probe_once</code> / <code>apply_probe_result</code></td><td>NEW</td><td>Issue <code>GET &lt;path&gt;</code> under timeout; map 2xx/else onto the breaker + log transitions.</td></tr>
+      <tr><td><code>proxy.rs</code> &middot; retry loop + <code>MAX_RETRIES</code></td><td>NEW</td><td>Connect-retry gated on cap(2) + idempotent + pre-body; <code>[retry N/2]</code> log marker.</td></tr>
+      <tr><td><code>proxy.rs</code> &middot; <code>is_idempotent</code></td><td>NEW</td><td><code>GET/HEAD/PUT/DELETE/OPTIONS/TRACE</code> &rarr; true.</td></tr>
+      <tr><td><code>main.rs</code> + spec parser</td><td>changed</td><td><code>;health=PATH</code> suffix on <code>--upstream</code>; global <code>--hc-*</code> flags; spawns the prober tasks.</td></tr>
+    </tbody>
+  </table>
+  <div class="callout warn"><strong>Could not fully verify in code:</strong> the exact retry-marker log wording (<code>[retry 1/2 after 127.0.0.1:9001 connect-refused]</code> as spec'd) &mdash; the code emits <code>[retry {attempt}/{MAX_RETRIES}]</code>; the richer "after &hellip; connect-refused" detail from the spec/observability section may be abbreviated in the shipped log. The state-transition log strings are produced from each transition's <code>Some((from,to))</code> return but I did not read the exact format string byte-for-byte.</div>
+</section>
+
+<section id="industry">
+  <h2>Industry Comparison</h2>
+  <p class="lead">Every serious proxy solves health checking, but they draw the active/passive/breaker lines differently. Ours is a teaching build; here is where it sits.</p>
+  <table>
+    <thead><tr><th>Proxy</th><th>Active checks</th><th>Passive / outlier</th><th>Retry model</th></tr></thead>
+    <tbody>
+      <tr><td><strong>nginx</strong> (OSS)</td><td>Passive only in OSS (<code>max_fails</code>/<code>fail_timeout</code>); active checks are NGINX Plus (commercial).</td><td>Counts recent failures per server, ejects for <code>fail_timeout</code>, then retries. No explicit HalfOpen probe &mdash; the first request after the window <em>is</em> the trial.</td><td><code>proxy_next_upstream</code> lists which conditions retry; capped via <code>proxy_next_upstream_tries</code>.</td></tr>
+      <tr><td><strong>Apache httpd</strong> (mod_proxy)</td><td><code>mod_proxy_hcheck</code> adds active health checks (configurable method / URL / interval).</td><td>Balancer members carry error state; the <code>retry</code> parameter re-enables a member after a cooldown.</td><td><code>ProxyPass</code> failover across balancer members; retry semantics per worker.</td></tr>
+      <tr><td><strong>HAProxy</strong></td><td>First-class active checks (<code>option httpchk</code>, custom expect rules, intervals, <code>rise</code>/<code>fall</code>).</td><td><code>observe layer7</code> + <code>on-error</code> gives passive marking; <code>rise</code>/<code>fall</code> are our <code>success_threshold</code>/<code>fail_threshold</code>.</td><td><code>retries</code> + <code>option redispatch</code> re-picks another server; L7 retry can be disabled per non-idempotent request.</td></tr>
+      <tr><td><strong>Envoy</strong></td><td>Active health checking per cluster (HTTP / TCP / gRPC), plus <em>panic mode</em>.</td><td><strong>Outlier detection</strong>: statistically ejects the member that deviates from the pool &mdash; genuinely more than a per-server threshold.</td><td>Rich retry policy: conditions, budgets, per-try timeouts, <em>hedged</em> requests.</td></tr>
+      <tr><td><strong>Ferrum (ours)</strong></td><td>Active prober in <code>health.rs</code>, one task per upstream, <code>GET /health</code>, fixed interval.</td><td>Passive via <code>Lease</code> drop into the <em>same</em> breaker. Per-server threshold only &mdash; <strong>no outlier detection across the pool</strong>.</td><td>One global cap (2), three fixed gates (idempotent + pre-body + attempts). No budgets, no hedging.</td></tr>
+    </tbody>
+  </table>
+  <div class="callout"><strong>The honest trade-off:</strong> our unifying idea &mdash; one breaker fed by both active and passive signals, with <code>rise</code>/<code>fall</code>-style thresholds &mdash; is close in spirit to HAProxy's <code>observe</code> + checks. What we deliberately skip is Envoy's league: cross-pool outlier detection, retry budgets, per-try timeouts, and hedged requests. Those are aggregate / statistical machinery; the lesson at this level is the <em>mechanism</em> of one breaker, so we keep it strictly per-server and threshold-based. As of 2026, nginx active checks remain a commercial (Plus) feature; the OSS build is passive-only.</div>
+</section>
+
+<section id="quiz">
+  <h2>Quiz</h2>
+  <p class="lead">Copied verbatim from PROGRESS.md (<code>### Level 4 quiz</code>). Vessey answers these before Level 5 &mdash; no answers provided here.</p>
+  <div class="qa">
+    <ol>
+      <li><code>allows_traffic()</code> is true only in <code>Closed</code>, not in <code>HalfOpen</code>. Why must client traffic stay blocked while a recovery probe is outstanding?</li>
+      <li>Active and passive checks share one set of counters. Give one failure scenario that <em>only</em> the passive feed catches, and one that <em>only</em> the active feed catches.</li>
+      <li><code>Lease</code>'s outcome is <code>Option&lt;bool&gt;</code>, and <code>None</code> reports nothing. Why is "no opinion" a distinct case from "success"?</li>
+      <li>Retry requires idempotent + pre-body + attempts-remaining. Construct a concrete request where dropping the <em>pre-body</em> gate would corrupt data.</li>
+      <li>Why does a 4xx response count as a health <em>success</em>?</li>
+      <li><code>probe_due</code> admits exactly one <code>HalfOpenTrial</code> per cooldown. What goes wrong if it admitted one per tick instead?</li>
+      <li>Backoff doubles on a failed trial but resets on recovery. What would a backoff that never reset do to a backend that flaps?</li>
+      <li>The breaker uses <code>Relaxed</code> atomics, so two concurrent <code>record_failure</code> calls can lose an increment. Why is that acceptable here?</li>
+    </ol>
+  </div>
+  <div class="callout warn"><strong>Note on Q6:</strong> read it against <a href="#deadlock">The HalfOpen Deadlock Bug</a> &mdash; the subtlety is that "one trial per cooldown" is the ceiling for a <em>failing</em> server, while a <em>recovering</em> one must keep being probed. Getting that distinction wrong is precisely what deadlocked recovery.</div>
+</section>
+
+<section id="cheatsheet">
+  <h2>Cheat Sheet &amp; Glossary</h2>
+  <p class="lead">The numbers, flags, and defaults &mdash; plus the vocabulary.</p>
+
+  <h3>Defaults &amp; constants</h3>
+  <table>
+    <thead><tr><th>Name</th><th>Default</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>--hc-interval</code></td><td>2s</td><td>Active probe period.</td></tr>
+      <tr><td><code>--hc-timeout</code></td><td>1s</td><td>Per-probe connect+read deadline.</td></tr>
+      <tr><td><code>--hc-fail</code> (<code>fail_threshold</code>)</td><td>3</td><td>Consecutive failures: Closed &rarr; Open.</td></tr>
+      <tr><td><code>--hc-success</code> (<code>success_threshold</code>)</td><td>2</td><td>Consecutive successes in HalfOpen &rarr; Closed.</td></tr>
+      <tr><td><code>--hc-backoff-base</code></td><td>1s</td><td>Initial Open cooldown, before any doubling.</td></tr>
+      <tr><td><code>--hc-backoff-max</code></td><td>30s</td><td>Cap on the doubling Open cooldown.</td></tr>
+      <tr><td><code>--retries</code> (<code>MAX_RETRIES</code>)</td><td>2</td><td>Max in-request retries (3 tries total).</td></tr>
+      <tr><td><code>;health=PATH</code></td><td><code>/health</code></td><td>Per-upstream probe path (spec suffix).</td></tr>
+      <tr><td>State encoding</td><td>0 / 1 / 2</td><td><code>Closed</code>=0, <code>Open</code>=1, <code>HalfOpen</code>=2 (<code>AtomicU8</code>).</td></tr>
+      <tr><td>Idempotent methods</td><td>&mdash;</td><td><code>GET HEAD PUT DELETE OPTIONS TRACE</code> retry; <code>POST/PATCH</code> do not.</td></tr>
+      <tr><td>Probe success class</td><td>2xx</td><td>Everything else (refused / timeout / malformed / non-2xx) = failure.</td></tr>
+      <tr><td>Passive success class</td><td>&lt; 500</td><td>4xx = success (client's fault); &ge; 500 = failure.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Run it</h3>
+  <pre><code>cargo run --release -- 127.0.0.1:8080 \
+  --upstream 'api=rr:127.0.0.1:9001,127.0.0.1:9002;health=/health' \
+  --hc-interval 1s --hc-fail 2 '/**=api'</code></pre>
+
+  <h3>Transition log lines</h3>
+  <pre><code>health: 127.0.0.1:9001 Closed-&gt;Open (3 consecutive failures, cooldown 1s)
+health: 127.0.0.1:9001 Open-&gt;HalfOpen (probing)
+health: 127.0.0.1:9001 HalfOpen-&gt;Closed (recovered)</code></pre>
+
+  <h3>Glossary</h3>
+  <table>
+    <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Circuit breaker</strong></td><td>A per-server state machine that stops traffic to a failing backend and gates its recovery.</td></tr>
+      <tr><td><strong>Closed</strong></td><td>Healthy, serving. The only state where <code>allows_traffic()</code> is true.</td></tr>
+      <tr><td><strong>Open</strong></td><td>Tripped; no traffic, cooling down for <code>backoff</code>.</td></tr>
+      <tr><td><strong>HalfOpen</strong></td><td>Recovery trial(s) outstanding; still no client traffic until confirmed.</td></tr>
+      <tr><td><strong>Passive check</strong></td><td>Health scored from real client exchanges (on <code>Lease</code> drop).</td></tr>
+      <tr><td><strong>Active check</strong></td><td>Health scored from the background prober's <code>GET /health</code>.</td></tr>
+      <tr><td><strong>Exponential backoff</strong></td><td>Cooldown that doubles on each failed trial, caps, and resets on recovery.</td></tr>
+      <tr><td><strong>Idempotent</strong></td><td>A method safe to re-send: replaying causes no additional side effect.</td></tr>
+      <tr><td><strong>Pre-body</strong></td><td>Still at the connect stage; no request-body bytes forwarded yet &mdash; the only safe time to retry.</td></tr>
+      <tr><td><strong>EWMA</strong></td><td>Exponentially-weighted moving average of round-trip time (Level 3), recorded on lease drop when served.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+</main>
+</div>
+
+<footer>
+  <p>Ferrum KB &mdash; Level 4: Health Checks &bull; Built 2026-09-02</p>
+  <p class="muted">A teaching reverse proxy. Verified against <code>rproxy/src/balancer.rs</code>, <code>health.rs</code>, <code>proxy.rs</code> and PROGRESS.md. Comparisons to nginx / Apache httpd / HAProxy / Envoy reflect their architecture as of 2026 and are qualified where uncertain.</p>
+</footer>
+</body>
+</html>

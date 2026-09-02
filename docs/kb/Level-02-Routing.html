@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ferrum KB — Level 2: Routing</title>
+<meta name="description" content="A complete, plain-English map of the Barracuda Networks product portfolio: every product family (Email, Application, Network, Data Protection, Managed XDR, MSP) and the BarracudaONE platform — what each product is, what it does, and what problem it solves." />
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    flowchart: { htmlLabels: true, useMaxWidth: true, padding: 12, nodeSpacing: 55, rankSpacing: 55 },
+    startOnLoad: true, theme: 'base', securityLevel: 'loose',
+    themeVariables: {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '15px',
+      primaryColor: '#e7e8ea', primaryTextColor: '#15203a', primaryBorderColor: '#7e848c',
+      lineColor: '#6a6f77', secondaryColor: '#dddfe2', tertiaryColor: '#f3f4f6',
+      noteBkgColor: '#fff3d6', noteTextColor: '#3a2f12', noteBorderColor: '#caa84a',
+      actorBkg: '#e7e8ea', actorTextColor: '#15203a', actorBorder: '#7e848c',
+      clusterBkg: '#eef0f2', clusterBorder: '#a0a4aa'
+    }
+  });
+</script>
+<style>
+  :root{--bg:#0f1320;--panel:#161c2e;--panel-2:#1d2540;--ink:#e8ecf5;--muted:#9aa6c4;--accent:#7c5cff;--accent-2:#22d3a6;--warn:#ffb454;--danger:#ff6b81;--line:#2a3354;--code-bg:#0b0f1a;--max:1100px;}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:linear-gradient(180deg,#0c1020,#0f1320 40%);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  a{color:var(--accent-2);text-decoration:none}a:hover{text-decoration:underline}
+  header.hero{padding:56px 24px 40px;text-align:center;background:radial-gradient(1200px 400px at 50% -10%,rgba(255,107,129,.18),transparent 60%);border-bottom:1px solid var(--line);}
+  header.hero .eyebrow{letter-spacing:.25em;text-transform:uppercase;color:var(--accent-2);font-size:.75rem;font-weight:700}
+  header.hero h1{font-size:clamp(1.9rem,4vw,3rem);margin:.3em 0 .2em;line-height:1.1}
+  header.hero p.sub{color:var(--muted);max-width:790px;margin:0 auto;font-size:1.05rem}
+  .badges{margin-top:18px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .badge{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);padding:4px 12px;border-radius:999px;font-size:.8rem}
+  .layout{display:grid;grid-template-columns:260px 1fr;gap:32px;align-items:start;max-width:1320px;margin:0 auto;padding:0 22px}
+  nav.toc{position:sticky;top:0;max-height:100vh;overflow:auto;padding:28px 10px 60px;border-right:1px solid var(--line);font-size:.9rem;}
+  nav.toc h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.18em;color:var(--muted);margin:18px 8px 6px}
+  nav.toc a{display:block;color:var(--muted);padding:5px 10px;border-radius:8px;border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--panel);color:var(--ink);text-decoration:none;border-left-color:var(--accent)}
+  main{padding:34px 0 80px;min-width:0}
+  section{margin:0 0 46px;scroll-margin-top:18px}
+  section>h2{font-size:1.7rem;margin:0 0 .5em;padding-bottom:.3em;border-bottom:2px solid var(--line);display:flex;align-items:center;gap:.5em;}
+  h3{font-size:1.25rem;margin:1.6em 0 .4em;color:#fff}
+  h4{font-size:1.02rem;margin:1.2em 0 .3em;color:var(--accent-2);text-transform:uppercase;letter-spacing:.04em}
+  p,li{color:var(--ink)}.muted{color:var(--muted)}
+  article.concept{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin:22px 0}
+  article.concept>h3:first-child{margin-top:0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr} .layout{grid-template-columns:1fr} nav.toc{position:static;max-height:none;border-right:none;border-bottom:1px solid var(--line)}}
+  .card{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card h4{margin-top:.2em}
+  .callout{border-left:4px solid var(--accent);background:var(--panel-2);padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  .callout.analogy{border-left-color:var(--accent-2)}.callout.warn{border-left-color:var(--warn)}.callout.danger{border-left-color:var(--danger)}.callout.story{border-left-color:#5ec2ff}
+  .tag{display:inline-block;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:2px 8px;border-radius:6px;margin-bottom:6px}
+  .tag.beg{background:rgba(34,211,166,.15);color:var(--accent-2)}.tag.tech{background:rgba(124,92,255,.18);color:#b9a6ff}.tag.adv{background:rgba(255,107,129,.15);color:var(--danger)}
+  code{background:var(--code-bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.86em;color:#ffd9a0}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.85rem;line-height:1.55}
+  pre code{background:none;border:none;padding:0;color:#d7e0f5}
+  pre.art{color:#ffd9a0;font-size:.95rem;line-height:1.4;letter-spacing:.04em}
+  pre.mermaid{background:#f7f8fc;color:#111;text-align:center}
+  .mermaid svg text,.mermaid text{fill:#15203a !important}
+  .mermaid .nodeLabel,.mermaid .edgeLabel,.mermaid .label,.mermaid span,.mermaid p,.mermaid div,.mermaid foreignObject *{color:#15203a !important;fill:#15203a !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p{background:#f3f5fc !important}
+  .mermaid .cluster-label .nodeLabel,.mermaid .cluster-label p,.mermaid .cluster span,.mermaid .cluster p{color:#3c4046 !important}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.92rem;overflow:hidden;border-radius:10px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel-2);color:#fff}
+  tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  details{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:12px 0}
+  details summary{cursor:pointer;font-weight:600;color:var(--accent-2);padding:6px 0}
+  details[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px}
+  figure{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  figcaption{color:var(--muted);font-size:.85rem;text-align:center;margin-top:8px;font-style:italic}
+  .qa{margin:10px 0}.qa .q{font-weight:600}.qa .a{color:var(--muted);margin:2px 0 0}
+  ol.flow{counter-reset:step;list-style:none;padding-left:0}
+  ol.flow>li{counter-increment:step;position:relative;padding:10px 0 10px 52px;border-bottom:1px dashed var(--line)}
+  ol.flow>li::before{content:counter(step);position:absolute;left:0;top:8px;width:34px;height:34px;background:var(--accent);color:#fff;border-radius:50%;display:grid;place-items:center;font-weight:700}
+  .rank{font-weight:800;color:var(--accent);margin-right:6px}
+  footer{border-top:1px solid var(--line);padding:30px 22px;text-align:center;color:var(--muted);font-size:.88rem}
+  .lead{font-size:1.08rem}
+  .formula{background:var(--code-bg);border:1px dashed var(--accent);border-radius:10px;padding:12px 16px;font-family:monospace;color:#ffd9a0;text-align:center;margin:14px 0}
+
+  /* KB-THEME START */
+  /* Azure (blue palette) */
+  :root{--bg:#0e1c30;--panel:#152740;--panel-2:#1d3458;--ink:#e6edf7;--muted:#93a6c4;--accent:#1a8ae5;--accent-2:#41a7f5;--warn:#d6a96a;--danger:#d98a8a;--line:#264064;--code-bg:#0b1626;}
+  body{background:linear-gradient(180deg,var(--bg),var(--bg))}
+  header.hero{background:radial-gradient(1100px 400px at 50% -10%,rgba(20,119,210,.26),transparent 60%)}
+  h3,.parthead{color:var(--ink)}
+  th{color:var(--ink)}
+  .tag.tech{background:rgba(65,167,245,.16);color:var(--accent-2)}
+  ol.flow>li::before{color:#0b1626}
+  /* KB-THEME END */
+  /* prevent node/edge label clipping */
+  .mermaid foreignObject{overflow:visible !important}
+  .mermaid .nodeLabel,.mermaid .label,.mermaid foreignObject>div,.mermaid foreignObject span,.mermaid foreignObject p{white-space:nowrap !important;overflow:visible !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p,.mermaid .edgeLabel span{white-space:nowrap !important;overflow:visible !important;padding:1px 4px}
+  .mermaid svg{max-width:100%;height:auto}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyebrow">Ferrum KB &middot; Level 2 of 14 &middot; Routing</div>
+  <h1>Routing<br/><span style="font-size:.6em;color:var(--muted)">RouteTable, path matchers, specificity ranking &amp; the shared <code>Arc&lt;RouteTable&gt;</code></span></h1>
+  <p class="sub">Level 1 forwarded every request to one hard-wired backend. Level 2 answers the question a real proxy must answer for each request: <em>given this method, host, and path, which backend handles it?</em> We build an immutable routing table of match rules, five kinds of path matcher, host and method filters, and a deterministic "most specific wins" ranking — all read lock-free by every connection through a shared <code>Arc&lt;RouteTable&gt;</code>.</p>
+  <nav style="margin-top:18px;font-size:.9rem">
+    <a href="index.html">&larr; Course index</a> &nbsp;&middot;&nbsp;
+    <a href="Level-01-Core-Networking.html">&larr; Prev: Level 1 — Core Networking</a> &nbsp;&middot;&nbsp;
+    <a href="Level-03-Load-Balancing.html">Next: Level 3 — Load Balancing &rarr;</a>
+  </nav>
+  <div class="badges">
+    <span class="badge">Audience: Vessey (built it) + revisers</span>
+    <span class="badge">Scope: router.rs (+ http.rs helpers)</span>
+    <span class="badge">Reading time: ~24 min</span>
+  </div>
+</header>
+
+<div class="layout">
+<nav class="toc">
+  <h2>Orientation</h2>
+  <a href="#exec-summary">Executive Summary</a>
+  <a href="#big-picture">The Big Picture</a>
+  <h2>Core</h2>
+  <a href="#route-model">1 &middot; The Route Model</a>
+  <a href="#matchers">2 &middot; Five Path Matchers</a>
+  <a href="#filters">3 &middot; Host &amp; Method Filters</a>
+  <a href="#specificity">4 &middot; Specificity Ranking</a>
+  <a href="#arc-sharing">5 &middot; Arc&lt;RouteTable&gt; Sharing</a>
+  <a href="#regex-decision">6 &middot; The Regex Dependency Decision</a>
+  <a href="#spec-parsing">7 &middot; Parsing Route Specs</a>
+  <a href="#code-map">Code Map</a>
+  <h2>Compare</h2>
+  <a href="#industry">Industry: nginx / httpd / HAProxy / Envoy</a>
+  <h2>Reference</h2>
+  <a href="#quiz">Self-Check Questions</a>
+  <a href="#cheatsheet">Cheat Sheet &amp; Glossary</a>
+</nav>
+
+<main>
+  <section id="exec-summary">
+    <h2>Executive Summary</h2>
+    <p class="lead">Level 2 turns Ferrum from a one-pipe forwarder into a router: it decides, per request, which backend gets the traffic — deterministically and without taking a lock.</p>
+    <p>The whole level lives in <code>rproxy/src/router.rs</code>. A <code>RouteTable</code> holds a <code>Vec&lt;Route&gt;</code>, and each <code>Route</code> is a set of match conditions (an optional host, an optional method, and one <code>PathMatcher</code>) plus the backend to forward to. There are five path matchers — <code>Exact</code>, <code>Prefix</code>, <code>Wildcard</code>, <code>Regex</code>, and <code>Any</code> — parsed from a compact CLI syntax like <code>/api/**=api</code> or <code>POST host.com/upload=127.0.0.1:9004</code>.</p>
+    <p>Because several routes usually match one request, the subtle part is precedence. We do <strong>not</strong> use declaration order; we compute a numeric <em>specificity</em> for every matching route and pick the highest, so the outcome never depends on how the operator ordered their config. Exact beats wildcard beats longest-prefix beats regex beats catch-all, and host- or method-scoped routes outrank unconstrained ones on the same path.</p>
+    <p>The table is built once at startup and then treated as immutable, shared as an <code>Arc&lt;RouteTable&gt;</code> that every per-connection task reads concurrently — matching never touches a mutex. Regex support is the one external dependency this level adds (the <code>regex</code> crate), chosen deliberately because it guarantees <em>linear-time</em> matching with no catastrophic backtracking — a property that stops being a mere performance note and becomes a security guarantee once untrusted input reaches the matcher at Levels 9 and 13. This is a teaching build: a linear scan over a <code>Vec</code>, not a compiled radix trie, and the comparison section is honest about where that costs us versus nginx or Envoy.</p>
+  </section>
+
+  <section id="big-picture">
+    <h2>The Big Picture</h2>
+    <p>Routing is the stage that sits between "we have a parsed request" (Level 1) and "we pick a server from a pool and forward" (Level 3). Level 1 drew the pipeline; Level 2 fills in the <em>route + forward</em> box that was dashed grey on the Level 1 diagram. The proxy extracts three keys from the parsed head — method, host (port stripped), and path (query stripped) — and hands them to <code>RouteTable::find_route_indexed</code>.</p>
+    <figure>
+<pre class="mermaid">
+flowchart TD
+  P["parse_request_head (Level 1)<br/>method / target / Host header"] --> K["extract keys<br/>method, host_without_port, target_path"]:::l2
+  K --> M["RouteTable::find_route_indexed<br/>(router.rs)"]:::l2
+  M --> F{"any route<br/>matches?"}:::l2
+  F -->|"no"| E["404 Not Found"]:::l2
+  F -->|"yes: rank by specificity,<br/>take the max"| W["winning Route<br/>+ its Arc&lt;Upstream&gt;"]:::l2
+  W --> LB["pick server from pool<br/>+ forward (Level 3+)"]:::l3
+  LB --> B(["Backend"])
+  classDef l2 fill:#cfe6ff,stroke:#1a8ae5,stroke-width:2px;
+  classDef l3 fill:#e7e8ea,stroke:#7e848c,stroke-dasharray:4 3;
+</pre>
+<figcaption>Blue = built in Level 2. The router turns three request keys into one winning route (or a 404). What it hands forward — <code>Arc&lt;Upstream&gt;</code>, a whole pool — is a Level 3 concept; in Level 2 it was a single backend address.</figcaption>
+    </figure>
+    <div class="callout analogy"><strong>Analogy:</strong> A <code>RouteTable</code> is a receptionist with a laminated directory. Every visitor states three things — what they want to do (method), who they're here to see (host), and which floor (path). Several directory entries might apply ("anyone → lobby", "engineering floor → 4th", "Jane on the engineering floor → room 412"). The receptionist doesn't pick the first line she reads; she picks the <em>most specific</em> matching line. That "most specific wins" instinct is the entire precedence algorithm.</div>
+  </section>
+
+  <section id="route-model">
+    <h2>1 &middot; The Route Model</h2>
+    <p class="lead">A <code>Route</code> is "if the request looks like <em>this</em>, send it <em>there</em>." A <code>RouteTable</code> is just an ordered list of them.</p>
+    <article class="concept">
+      <h3>What a Route holds</h3>
+      <p>In <code>router.rs</code>, a <code>Route</code> is a plain struct with three match conditions and a destination:</p>
+      <pre><code>pub struct Route {
+    pub host: Option&lt;String&gt;,      // None = match any host
+    pub method: Option&lt;String&gt;,    // None = match any method
+    pub path: PathMatcher,         // one of five kinds (next section)
+    pub upstream: Arc&lt;Upstream&gt;,   // where to forward (a pool, from L3)
+    // ... rules (L5), chain (L6), cache_ttl (L11) added later
+}</code></pre>
+      <p><strong>What it is:</strong> the <code>Option</code> on <code>host</code> and <code>method</code> encodes "this dimension is unconstrained." A route with <code>host: None, method: None</code> only filters on the path. <strong>The why:</strong> making "any" the <code>None</code> case rather than a magic <code>"*"</code> string means the matcher never has to special-case a sentinel — a missing constraint literally can't be compared, so it's skipped.</p>
+      <div class="callout warn"><strong>Watch out — the field grew later.</strong> In Level 2 the destination was a single backend <code>String</code>. The code you read today shows <code>upstream: Arc&lt;Upstream&gt;</code> because Level 3 replaced the string with a whole pool (a single backend is now a one-member round-robin pool). The fields <code>rules</code>, <code>chain</code>, and <code>cache_ttl</code> are Levels 5, 6, and 11. For Level 2, mentally erase everything after <code>path</code> and read <code>upstream</code> as "the one backend."</div>
+    </article>
+    <article class="concept">
+      <h3>The RouteTable and the catch-all</h3>
+      <p><code>RouteTable</code> wraps a <code>Vec&lt;Route&gt;</code> and is built once via <code>RouteTable::new(routes)</code>. The Level 1 behavior — forward everything to one backend — is now expressible as a single rule via <code>Route::catch_all(backend)</code>, which sets <code>host: None</code>, <code>method: None</code>, and <code>path: PathMatcher::Any</code>. That is the backward-compatibility seam: <code>cargo run -- 127.0.0.1:8080 127.0.0.1:9000</code> still works because a bare <code>host:port</code> becomes one catch-all route.</p>
+      <p>Three read methods sit on the table, all sharing one selection core:</p>
+      <ul>
+        <li><code>find(method, host, path) -&gt; Option&lt;&amp;Arc&lt;Upstream&gt;&gt;</code> — just the pool.</li>
+        <li><code>find_route(...) -&gt; Option&lt;&amp;Route&gt;</code> — the whole winning route (Level 5 needs its rewrite rules).</li>
+        <li><code>find_route_indexed(...) -&gt; Option&lt;(usize, &amp;Route)&gt;</code> — the winner <em>plus</em> its table index (Level 11's cache key uses the index).</li>
+      </ul>
+      <p><strong>The why for one shared core:</strong> if <code>find</code> and <code>find_route</code> each ran their own ranking, a subtle divergence could route the body to backend A while applying backend B's rewrite rules. Funnelling all three through <code>find_route_indexed</code> makes that class of bug impossible.</p>
+    </article>
+  </section>
+
+  <section id="matchers">
+    <h2>2 &middot; Five Path Matchers</h2>
+    <p class="lead">The path is where the interesting matching happens. Ferrum offers five kinds, ordered from most to least specific.</p>
+    <p>The <code>PathMatcher</code> enum in <code>router.rs</code> is the heart of the level. Each variant answers <code>matches(path) -&gt; bool</code> differently:</p>
+    <div class="grid2">
+      <div class="card">
+        <span class="tag beg">Exact</span>
+        <h4>Exact(String)</h4>
+        <p><strong>What:</strong> <code>path == p</code>. <code>/health</code> matches only <code>/health</code>.</p>
+        <p><strong>Spec syntax:</strong> a plain path with no trailing glob, e.g. <code>/api/health=...</code>.</p>
+      </div>
+      <div class="card">
+        <span class="tag beg">Prefix</span>
+        <h4>Prefix(String)</h4>
+        <p><strong>What:</strong> <code>path.starts_with(p)</code>. <code>/api/</code> matches <code>/api/users</code> and <code>/api/v2/x</code>.</p>
+        <p><strong>Spec syntax:</strong> the <code>/**</code> suffix: <code>/api/**</code> becomes prefix <code>/api/</code>.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Wildcard</span>
+        <h4>Wildcard(String)</h4>
+        <p><strong>What:</strong> exactly <em>one</em> non-empty path segment after the prefix. <code>/files/*</code> matches <code>/files/report.pdf</code> but <strong>not</strong> <code>/files/2026/report.pdf</code> (nested) nor <code>/files/</code> (empty).</p>
+        <p><strong>Spec syntax:</strong> the <code>/*</code> suffix.</p>
+      </div>
+      <div class="card">
+        <span class="tag adv">Regex</span>
+        <h4>Regex(Regex)</h4>
+        <p><strong>What:</strong> a full regular expression tested with <code>re.is_match(path)</code>. <code>~^/v[0-9]+/</code> matches <code>/v2/users</code> but not <code>/vX/users</code>.</p>
+        <p><strong>Spec syntax:</strong> a leading <code>~</code> takes the rest as the pattern.</p>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <span class="tag beg">Any</span>
+      <h4>Any</h4>
+      <p><strong>What:</strong> matches every path — the catch-all backstop. <strong>Spec syntax:</strong> <code>/</code> or <code>/**</code> on their own.</p>
+    </div>
+    <article class="concept">
+      <h3>Why the Wildcard exists at all</h3>
+      <p>A single-segment wildcard is a <em>cheap alternative to regex</em>. Its <code>matches</code> body is just <code>strip_prefix</code> plus two conditions — "there is a remainder" and "the remainder contains no <code>/</code>":</p>
+      <pre><code>PathMatcher::Wildcard(prefix) =&gt; match path.strip_prefix(prefix) {
+    Some(rest) =&gt; !rest.is_empty() &amp;&amp; !rest.contains('/'),
+    None =&gt; false,
+}</code></pre>
+      <p>That is <code>O(path length)</code> with no engine to compile or feed. For the common "one variable segment" case (<code>/files/*</code>, <code>/users/*</code>) you get the ergonomics of a wildcard without paying for regex at all. <strong>The design lesson:</strong> reach for the cheapest matcher that expresses the intent; keep regex for the cases only regex can express.</p>
+    </article>
+    <div class="callout warn"><strong>Gotcha — the parser's precedence of suffixes matters.</strong> In <code>parse_matchers</code>, the order of checks is <code>/**</code> → <code>/</code>-or-<code>/**</code> (Any) → <code>/*</code> → else Exact. Because <code>/**</code> is checked before <code>/*</code>, a path ending in <code>/**</code> can never be mis-read as a wildcard with a trailing <code>*</code>. Get that order wrong and <code>/api/**</code> silently becomes a wildcard.</div>
+  </section>
+
+  <section id="filters">
+    <h2>3 &middot; Host &amp; Method Filters</h2>
+    <p class="lead">Path is the primary key; host and method are optional secondary filters that narrow a route.</p>
+    <article class="concept">
+      <h3>How the three dimensions combine</h3>
+      <p><code>Route::matches</code> is an AND across all constrained dimensions — a route matches only if <em>every</em> present constraint is satisfied:</p>
+      <ol class="flow">
+        <li><strong>Host:</strong> if <code>self.host</code> is <code>Some(h)</code>, the request's <code>Host</code> header (port already stripped) must equal <code>h</code> <em>case-insensitively</em> via <code>eq_ignore_ascii_case</code>. <code>None</code> matches any host.</li>
+        <li><strong>Method:</strong> if <code>self.method</code> is <code>Some(m)</code>, the request method must equal <code>m</code> case-insensitively. <code>None</code> matches any method.</li>
+        <li><strong>Path:</strong> always checked, by delegating to <code>self.path.matches(path)</code>.</li>
+      </ol>
+      <p><strong>The why for case-insensitivity:</strong> hostnames are case-insensitive by RFC, and HTTP methods are conventionally uppercase but clients misbehave. Comparing with <code>eq_ignore_ascii_case</code> (ASCII-only, not full Unicode folding) is correct for both and avoids a surprising 404 when a client sends <code>API.EXAMPLE.COM</code> or a lowercase verb.</p>
+    </article>
+    <article class="concept">
+      <h3>Where the keys come from</h3>
+      <p>The router doesn't parse the request; Level 1 already did. Two small helpers in <code>http.rs</code> shape the raw fields into match keys:</p>
+      <ul>
+        <li><code>http::target_path(target)</code> — strips the query string, so <code>/api/users?page=2</code> matches on <code>/api/users</code>. Routing keys off the path, never the query.</li>
+        <li><code>http::host_without_port(host)</code> — strips a trailing <code>:port</code>, correctly handling IPv6 literals like <code>[::1]:8080</code> → <code>[::1]</code>. So <code>example.com:8080</code> and <code>example.com</code> route identically.</li>
+      </ul>
+      <p>The proxy calls these in <code>proxy.rs</code> before invoking <code>find_route_indexed</code>. Keeping the shaping in <code>http.rs</code> and the matching in <code>router.rs</code> is a clean seam: the router never learns about ports or query strings.</p>
+    </article>
+    <div class="callout warn"><strong>Parser limitation, stated honestly.</strong> The simple CLI parser does <em>not</em> support a host prefix alongside a regex path — a <code>~</code>-regex spec always has <code>host: None</code>. If you need host-scoped regex routing you would extend <code>parse_matchers</code>; Level 2 didn't, because the exercise was the matching engine, not a full config grammar.</div>
+  </section>
+
+  <section id="specificity">
+    <h2>4 &middot; Specificity Ranking</h2>
+    <p class="lead">The one idea to take away from Level 2: precedence is <em>computed</em>, not declared. Most-specific wins, deterministically, regardless of config order.</p>
+    <article class="concept">
+      <h3>The problem</h3>
+      <p>Consider three routes and one request to <code>/api/health</code>:</p>
+      <pre><code>/=B_ANY              (catch-all)
+/api/**=B_PREFIX     (prefix)
+/api/health=B_EXACT  (exact)</code></pre>
+      <p>All three <em>match</em>. Which wins? If you picked by declaration order the answer would flip when someone reorders the config file — a fragile, surprising rule. Ferrum instead assigns each matcher a numeric <strong>specificity</strong> and takes the maximum.</p>
+    </article>
+    <article class="concept">
+      <h3>The scoring function</h3>
+      <p><code>PathMatcher::specificity</code> returns a base rank per variant, with length as a tie-breaker for prefixes and wildcards:</p>
+      <table>
+        <thead><tr><th>Matcher</th><th>Score</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>Exact</code></td><td class="rank">4000</td><td>one path only — maximally specific</td></tr>
+          <tr><td><code>Wildcard(p)</code></td><td class="rank">3000 + p.len()</td><td>one segment; longer prefix = more specific</td></tr>
+          <tr><td><code>Prefix(p)</code></td><td class="rank">2000 + p.len()</td><td>any suffix; <strong>longest prefix wins</strong></td></tr>
+          <tr><td><code>Regex</code></td><td class="rank">1000</td><td>flexible but ranked below the structured matchers</td></tr>
+          <tr><td><code>Any</code></td><td class="rank">0</td><td>the backstop — only wins when nothing else matches</td></tr>
+        </tbody>
+      </table>
+      <p>Then <code>Route::specificity</code> adds tie-breakers for the other two dimensions on top of the path score:</p>
+      <div class="formula">route_score = path.specificity() + (host ? 500 : 0) + (method ? 100 : 0)</div>
+      <p>So a host-scoped route beats a bare one on the same path (<code>+500</code>), and a method-scoped route beats a bare one (<code>+100</code>). The band widths (1000 apart for path kinds, +500 for host, +100 for method) are chosen so that <em>path kind always dominates</em> host and method — a host constraint can't promote a prefix above an exact match.</p>
+    </article>
+    <article class="concept">
+      <h3>The algorithm &amp; its complexity</h3>
+      <p>Selection is a single pass in <code>find_route_indexed</code>:</p>
+      <pre><code>self.routes.iter().enumerate()
+    .filter(|(_, r)| r.matches(method, host, path))
+    .max_by_key(|(_, r)| r.specificity())</code></pre>
+      <p><strong>Complexity:</strong> <code>O(n)</code> in the number of routes — test every route, keep the highest score. <strong>Tie-break:</strong> Rust's <code>max_by_key</code> keeps the <em>first</em> maximum, so two equally-specific routes resolve to the earliest declared — the same behavior nginx gives equally-specific regex locations. This is the one place declaration order matters, and only as a final tie-break after specificity has already decided.</p>
+      <div class="callout"><strong>The "longest prefix wins" heritage:</strong> the <code>2000 + p.len()</code> rule is exactly the longest-prefix-match rule from IP routing tables — <code>/api/v2/</code> (len 8) beats <code>/api/</code> (len 5). Reusing a battle-tested networking idea, not inventing a new one.</div>
+    </article>
+    <figure>
+<pre class="mermaid">
+flowchart TD
+  R["request: GET /api/v2/users"] --> S["score every matching route"]
+  S --> A["/=B_ANY<br/>Any → 0"]
+  S --> B["/api/**=B_SHORT<br/>Prefix /api/ → 2005"]
+  S --> C["/api/v2/**=B_LONG<br/>Prefix /api/v2/ → 2008"]
+  A --> M{"max_by_key"}
+  B --> M
+  C --> M
+  M -->|"2008 wins"| W["B_LONG<br/>(longest prefix)"]
+  classDef win fill:#cfe6ff,stroke:#1a8ae5,stroke-width:2px;
+  class W win;
+</pre>
+<figcaption>Longest-prefix-wins in action: two prefixes both match, the longer one scores higher on the length tie-break, so <code>B_LONG</code> is selected — no dependence on which was written first.</figcaption>
+    </figure>
+  </section>
+
+  <section id="arc-sharing">
+    <h2>5 &middot; Arc&lt;RouteTable&gt; Sharing</h2>
+    <p class="lead">One table, many readers, zero locks on the hot path. The routing table is built once and shared immutably.</p>
+    <article class="concept">
+      <h3>Immutable-after-build, shared by reference count</h3>
+      <p>After <code>RouteTable::new</code> returns, the table is never mutated. It is wrapped in an <code>Arc</code> — an atomically reference-counted pointer — and each per-connection Tokio task holds a clone. Cloning an <code>Arc</code> is a cheap atomic increment of a refcount, not a copy of the routes. <strong>The why:</strong> because the data behind the <code>Arc</code> can't change, no reader needs a lock to observe it consistently. Matching a request is a pure read: iterate, filter, take the max. Thousands of concurrent connections can route simultaneously without ever contending.</p>
+      <p>The same <code>Arc</code>-sharing idea nests one level deeper: several routes can point at the <em>same</em> declared upstream, so <code>Route.upstream</code> is itself an <code>Arc&lt;Upstream&gt;</code> (a Level 3 detail). <code>RouteTable::upstreams()</code> de-duplicates by <code>Arc::ptr_eq</code> so a pool shared by five routes is health-probed once, not five times.</p>
+    </article>
+    <div class="callout warn"><strong>Honest scope note — Level 2 vs. Level 12.</strong> The doc-comment in <code>router.rs</code> foreshadows an "atomic config swap," and the code you read today wraps the table in <code>RwLock&lt;Arc&lt;RouteTable&gt;&gt;</code> in <code>main.rs</code> so it can be hot-reloaded. That <code>RwLock</code> and the swap are <strong>Level 12</strong>, not Level 2. In Level 2 the <code>Arc</code> is simply cloned per connection and never replaced. The brief is clear elsewhere in the course that this is a plain <code>RwLock</code> swap, not a true lock-free <code>arc-swap</code> — a deliberately crude but correct choice.</div>
+    <div class="callout analogy"><strong>Analogy:</strong> the <code>Arc&lt;RouteTable&gt;</code> is a laminated directory bolted to the wall. Every receptionist (connection) can read it at once because nobody is allowed to write on it. When management needs to change the directory (Level 12), they don't erase the wall copy while people are reading it — they print a whole new laminated sheet and swap the whole board atomically.</div>
+  </section>
+
+  <section id="regex-decision">
+    <h2>6 &middot; The Regex Dependency Decision</h2>
+    <p class="lead">Level 2 adds exactly one external crate — <code>regex</code> — and the reason it's safe to add is the reason it matters for security later.</p>
+    <article class="concept">
+      <h3>The decision</h3>
+      <p>Ferrum is otherwise near-dependency-free (Level 1 hand-rolls its HTTP parser). Adding <code>regex</code> (pinned at <code>1.13.1</code> in <code>Cargo.toml</code>) was a conscious trade: some path patterns — "any version segment", "a UUID-shaped id" — simply cannot be expressed by exact/prefix/wildcard matchers, and writing a regex engine from scratch would be a multi-week detour off-topic for a proxy course. So we take the dependency, but a <em>specific</em> one.</p>
+    </article>
+    <article class="concept">
+      <h3>Why the Rust <code>regex</code> crate specifically</h3>
+      <p>The Rust <code>regex</code> crate is built on finite automata (Thompson NFA / DFA), not the backtracking engines used by PCRE, Perl, Python's <code>re</code>, or JavaScript. Its defining guarantee: matching runs in <strong>linear time in the length of the input</strong>, <code>O(n)</code>, with <strong>no catastrophic backtracking</strong>. To buy that, it deliberately omits backreferences and lookaround — the very features that make backtracking engines able to blow up.</p>
+      <p><strong>What "catastrophic backtracking" is:</strong> a backtracking engine fed a pathological pattern like <code>(a+)+$</code> against a long non-matching input can explore exponentially many ways to split the input, taking seconds or minutes on a few dozen bytes. That's a denial-of-service primitive known as <strong>ReDoS</strong> (Regular-expression DoS).</p>
+    </article>
+    <div class="callout danger"><strong>Why this is a <em>security</em> property, not just a speed note.</strong> In Level 2 the regexes come only from the operator's own CLI config, so ReDoS is at most a foot-gun. But later levels feed <em>untrusted, attacker-controlled</em> strings into matchers: Level 9 (OS internals / limits) and Level 13 (the basic WAF) evaluate patterns against request paths, headers, and bodies. A backtracking engine there would hand every client a DoS button — send one crafted URL, pin a core for a minute. Because we chose the linear-time <code>regex</code> crate at Level 2, that entire attack class is structurally impossible by the time hostile input arrives. The dependency decision made in the routing level pays off as a WAF safety guarantee two-thirds of the way through the course.</div>
+    <article class="concept">
+      <h3>How Ferrum uses it</h3>
+      <p>A <code>~</code>-prefixed spec is compiled once at startup with <code>Regex::new(pattern)</code>; a bad pattern is a startup error (<code>invalid regex</code>), never a runtime surprise. At request time the compiled <code>Regex</code> lives inside the immutable <code>PathMatcher::Regex</code> variant and is tested with <code>re.is_match(path)</code> — one linear scan, no allocation, no lock. Compile-once / match-many is the same shape as the route table itself.</p>
+    </article>
+  </section>
+
+  <section id="spec-parsing">
+    <h2>7 &middot; Parsing Route Specs</h2>
+    <p class="lead">The CLI grammar is tiny but has one genuine trap, and the parser is structured to defuse it.</p>
+    <article class="concept">
+      <h3>The grammar</h3>
+      <p>A route spec is <code>[METHOD ][host]path_expr=TARGET</code>. Examples straight from the code's doc-comments:</p>
+      <table>
+        <thead><tr><th>Spec</th><th>Parses to</th></tr></thead>
+        <tbody>
+          <tr><td><code>/=127.0.0.1:9000</code></td><td>Any → one-server pool (the catch-all)</td></tr>
+          <tr><td><code>/api/**=api</code></td><td>Prefix <code>/api/</code> → declared upstream named <code>api</code></td></tr>
+          <tr><td><code>/files/*=127.0.0.1:9002</code></td><td>Wildcard <code>/files/</code> → one-server pool</td></tr>
+          <tr><td><code>POST /upload=127.0.0.1:9004</code></td><td>method <code>POST</code> + exact <code>/upload</code></td></tr>
+          <tr><td><code>api.example.com/=B_API</code></td><td>host <code>api.example.com</code> + Any</td></tr>
+          <tr><td><code>~^/v[0-9]+/=127.0.0.1:9005</code></td><td>Regex → one-server pool</td></tr>
+        </tbody>
+      </table>
+    </article>
+    <article class="concept">
+      <h3>The trap: <code>=</code> and <code>;</code></h3>
+      <p>The target is separated from the matcher by <code>=</code>, so the parser uses <code>rsplit_once('=')</code> to take everything after the <em>last</em> <code>=</code> as the target. But Level 5+ rewrite options are <code>;</code>-separated and <em>contain their own <code>=</code></em> (e.g. <code>;strip=/api</code>). If you split on <code>=</code> first, <code>rsplit_once('=')</code> would grab the option's value (<code>/api</code>) as the route target — a silent mis-route.</p>
+      <p><strong>The fix, from <code>parse_matchers</code>:</strong> sever the <code>;</code>-options <em>before</em> splitting on <code>=</code>. Order of operations is the whole defense:</p>
+      <ol class="flow">
+        <li><code>spec.split_once(';')</code> — peel off the options string first.</li>
+        <li><code>base.rsplit_once('=')</code> — now the last <code>=</code> is guaranteed the target separator.</li>
+        <li>Peel an optional leading uppercase <code>METHOD </code> (a word of ASCII letters before a space).</li>
+        <li>A leading <code>~</code> means the rest is a regex; otherwise split host from path at the first <code>/</code>.</li>
+        <li>Classify the path suffix into one of the five matchers.</li>
+      </ol>
+      <p>A consequence the code documents plainly: because options are <code>;</code>-severed first, <em>a route's options cannot contain a literal <code>;</code></em>. That's an accepted limitation, not a bug.</p>
+      <div class="callout warn"><strong>Validation is at startup, not per-request.</strong> An empty target, a missing <code>=</code>, a path with no <code>/</code>, or a bad regex all return an <code>io::Error</code> from <code>parse_matchers</code>/<code>resolve_route</code>, which fails the process at boot. The request-time path never has to handle a malformed route — by the time <code>find_route_indexed</code> runs, every route is known-valid.</div>
+    </article>
+  </section>
+
+  <section id="code-map">
+    <h2>Code Map</h2>
+    <p>Everything Level 2 added or touched. Verified against <code>rproxy/src/</code>.</p>
+    <table>
+      <thead><tr><th>File / item</th><th>Responsibility</th></tr></thead>
+      <tbody>
+        <tr><td><code>router.rs</code></td><td>The entire routing engine — the file this level created.</td></tr>
+        <tr><td><code>PathMatcher</code> enum</td><td>The five match kinds: <code>Exact</code>, <code>Prefix</code>, <code>Wildcard</code>, <code>Regex</code>, <code>Any</code>.</td></tr>
+        <tr><td><code>PathMatcher::matches</code></td><td>Per-variant path test (the actual matching logic).</td></tr>
+        <tr><td><code>PathMatcher::specificity</code></td><td>Numeric rank per variant (4000 / 3000+len / 2000+len / 1000 / 0).</td></tr>
+        <tr><td><code>Route</code> struct</td><td>Match conditions (host, method, path) + destination.</td></tr>
+        <tr><td><code>Route::catch_all</code></td><td>The Level 1 "forward everything to one backend" expressed as one Any-route.</td></tr>
+        <tr><td><code>Route::matches</code></td><td>AND across host (case-insensitive) + method (case-insensitive) + path.</td></tr>
+        <tr><td><code>Route::specificity</code></td><td>path score + 500 (host) + 100 (method).</td></tr>
+        <tr><td><code>RouteTable</code> + <code>new</code></td><td>Immutable <code>Vec&lt;Route&gt;</code> built once at startup.</td></tr>
+        <tr><td><code>RouteTable::find</code></td><td>Most-specific pool for a request (returns <code>&amp;Arc&lt;Upstream&gt;</code>).</td></tr>
+        <tr><td><code>find_route</code> / <code>find_route_indexed</code></td><td>Whole winning route (the indexed form also yields the table index for L11).</td></tr>
+        <tr><td><code>RouteTable::upstreams</code></td><td>Distinct pools, de-duplicated by <code>Arc::ptr_eq</code>, for the health prober.</td></tr>
+        <tr><td><code>RouteTable::describe</code></td><td>Human-readable dump for the startup banner.</td></tr>
+        <tr><td><code>parse_matchers</code></td><td>Parse <code>[METHOD ][host]path_expr</code> — the <code>;</code>-before-<code>=</code> trap lives here.</td></tr>
+        <tr><td><code>resolve_route</code></td><td>Bind a parsed spec's target to a pool; startup validation.</td></tr>
+        <tr><td><code>http::target_path</code></td><td>Strip the query string, giving the path routing keys off.</td></tr>
+        <tr><td><code>http::host_without_port</code></td><td>Strip the port (IPv6-aware) from the <code>Host</code> header.</td></tr>
+        <tr><td><code>Cargo.toml</code></td><td>Adds the single dependency <code>regex = "1.13.1"</code>.</td></tr>
+      </tbody>
+    </table>
+    <div class="callout warn"><strong>Verification note:</strong> the <code>Route</code> fields <code>upstream: Arc&lt;Upstream&gt;</code>, <code>rules</code>, <code>chain</code>, and <code>cache_ttl</code>, plus <code>resolve_route</code>'s upstream-map argument and <code>find_route_indexed</code> itself, are visible in today's <code>router.rs</code> but were added by Levels 3, 5, 6, and 11. This map labels them as Level 2's <em>seams</em>, not its original contents — Level 2 stored a single backend <code>String</code> and had a simpler <code>find</code>.</div>
+  </section>
+
+  <section id="industry">
+    <h2>Industry: nginx / httpd / HAProxy / Envoy</h2>
+    <p class="lead">Every production proxy solves "which backend?" — but with different data structures, config models, and precedence rules. Ferrum is a teaching build; here's where it lands honestly against the field. (Architecture as generally understood; qualify specifics with "as of" — behaviors drift across versions.)</p>
+    <div class="grid2">
+      <div class="card">
+        <span class="tag tech">nginx</span>
+        <h4>Location matching</h4>
+        <p><strong>Mechanism:</strong> <code>location</code> blocks with prefix and regex forms. Prefix matches use a compiled tree; exact (<code>=</code>) and prefix (<code>^~</code>) can short-circuit before regexes are tried. Precedence is a documented, slightly baroque set of rules (exact, then longest literal prefix, then regexes <em>in file order</em>).</p>
+        <p><strong>vs. ours:</strong> nginx's "regexes tried in order" is declaration-dependent; Ferrum ranks regex uniformly below structured matchers and never depends on order except as a final tie-break. Ferrum's rule is simpler to reason about; nginx's is more expressive and far more optimized.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Apache httpd</span>
+        <h4>Location / Directory / rewrite</h4>
+        <p><strong>Mechanism:</strong> <code>&lt;Location&gt;</code>, <code>&lt;LocationMatch&gt;</code>, and the <code>mod_rewrite</code> engine (a PCRE-based rule stack evaluated per request). Merging order across container types is intricate.</p>
+        <p><strong>vs. ours:</strong> httpd's <code>mod_rewrite</code> uses a backtracking PCRE engine — powerful (backreferences, lookaround) but exposed to ReDoS if rules touch untrusted input. Ferrum deliberately gives that up for the linear-time <code>regex</code> crate. We trade expressiveness for a safety guarantee.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">HAProxy</span>
+        <h4>ACLs + use_backend</h4>
+        <p><strong>Mechanism:</strong> boolean <em>ACLs</em> (<code>path_beg</code>, <code>hdr(host)</code>, <code>path_reg</code>, …) combined with <code>use_backend ... if &lt;acl&gt;</code>. Rules are evaluated <em>top-to-bottom; first match wins</em> — precedence <em>is</em> declaration order, by design.</p>
+        <p><strong>vs. ours:</strong> the opposite philosophy. HAProxy makes order authoritative and gives the operator full control; Ferrum computes specificity so order can't surprise you. Both are valid; ours is friendlier to "I added a route and everything broke."</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Envoy</span>
+        <h4>RouteConfiguration</h4>
+        <p><strong>Mechanism:</strong> virtual hosts → an ordered list of routes, each with <code>prefix</code> / <code>path</code> / <code>safe_regex</code> matchers plus header and query matchers. First matching route wins (order-authoritative), and — notably — <code>safe_regex</code> mandates the RE2 engine (linear-time, no backtracking).</p>
+        <p><strong>vs. ours:</strong> Envoy's <code>safe_regex</code>/RE2 is the <em>same</em> insight as our <code>regex</code>-crate choice — both refuse backtracking for safety. Envoy is order-authoritative and dynamically configurable (xDS) over the network; Ferrum is specificity-ranked and configured once at startup.</p>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Proxy</th><th>Data structure</th><th>Precedence rule</th><th>Regex engine</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Ferrum (ours)</strong></td><td>linear scan over a <code>Vec&lt;Route&gt;</code></td><td>computed specificity; order only breaks ties</td><td>Rust <code>regex</code> (linear-time, no backtracking)</td></tr>
+        <tr><td>nginx</td><td>compiled prefix tree + regex list</td><td>exact → longest prefix → regex in file order</td><td>PCRE (backtracking)</td></tr>
+        <tr><td>Apache httpd</td><td>container merge + rule stack</td><td>intricate merge; mod_rewrite is ordered</td><td>PCRE (backtracking)</td></tr>
+        <tr><td>HAProxy</td><td>ACL list</td><td>top-to-bottom, first match wins</td><td>PCRE-style</td></tr>
+        <tr><td>Envoy</td><td>ordered route list per vhost</td><td>first match wins (order-authoritative)</td><td>RE2 via <code>safe_regex</code> (linear-time)</td></tr>
+      </tbody>
+    </table>
+    <div class="callout"><strong>The honest bottom line:</strong> Ferrum's <code>O(n)</code> linear scan is fine for a handful of routes and easy to understand, but it does <em>not</em> scale like nginx's compiled tree or Envoy's optimized matchers to thousands of routes. What Ferrum gets right for a teaching build is the two ideas that matter most: <em>order-independent precedence</em> and a <em>linear-time regex engine</em>. The second one puts us in the same safety camp as Envoy's <code>safe_regex</code>.</div>
+  </section>
+
+  <section id="quiz">
+    <h2>Self-Check Questions</h2>
+    <div class="callout warn"><strong>Quiz pending — Levels 1–2 predate the per-level quiz convention.</strong> PROGRESS.md records a checkbox "Level 2 quiz — Vessey to answer before Level 3" but, unlike Levels 3–14, contains no written questions for this level. The eight questions below are <strong>KB-authored self-checks</strong>, not copied from PROGRESS.md — they are here so the page has a working revision section. Answers are intentionally omitted; work them out from the sections above (and from <code>router.rs</code>).</div>
+    <ol>
+      <li class="qa"><p class="q">A request for <code>GET /api/health</code> arrives and three routes all match: <code>/=B_ANY</code>, <code>/api/**=B_PREFIX</code>, and <code>/api/health=B_EXACT</code>. Which backend is chosen, what are the three specificity scores, and why does the answer <em>not</em> depend on the order the routes were declared?</p></li>
+      <li class="qa"><p class="q">Two prefix routes match <code>/api/v2/users</code>: <code>/api/**</code> and <code>/api/v2/**</code>. Explain, using the <code>2000 + p.len()</code> formula, which wins — and name the classic networking rule this mirrors.</p></li>
+      <li class="qa"><p class="q">Why does <code>PathMatcher::Wildcard</code> reject <code>/files/2026/report.pdf</code> but accept <code>/files/report.pdf</code>? Reference the two conditions in its <code>matches</code> body.</p></li>
+      <li class="qa"><p class="q">The parser severs the <code>;</code>-options string <em>before</em> splitting the spec on <code>=</code>. Give a concrete spec that would mis-route if the order were reversed, and say what wrong target it would pick.</p></li>
+      <li class="qa"><p class="q">The <code>RouteTable</code> is shared as <code>Arc&lt;RouteTable&gt;</code> and read by many connection tasks at once with no lock. What property of the table makes lock-free reads safe, and what does cloning the <code>Arc</code> actually cost?</p></li>
+      <li class="qa"><p class="q">Why did Level 2 choose the Rust <code>regex</code> crate specifically, and how does its linear-time / no-backtracking guarantee become a <em>security</em> property at Levels 9 and 13 that it isn't yet at Level 2?</p></li>
+      <li class="qa"><p class="q">A route is declared with a host <em>and</em> a method constraint; another with the same path but neither. On <code>Route::specificity</code>, how much does each constraint add, and why are the band widths chosen so path kind always dominates host/method?</p></li>
+      <li class="qa"><p class="q">Where do the three match keys (method, host, path) actually come from before <code>find_route_indexed</code> sees them, and what do <code>http::target_path</code> and <code>http::host_without_port</code> each strip? (Bonus: what does the latter do with <code>[::1]:8080</code>?)</p></li>
+    </ol>
+  </section>
+
+  <section id="cheatsheet">
+    <h2>Cheat Sheet &amp; Glossary</h2>
+    <h3>Specificity scores</h3>
+    <table>
+      <thead><tr><th>Component</th><th>Score contribution</th></tr></thead>
+      <tbody>
+        <tr><td>Path: <code>Exact</code></td><td>4000</td></tr>
+        <tr><td>Path: <code>Wildcard(p)</code></td><td>3000 + <code>p.len()</code></td></tr>
+        <tr><td>Path: <code>Prefix(p)</code></td><td>2000 + <code>p.len()</code></td></tr>
+        <tr><td>Path: <code>Regex</code></td><td>1000</td></tr>
+        <tr><td>Path: <code>Any</code></td><td>0</td></tr>
+        <tr><td>Host constraint present</td><td>+500</td></tr>
+        <tr><td>Method constraint present</td><td>+100</td></tr>
+      </tbody>
+    </table>
+    <h3>Spec syntax &amp; defaults</h3>
+    <table>
+      <thead><tr><th>Item</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Spec shape</td><td><code>[METHOD ][host]path_expr=TARGET</code></td></tr>
+        <tr><td>Prefix suffix</td><td><code>/**</code> → <code>Prefix</code></td></tr>
+        <tr><td>Wildcard suffix</td><td><code>/*</code> → <code>Wildcard</code> (one segment)</td></tr>
+        <tr><td>Regex prefix</td><td>leading <code>~</code> → <code>Regex</code></td></tr>
+        <tr><td>Catch-all</td><td><code>/</code> or <code>/**</code> alone → <code>Any</code></td></tr>
+        <tr><td>Options separator</td><td><code>;</code> (severed before <code>=</code>; no literal <code>;</code> in options)</td></tr>
+        <tr><td>Host / method compare</td><td><code>eq_ignore_ascii_case</code> (case-insensitive, ASCII)</td></tr>
+        <tr><td>No match</td><td>404 Not Found</td></tr>
+        <tr><td>Equal-specificity tie-break</td><td>first declared wins (<code>max_by_key</code> keeps first max)</td></tr>
+        <tr><td>Selection complexity</td><td>O(n) over routes</td></tr>
+        <tr><td>Dependency added</td><td><code>regex = "1.13.1"</code></td></tr>
+        <tr><td>Run with routes</td><td><code>cargo run -- 127.0.0.1:8080 /api/**=127.0.0.1:9001 /=127.0.0.1:9000</code></td></tr>
+      </tbody>
+    </table>
+    <h3>Glossary</h3>
+    <div class="qa"><p class="q"><code>RouteTable</code></p><p class="a">The immutable <code>Vec&lt;Route&gt;</code> built once at startup and shared as <code>Arc&lt;RouteTable&gt;</code>.</p></div>
+    <div class="qa"><p class="q"><code>PathMatcher</code></p><p class="a">The five-variant enum deciding whether a path matches: Exact / Prefix / Wildcard / Regex / Any.</p></div>
+    <div class="qa"><p class="q">Specificity</p><p class="a">A computed numeric rank; the highest-scoring matching route wins, independent of declaration order.</p></div>
+    <div class="qa"><p class="q">Longest-prefix-wins</p><p class="a">Among matching prefixes, the longest is most specific — the IP-routing-table rule, encoded as <code>2000 + p.len()</code>.</p></div>
+    <div class="qa"><p class="q"><code>Arc&lt;T&gt;</code></p><p class="a">Atomically reference-counted shared pointer; cloning is a refcount bump, enabling lock-free concurrent reads of immutable data.</p></div>
+    <div class="qa"><p class="q">Catch-all</p><p class="a">A route with <code>path: Any</code> and no host/method constraints (score 0) — the backstop that only wins when nothing else matches; also how Level 1's single-backend behavior is expressed.</p></div>
+    <div class="qa"><p class="q">ReDoS</p><p class="a">Regular-expression denial of service: a backtracking engine driven to exponential time by a crafted input. Structurally impossible with the linear-time <code>regex</code> crate Ferrum chose.</p></div>
+    <div class="qa"><p class="q"><code>find_route_indexed</code></p><p class="a">The single selection core; also yields the winning route's table index (used by Level 11's cache key). <code>find</code> and <code>find_route</code> both funnel through it.</p></div>
+  </section>
+</main>
+</div>
+
+<footer>
+  <p>Ferrum Knowledge Base &mdash; Level 2: Routing &bull; Built 2026-09-02</p>
+  <p class="muted">A from-scratch Rust reverse-proxy course. Grounded in <code>rproxy/src/router.rs</code> and PROGRESS.md; industry comparisons are the author's own and qualified where uncertain.</p>
+</footer>
+</body>
+</html>

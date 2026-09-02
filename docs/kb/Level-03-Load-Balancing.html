@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ferrum KB — Level 3: Load Balancing</title>
+<meta name="description" content="A complete, plain-English map of the Barracuda Networks product portfolio: every product family (Email, Application, Network, Data Protection, Managed XDR, MSP) and the BarracudaONE platform — what each product is, what it does, and what problem it solves." />
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    flowchart: { htmlLabels: true, useMaxWidth: true, padding: 12, nodeSpacing: 55, rankSpacing: 55 },
+    startOnLoad: true, theme: 'base', securityLevel: 'loose',
+    themeVariables: {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '15px',
+      primaryColor: '#e7e8ea', primaryTextColor: '#15203a', primaryBorderColor: '#7e848c',
+      lineColor: '#6a6f77', secondaryColor: '#dddfe2', tertiaryColor: '#f3f4f6',
+      noteBkgColor: '#fff3d6', noteTextColor: '#3a2f12', noteBorderColor: '#caa84a',
+      actorBkg: '#e7e8ea', actorTextColor: '#15203a', actorBorder: '#7e848c',
+      clusterBkg: '#eef0f2', clusterBorder: '#a0a4aa'
+    }
+  });
+</script>
+<style>
+  :root{--bg:#0f1320;--panel:#161c2e;--panel-2:#1d2540;--ink:#e8ecf5;--muted:#9aa6c4;--accent:#7c5cff;--accent-2:#22d3a6;--warn:#ffb454;--danger:#ff6b81;--line:#2a3354;--code-bg:#0b0f1a;--max:1100px;}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:linear-gradient(180deg,#0c1020,#0f1320 40%);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  a{color:var(--accent-2);text-decoration:none}a:hover{text-decoration:underline}
+  header.hero{padding:56px 24px 40px;text-align:center;background:radial-gradient(1200px 400px at 50% -10%,rgba(255,107,129,.18),transparent 60%);border-bottom:1px solid var(--line);}
+  header.hero .eyebrow{letter-spacing:.25em;text-transform:uppercase;color:var(--accent-2);font-size:.75rem;font-weight:700}
+  header.hero h1{font-size:clamp(1.9rem,4vw,3rem);margin:.3em 0 .2em;line-height:1.1}
+  header.hero p.sub{color:var(--muted);max-width:790px;margin:0 auto;font-size:1.05rem}
+  .badges{margin-top:18px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .badge{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);padding:4px 12px;border-radius:999px;font-size:.8rem}
+  .layout{display:grid;grid-template-columns:260px 1fr;gap:32px;align-items:start;max-width:1320px;margin:0 auto;padding:0 22px}
+  nav.toc{position:sticky;top:0;max-height:100vh;overflow:auto;padding:28px 10px 60px;border-right:1px solid var(--line);font-size:.9rem;}
+  nav.toc h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.18em;color:var(--muted);margin:18px 8px 6px}
+  nav.toc a{display:block;color:var(--muted);padding:5px 10px;border-radius:8px;border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--panel);color:var(--ink);text-decoration:none;border-left-color:var(--accent)}
+  main{padding:34px 0 80px;min-width:0}
+  section{margin:0 0 46px;scroll-margin-top:18px}
+  section>h2{font-size:1.7rem;margin:0 0 .5em;padding-bottom:.3em;border-bottom:2px solid var(--line);display:flex;align-items:center;gap:.5em;}
+  h3{font-size:1.25rem;margin:1.6em 0 .4em;color:#fff}
+  h4{font-size:1.02rem;margin:1.2em 0 .3em;color:var(--accent-2);text-transform:uppercase;letter-spacing:.04em}
+  p,li{color:var(--ink)}.muted{color:var(--muted)}
+  article.concept{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin:22px 0}
+  article.concept>h3:first-child{margin-top:0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr} .layout{grid-template-columns:1fr} nav.toc{position:static;max-height:none;border-right:none;border-bottom:1px solid var(--line)}}
+  .card{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card h4{margin-top:.2em}
+  .callout{border-left:4px solid var(--accent);background:var(--panel-2);padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  .callout.analogy{border-left-color:var(--accent-2)}.callout.warn{border-left-color:var(--warn)}.callout.danger{border-left-color:var(--danger)}.callout.story{border-left-color:#5ec2ff}
+  .tag{display:inline-block;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:2px 8px;border-radius:6px;margin-bottom:6px}
+  .tag.beg{background:rgba(34,211,166,.15);color:var(--accent-2)}.tag.tech{background:rgba(124,92,255,.18);color:#b9a6ff}.tag.adv{background:rgba(255,107,129,.15);color:var(--danger)}
+  code{background:var(--code-bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.86em;color:#ffd9a0}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.85rem;line-height:1.55}
+  pre code{background:none;border:none;padding:0;color:#d7e0f5}
+  pre.art{color:#ffd9a0;font-size:.95rem;line-height:1.4;letter-spacing:.04em}
+  pre.mermaid{background:#f7f8fc;color:#111;text-align:center}
+  .mermaid svg text,.mermaid text{fill:#15203a !important}
+  .mermaid .nodeLabel,.mermaid .edgeLabel,.mermaid .label,.mermaid span,.mermaid p,.mermaid div,.mermaid foreignObject *{color:#15203a !important;fill:#15203a !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p{background:#f3f5fc !important}
+  .mermaid .cluster-label .nodeLabel,.mermaid .cluster-label p,.mermaid .cluster span,.mermaid .cluster p{color:#3c4046 !important}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.92rem;overflow:hidden;border-radius:10px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel-2);color:#fff}
+  tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  details{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:12px 0}
+  details summary{cursor:pointer;font-weight:600;color:var(--accent-2);padding:6px 0}
+  details[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px}
+  figure{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  figcaption{color:var(--muted);font-size:.85rem;text-align:center;margin-top:8px;font-style:italic}
+  .qa{margin:10px 0}.qa .q{font-weight:600}.qa .a{color:var(--muted);margin:2px 0 0}
+  ol.flow{counter-reset:step;list-style:none;padding-left:0}
+  ol.flow>li{counter-increment:step;position:relative;padding:10px 0 10px 52px;border-bottom:1px dashed var(--line)}
+  ol.flow>li::before{content:counter(step);position:absolute;left:0;top:8px;width:34px;height:34px;background:var(--accent);color:#fff;border-radius:50%;display:grid;place-items:center;font-weight:700}
+  .rank{font-weight:800;color:var(--accent);margin-right:6px}
+  footer{border-top:1px solid var(--line);padding:30px 22px;text-align:center;color:var(--muted);font-size:.88rem}
+  .lead{font-size:1.08rem}
+  .formula{background:var(--code-bg);border:1px dashed var(--accent);border-radius:10px;padding:12px 16px;font-family:monospace;color:#ffd9a0;text-align:center;margin:14px 0}
+
+  /* KB-THEME START */
+  /* Azure (blue palette) */
+  :root{--bg:#0e1c30;--panel:#152740;--panel-2:#1d3458;--ink:#e6edf7;--muted:#93a6c4;--accent:#1a8ae5;--accent-2:#41a7f5;--warn:#d6a96a;--danger:#d98a8a;--line:#264064;--code-bg:#0b1626;}
+  body{background:linear-gradient(180deg,var(--bg),var(--bg))}
+  header.hero{background:radial-gradient(1100px 400px at 50% -10%,rgba(20,119,210,.26),transparent 60%)}
+  h3,.parthead{color:var(--ink)}
+  th{color:var(--ink)}
+  .tag.tech{background:rgba(65,167,245,.16);color:var(--accent-2)}
+  ol.flow>li::before{color:#0b1626}
+  /* KB-THEME END */
+  /* prevent node/edge label clipping */
+  .mermaid foreignObject{overflow:visible !important}
+  .mermaid .nodeLabel,.mermaid .label,.mermaid foreignObject>div,.mermaid foreignObject span,.mermaid foreignObject p{white-space:nowrap !important;overflow:visible !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p,.mermaid .edgeLabel span{white-space:nowrap !important;overflow:visible !important;padding:1px 4px}
+  .mermaid svg{max-width:100%;height:auto}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyebrow">Ferrum KB &middot; Level 3 of 14 &middot; Load Balancing</div>
+  <h1>Load Balancing<br/><span style="font-size:.6em;color:var(--muted)">One route, many servers, seven ways to choose</span></h1>
+  <p class="sub">Level 3 turns each route's single backend address into a <em>pool</em> of servers and chooses one per request. Seven algorithms &mdash; round-robin, weighted-RR, random, least-connections, least-response-time, IP hash, consistent hash &mdash; sit behind one <code>Upstream::pick()</code> call, all grounded in <code>balancer.rs</code>. The linchpin is the RAII <code>Lease</code>: it makes the load-aware counters honest by releasing on <em>every</em> exit path, and gates response-time learning so a failed connect can't teach the proxy to prefer dead servers.</p>
+  <div class="badges">
+    <span class="badge">Audience: Vessey (built it) + curious engineers</span>
+    <span class="badge">Scope: balancer.rs / router.rs / proxy.rs</span>
+    <span class="badge">Reading time: ~24 min</span>
+  </div>
+  <p class="muted" style="margin-top:18px">
+    <a href="index.html">&larr; Course index</a>
+    &nbsp;&middot;&nbsp; <a href="Level-02-Routing.html">&larr; Level 2: Routing</a>
+    &nbsp;&middot;&nbsp; <a href="Level-04-Health-Checks.html">Level 4: Health Checks &rarr;</a>
+  </p>
+</header>
+
+<div class="layout">
+<nav class="toc">
+  <h2>Orientation</h2>
+  <a href="#exec-summary">Executive Summary</a>
+  <a href="#big-picture">The Big Picture</a>
+  <h2>Core</h2>
+  <a href="#pools">Upstream Pools &amp; Resolution</a>
+  <a href="#lease">The RAII Lease</a>
+  <a href="#stateless">Stateless Algorithms</a>
+  <a href="#load-aware">Load-Aware Algorithms</a>
+  <a href="#hash-based">Hash-Based Algorithms</a>
+  <a href="#sharing">Arc-Shared Upstreams &amp; the L4 Seam</a>
+  <a href="#code-map">Code Map</a>
+  <h2>Compare</h2>
+  <a href="#industry">Industry Comparison</a>
+  <h2>Reference</h2>
+  <a href="#quiz">Quiz</a>
+  <a href="#cheatsheet">Cheat Sheet &amp; Glossary</a>
+</nav>
+
+<main>
+
+<section id="exec-summary">
+  <h2>Executive Summary</h2>
+  <p class="lead">Level 2 answered "which pool?"; Level 3 answers "which server in that pool?" &mdash; and does it seven different ways behind a single <code>Upstream::pick()</code> call, with zero new dependencies.</p>
+  <p>The core reshape is small but load-bearing: <code>Route.backend: String</code> becomes <code>Route.upstream: Arc&lt;Upstream&gt;</code>. A single bare <code>host:port</code> is no longer special &mdash; it is just a degenerate 1-member round-robin pool (<code>Upstream::single</code>), so the rest of the code has exactly one path. Every existing route, and all 36 pre-Level-3 tests, keep working unchanged because a <code>host:port</code> route target auto-wraps into a pool (the second of three resolution rules).</p>
+  <p>The seven algorithms fall into three teaching groups. <strong>Stateless</strong> (round-robin, weighted-RR, random) need no shared per-server state &mdash; an atomic counter or nothing at all. <strong>Load-aware</strong> (least-connections, least-response-time) read live per-server atomics and are the reason the <code>Lease</code> exists. <strong>Hash-based</strong> (IP hash, consistent hash) give client affinity: the same client keeps landing on the same server, cheaply by arithmetic (IP hash) or robustly through a virtual-node ring (consistent hash).</p>
+  <p>The <strong>RAII <code>Lease</code></strong> is the design's keystone. Selecting a server hands back a <code>Lease</code> that counts as one in-flight request; releasing that count lives in <code>Drop</code>, not an explicit <code>release()</code> call, so it fires on <em>every</em> exit path &mdash; normal finish, a <code>?</code> bailing out mid-body, task cancellation, panic. A single leaked in-flight count would permanently bias least-connections against a perfectly healthy server. The lease also folds the observed round-trip time into an EWMA, but only after <code>mark_served()</code> &mdash; so a failed (instantly-refused) connect never records a tiny RTT that would trick least-response-time into preferring dead backends.</p>
+  <p>Every <code>Upstream</code> is built once at startup and shared read-only behind an <code>Arc</code>; the only mutation is through interior-mutable atomics, so <code>pick()</code> takes <code>&amp;self</code> and needs no lock &mdash; the same lock-free-shared-config pattern the router used. And Level 3 deliberately left a seam: <code>Server::available()</code> was hardcoded <code>true</code> but already consulted by every selection branch, so Level 4's circuit breaker could snap in with no changes to the <code>select</code> logic.</p>
+  <p>This is a teaching build, and its limits are the lesson. It uses a single sorted hash ring (Ketama-style, 160 vnodes/server), not Maglev; least-connections tolerates a documented one-request race rather than taking a lock; and a dead server is still picked and still yields <code>502</code> &mdash; liveness is Level 4's job. 52 unit tests pass; distributions were live-verified against Python backends.</p>
+</section>
+
+<section id="big-picture">
+  <h2>The Big Picture</h2>
+  <p class="lead">Level 3 inserts exactly one step into the request path: between "route matched" and "connect to backend", the proxy now calls <code>upstream.pick(client_ip)</code> to choose a specific server.</p>
+  <p>The router still does match logic only &mdash; it answers "which pool?" and returns an <code>Arc&lt;Upstream&gt;</code>. The balancer answers "which server in it?". That clean split is why <code>router.rs</code> barely changed: its <code>find()</code> just returns <code>Option&lt;&amp;Arc&lt;Upstream&gt;&gt;</code> instead of a backend string. The pick produces a <code>Lease</code>, the proxy connects to <code>lease.addr()</code>, forwards, and when the lease drops the per-server counters settle up.</p>
+  <figure>
+<pre class="mermaid">
+flowchart LR
+  C["Client"] --> A["Accept + parse<br/>(Level 1)"]
+  A --> R["Route match<br/>(Level 2)<br/>returns Arc of Upstream"]
+  R --> P["pick(client_ip)<br/>select server + take Lease<br/>THIS LEVEL"]
+  P --> K["connect(lease.addr())"]
+  K -->|"ok"| F["Forward + stream response<br/>mark_served()"]
+  K -->|"connect fail"| E502["502 (dead server<br/>still picked — L4 fixes)"]
+  F --> D["Drop Lease:<br/>inflight-- always,<br/>record RTT if served"]
+  D --> C
+  style P fill:#1a8ae5,color:#fff,stroke:#0b1626
+  style D fill:#bcd8f5,stroke:#0b1626
+  style E502 fill:#d98a8a,color:#fff,stroke:#0b1626
+</pre>
+<figcaption>Where Level 3 lives. The one new stage is <code>pick()</code> (highlighted); everything downstream flows through the <code>Lease</code>, whose <code>Drop</code> keeps the load-aware counters honest.</figcaption>
+  </figure>
+  <div class="callout analogy">
+    <strong>Analogy:</strong> a route is like a phone number for a whole department; Level 2 dials the department. Level 3 is the receptionist who decides <em>which desk</em> in that department picks up &mdash; round-robin (next desk in line), least-connections (whoever's least busy), or IP hash (always the same desk for the same caller, so they don't have to re-explain themselves). The <code>Lease</code> is the sticky note on the desk saying "one call in progress here" &mdash; and it comes off the moment the call ends, no matter how the call ends.
+  </div>
+</section>
+
+<section id="pools">
+  <h2>Upstream Pools &amp; Resolution</h2>
+  <p class="lead">An <code>Upstream</code> is a named group of <code>Server</code>s plus one <code>Algorithm</code>. The CLI declares pools with <code>--upstream NAME=SPEC</code>; routes then bind to a pool by name, or auto-wrap a bare address.</p>
+
+  <article class="concept">
+    <h3>What a pool is</h3>
+    <p>In <code>balancer.rs</code>, <code>Upstream</code> holds a <code>name</code>, an <code>algorithm</code>, a <code>Vec&lt;Server&gt;</code>, and a few precomputed helpers: a <code>cursor: AtomicUsize</code> for round-robin, a <code>wrr_index</code> (the weight-expanded index list, empty unless weighted), and a <code>ring: Vec&lt;(u64, usize)&gt;</code> (the consistent-hash ring, empty unless <code>chash</code>). Each <code>Server</code> owns its <code>addr</code> plus the two live atomics the load-aware algorithms read: <code>inflight: AtomicUsize</code> and <code>ewma_us: AtomicU64</code>.</p>
+    <p>The spec grammar is <code>SPEC = algo:server[*weight][,server...]</code>. The algorithm tag is optional and defaults to round-robin. Telling a tag apart from a hostname is the one subtlety: a leading token is treated as an algorithm keyword only when it is <em>all ASCII letters</em> and the remainder still contains a <code>:</code> (so it really looks like <code>tag:host:port</code>). Thus <code>lc:127.0.0.1:9001</code> parses as tag <code>lc</code>, but <code>localhost:9001</code> has no tag (its remainder <code>9001</code> has no colon) and defaults to round-robin.</p>
+    <pre><code>--upstream api=lc:127.0.0.1:9001,127.0.0.1:9002,127.0.0.1:9003
+--upstream web=wrr:10.0.0.1:80*5,10.0.0.2:80*1
+--upstream cache=chash:node1:6379,node2:6379,node3:6379</code></pre>
+  </article>
+
+  <article class="concept">
+    <h3>The three-rule route resolution</h3>
+    <p>A route's target resolves in a strict order (in <code>main.rs</code> / route wiring), which is what preserves backward compatibility:</p>
+    <ol class="flow">
+      <li><strong>Declared name:</strong> the target matches a <code>--upstream</code> name &rarr; bind to that pool.</li>
+      <li><strong>Auto-wrap:</strong> otherwise it parses as <code>host:port</code> &rarr; wrap it as a single-server <code>rr</code> pool via <code>Upstream::single</code>. This is what lets every pre-Level-3 invocation and all 36 old tests keep working unchanged &mdash; a lone backend is genuinely just a 1-member pool.</li>
+      <li><strong>Error:</strong> otherwise &rarr; startup error <code>unknown upstream "x"</code> and exit 1.</li>
+    </ol>
+    <p>The shape check <code>is_host_port</code> splits the port off from the <em>right</em>, so IPv6 hosts survive (<code>[::1]:8080</code> &rarr; host <code>[::1]</code>, port <code>8080</code>). It validates shape only; DNS resolution happens at connect time.</p>
+  </article>
+
+  <article class="concept">
+    <h3>Startup validation &mdash; fail loud, fail early</h3>
+    <p>Misconfigurations are rejected at startup with exit 1 rather than surfacing as confusing runtime behavior. From the spec parser:</p>
+    <ul>
+      <li><strong>Empty pool</strong> (no servers) &rarr; error.</li>
+      <li><strong>Unparseable address</strong> (not <code>host:port</code>, or port <code>0</code>) &rarr; error.</li>
+      <li><strong>Unknown algorithm</strong> (<code>bogus:127.0.0.1:9001</code> looks like a tag, isn't known) &rarr; error.</li>
+      <li><strong>Zero weight</strong> (<code>*0</code>) &rarr; error: a zero-weight server can never be picked, so it is certainly a typo.</li>
+      <li><strong>Duplicate upstream name</strong> &rarr; error.</li>
+    </ul>
+    <div class="callout warn"><strong>Accept-but-warn, one exception:</strong> a <code>*weight</code> suffix on a <em>non</em>-weighted algorithm (e.g. <code>rr:...*5</code>) is not an error &mdash; it warns on stderr and ignores the weight. Rationale: a harmless no-op misconfiguration should not stop the proxy from starting. Only <code>wrr</code> consumes the weight; everywhere else it is dead text.</div>
+  </article>
+</section>
+
+<section id="lease">
+  <h2>The RAII Lease</h2>
+  <p class="lead">This is the level's keystone. A <code>Lease</code> is an RAII handle to a picked server: holding it counts as one in-flight request, and releasing that count lives in <code>Drop</code> &mdash; never an explicit call. That single design choice is the whole reason the type exists.</p>
+
+  <article class="concept">
+    <h3>Why release must live in <code>Drop</code></h3>
+    <p>Two algorithms are <em>load-aware</em>: least-connections reads a per-server <code>inflight</code> count, least-response-time reads a per-server EWMA. Those counters only stay honest if every increment is paired with exactly one decrement &mdash; <strong>including on the error paths</strong>. An explicit <code>release()</code> call is always one early <code>return</code>, one <code>?</code>-propagation, or one task cancellation away from being skipped. So <code>Lease::new</code> does <code>inflight.fetch_add(1, Relaxed)</code> and <code>impl Drop for Lease</code> does <code>inflight.fetch_sub(1, Relaxed)</code>, which the Rust compiler runs on <em>every</em> exit path.</p>
+    <div class="callout danger"><strong>The leak this prevents (quiz Q1):</strong> suppose release were an explicit call at the end of <code>serve_one</code>, and the request bails out mid-body via <code>?</code> after a read error. The <code>fetch_sub</code> never runs, so that server's <code>inflight</code> is now permanently one too high. Under least-connections, the scan sees a phantom in-flight request forever and steers traffic <em>away</em> from that server &mdash; a perfectly <em>healthy</em> server, penalized by a counter that never came back down. Every leaked request makes it worse. This is precisely the bug the RAII design exists to make impossible, and test #6 (<code>lease_releases_on_every_path</code>) asserts the counter returns to 0 after an early return.</div>
+  </article>
+
+  <article class="concept">
+    <h3>The <code>served</code> gate: don't let dead servers look fast</h3>
+    <p>The lease also records round-trip time into the server's EWMA on drop &mdash; but <strong>only</strong> after <code>mark_served()</code> has been called (which <code>proxy.rs</code> does after a successful connect + forward). The gate is a plain <code>served: bool</code> field, checked in <code>Drop</code> before <code>record_rtt(started.elapsed())</code> fires.</p>
+    <p>Why gate it? Because the fastest possible way to "respond" is to <em>refuse the connection instantly</em>. If a failed, instantly-refused connect recorded its tiny RTT into the EWMA, least-response-time would <em>learn to prefer the dead server</em> &mdash; it appears to have the lowest response time in the pool. The <code>served</code> gate ensures only a real, completed exchange teaches the EWMA anything. (Samples are also floored at 1µs so a genuinely fast reply can never masquerade as the <code>0</code> = "untried" sentinel.)</p>
+    <div class="callout warn"><strong>This is quiz Q2.</strong> The in-flight decrement is <em>unconditional</em> (it must fall no matter what), but the RTT record is <em>conditional</em> on <code>served</code>. Two different rules for two different fields, both enforced in the same <code>Drop</code> body.</div>
+  </article>
+
+  <figure>
+<pre class="mermaid">
+sequenceDiagram
+  participant PX as proxy.rs
+  participant UP as Upstream
+  participant SV as Server
+  PX->>UP: pick(client_ip)
+  UP->>UP: select() → index
+  UP->>SV: Lease::new(&server)
+  SV->>SV: inflight += 1 (Relaxed)
+  UP-->>PX: Some(Lease)
+  PX->>PX: connect(lease.addr())
+  alt connect + forward OK
+    PX->>PX: lease.mark_served()
+    PX->>PX: stream response
+  else connect fails
+    PX->>PX: (no mark_served) → 502
+  end
+  PX->>SV: drop(lease)
+  SV->>SV: inflight -= 1 (ALWAYS)
+  SV->>SV: if served: record_rtt(elapsed) into EWMA
+</pre>
+<figcaption>The pick&rarr;lease&rarr;drop lifecycle (<code>balancer.rs</code> + <code>proxy.rs</code>). The in-flight count rises at <code>Lease::new</code> and falls unconditionally at <code>Drop</code>; the EWMA update fires at <code>Drop</code> only if <code>mark_served()</code> ran. A failed connect drops the lease too &mdash; releasing the count &mdash; but leaves the EWMA untouched.</figcaption>
+  </figure>
+
+  <article class="concept">
+    <h3>Borrowing, not owning</h3>
+    <p><code>Lease&lt;'a&gt;</code> holds <code>server: &amp;'a Server</code> &mdash; it <em>borrows</em> the chosen server rather than copying anything out. The backend address is read via <code>lease.addr()</code> straight from the <code>Server</code>, keeping a single source of truth. The borrow works cleanly because <code>serve_one</code> holds the <code>Arc&lt;Upstream&gt;</code> for the whole exchange, so no <code>'static</code> bound and no owned-index workaround is needed. <code>pick()</code> returns <code>Option&lt;Lease&lt;'_&gt;&gt;</code>; <code>None</code> only when the pool has no available server &mdash; a case startup validation already forbids, so the call site treats it as a defensive <code>502</code>.</p>
+  </article>
+</section>
+
+<section id="stateless">
+  <h2>Stateless Algorithms</h2>
+  <p class="lead">Round-robin, weighted round-robin, and random need no live per-server state &mdash; just an atomic counter, a pre-expanded list, or nothing at all. All three are O(1) per pick.</p>
+
+  <article class="concept">
+    <h3>Round Robin &mdash; the atomic counter</h3>
+    <p>The sensible default. One shared <code>cursor: AtomicUsize</code>; each pick does <code>cursor.fetch_add(1, Relaxed) % n</code> and cycles through servers in order. Over four picks of a 3-server pool the sequence is <code>0,1,2,0</code> (test #1). Complexity: <strong>O(1)</strong>, one atomic.</p>
+    <p><strong>Why <code>Relaxed</code> (quiz Q3)?</strong> We want a distinct-ish index, not a synchronization edge. Round-robin has no data that a later thread must observe in a particular order &mdash; the counter <em>is</em> the whole state, and <code>fetch_add</code> is atomic regardless of ordering. <code>SeqCst</code> would impose a global total order across all atomics in the program and cost a memory fence, buying nothing here: two racing picks might still land on the same index under either ordering, and that's fine. <code>Relaxed</code> is the honest expression of "I need atomicity, not ordering."</p>
+  </article>
+
+  <article class="concept">
+    <h3>Weighted Round Robin &mdash; pre-expanded index vector</h3>
+    <p>Weights are expanded <em>once at startup</em> into an index vector: weights <code>5:1</code> become <code>[0,0,0,0,0,1]</code>. A pick is then plain round-robin over that vector (<code>cursor.fetch_add(1) % wrr_index.len()</code>, then index into it). Complexity: <strong>O(1)</strong> pick, <strong>O(sum of weights)</strong> memory. Test #2 confirms the 5:1 ratio holds over 100 picks.</p>
+    <div class="callout warn"><strong>Bursty vs. smooth (quiz Q4):</strong> the simple expansion produces a <em>bursty</em> run &mdash; <code>AAAAAB</code> for 5:1, i.e. five consecutive hits on A, then one on B. Nginx uses <em>smooth</em> weighted round-robin, which interleaves (roughly <code>AABAAB</code>) so the heavy server isn't hammered in a contiguous streak. When does the difference matter? Under high concurrency with slow requests, a bursty run can transiently pile several simultaneous requests onto A before B gets any &mdash; a momentary imbalance smooth WRR avoids. We keep the simple expansion because the burst is harmless for a teaching proxy and the array makes the weighting visually obvious.</div>
+  </article>
+
+  <article class="concept">
+    <h3>Random &mdash; no shared state at all</h3>
+    <p>A uniform random choice: <code>next_random() % n</code>. The teaching point is that random balancing needs <em>no coordinated state whatsoever</em> &mdash; and is surprisingly competitive in practice (cf. power-of-two-choices). The PRNG is a small <strong>xorshift64</strong> living in a <code>Cell&lt;u64&gt;</code> inside a <code>thread_local!</code>, so each worker thread rolls its own and never contends a shared cache line. No <code>rand</code> crate is added.</p>
+    <p>Seeding: each thread mixes the process-start <code>Instant</code>'s elapsed nanos with a per-thread <code>SEED_COUNTER</code> value (golden-ratio multiply) so two threads seeded in the same nanosecond still diverge, and a zero seed is nudged to a constant (xorshift is stuck at 0 forever if it ever reaches 0). Complexity: <strong>O(1)</strong>, no state shared across threads. Test #3 confirms every server gets picked over 300 rolls.</p>
+  </article>
+</section>
+
+<section id="load-aware">
+  <h2>Load-Aware Algorithms</h2>
+  <p class="lead">Least-connections and least-response-time read live per-server atomics that the <code>Lease</code> maintains. Both are an O(n) scan for the minimum. This is the group the whole RAII design serves.</p>
+
+  <article class="concept">
+    <h3>Least Connections &mdash; O(n) inflight scan</h3>
+    <p>Scan all servers, pick the one with the fewest in-flight requests (<code>min_by_key(|s| s.inflight())</code>); ties go to the lower index. The <code>inflight</code> count is exactly what the <code>Lease</code> bumps and drops. Complexity: <strong>O(n)</strong>, per-server <code>AtomicUsize</code>. Tests #4 and #5 confirm it picks the idle server while leases are held and rebalances once they drop.</p>
+    <div class="callout warn"><strong>The documented race (quiz Q8):</strong> two tasks scanning at the same instant can both see the same server as least-loaded and both pick it, briefly over-loading it by one request. This is <em>acceptable</em>: the error is one request deep and self-corrects on the very next pick (the just-picked server's <code>inflight</code> is now higher). The fix &mdash; a lock around the scan-and-pick &mdash; would serialize <em>every request</em> through a single mutex, destroying the concurrency the whole proxy exists to provide. Living with a one-request transient beats serializing the hot path. That trade-off is the lesson.</div>
+  </article>
+
+  <article class="concept">
+    <h3>Least Response Time &mdash; EWMA of RTT</h3>
+    <p>The same O(n) scan, but keyed on an <strong>exponentially-weighted moving average</strong> of observed round-trip time, stored as <code>AtomicU64</code> microseconds. The update rule, done in integer math with &alpha; = 0.2, is <code>new = (old*4 + sample) / 5</code>. Higher &alpha; reacts faster but is noisier; 0.2 is a calm, common choice.</p>
+    <p>Two subtleties make it fair. First, <strong>untried servers sort first</strong>: <code>0</code> is the sentinel for "no samples yet", and since <code>0</code> is the minimum, a freshly-added server gets traffic instead of being starved behind servers with (non-zero) history. Test #7 confirms both the untried-first rule and that the fastest server wins once all are tried. Second &mdash; and this is why the <code>served</code> gate matters &mdash; only a <em>completed</em> exchange folds into the EWMA, so a dead server's instant connection-refusal can never register as a blazing-fast response time.</p>
+    <div class="formula">EWMA (&alpha; = 0.2, integer):&nbsp; new_us = (old_us &times; 4 + sample_us) / 5&nbsp;&nbsp;|&nbsp;&nbsp;first sample: new_us = sample_us</div>
+  </article>
+</section>
+
+<section id="hash-based">
+  <h2>Hash-Based Algorithms</h2>
+  <p class="lead">IP hash and consistent hash both give <em>client affinity</em> &mdash; the same client keeps landing on the same server. The difference is what happens when the server set changes: IP hash reshuffles almost everyone; consistent hash barely moves anyone.</p>
+
+  <article class="concept">
+    <h3>The shared hasher: hand-written FNV-1a</h3>
+    <p>Both algorithms hash with an explicit <strong>FNV-1a</strong> (64-bit) written out in ~6 lines, <em>not</em> <code>std</code>'s <code>DefaultHasher</code>. Two reasons (quiz Q7): (1) FNV's arithmetic is visible and teachable &mdash; XOR the byte, multiply by the prime, repeat; and (2) <code>DefaultHasher</code>'s output is <em>explicitly unspecified across Rust versions</em>, so a routine toolchain upgrade could silently remap every client to a different server, quietly breaking affinity for the whole fleet. A named, fixed algorithm keeps affinity stable forever. The client IP is hashed by its raw octets (4 for v4, 16 for v6), avoiding textual quirks like <code>::1</code> vs its expanded form mapping differently.</p>
+  </article>
+
+  <article class="concept">
+    <h3>IP Hash &mdash; affinity by arithmetic accident</h3>
+    <p><code>hash(client_ip) % n</code>. The same IP hashes to the same index &mdash; <em>as long as <code>n</code> never changes</em>. Complexity: <strong>O(1)</strong>, no state. Test #8 confirms stability for one IP; test #9 confirms a range of IPs spreads across all servers.</p>
+    <div class="callout danger"><strong>The modulo-rehash disaster (quiz Q5):</strong> when <code>n</code> goes from 4 to 3, the divisor in <code>hash % n</code> changes, so <em>almost every</em> client's result changes &mdash; roughly <strong>3/4 of clients move</strong> to a different server, not just the 1/4 that lived on the removed server. Every remapped client loses its session affinity at once. For a cache pool this is a thundering herd of misses; for sticky sessions it's a mass logout. This fragility is exactly what consistent hashing was invented to fix, and test #11 asserts plain IP hash keeps <strong>&lt; 40%</strong> of keys on their original server under a 4&rarr;3 change.</div>
+  </article>
+
+  <article class="concept">
+    <h3>Consistent Hash &mdash; the virtual-node ring</h3>
+    <p>Place <code>VNODES_PER_SERVER = 160</code> virtual nodes per real server onto a <code>u64</code> ring by hashing <code>"addr#vnode_index"</code> with the same FNV-1a. Sort the <code>Vec&lt;(u64, usize)&gt;</code> once by hash. To pick: hash the client, binary-search (<code>partition_point</code>) for the first ring entry with hash &ge; the client's, and walk clockwise (wrapping to 0) to the first available server. Complexity: <strong>O(log(n&middot;v))</strong> lookup, sorted ring of <code>n&times;160</code> entries.</p>
+    <p><strong>Why 160 vnodes (quiz Q6)?</strong> If each server owned just <em>one</em> point on the ring, two problems appear: the arcs between points would be wildly uneven (one server might own a huge span and get most traffic), and removing a server would dump its entire single arc onto exactly one neighbor. Scattering 160 vnodes per server across the ring makes each server's total ownership close to <code>1/n</code> (smooth distribution), and removal orphans only the ~1/n of keys on <em>that</em> server's vnodes, redistributed among <em>many</em> neighbors rather than one. With 1 vnode per server, consistent hashing degrades toward the same imbalance and single-neighbor dumping it was meant to avoid.</p>
+    <div class="callout"><strong>The headline result:</strong> under the identical 4&rarr;3 change, consistent hashing keeps <strong>&ge; 70%</strong> of keys on their original server (theory says ~75%; the 70% bound leaves headroom for vnode imbalance), versus IP hash's <strong>&lt; 40%</strong>. Test #11 asserts <em>both</em> numbers &mdash; the contrast is the lesson, and a one-sided assertion would pass even if the ring were secretly behaving like modulo.</div>
+  </article>
+
+  <figure>
+<pre class="mermaid">
+flowchart TD
+  subgraph before["4 servers → hash % 4"]
+    K1["client A"] --> S0a["srv0"]
+    K2["client B"] --> S3a["srv3 (removed)"]
+    K3["client C"] --> S2a["srv2"]
+  end
+  subgraph after["3 servers → hash % 3"]
+    K1b["client A"] --> S1b["srv1 (moved!)"]
+    K3b["client C"] --> S0b["srv0 (moved!)"]
+  end
+  note["IP hash: divisor changed → ~3/4 of clients move.<br/>Consistent hash: only srv3's ~1/4 of keys move,<br/>spread across surviving servers' vnodes."]
+  before --> note
+  after --> note
+  style S3a fill:#d98a8a,color:#fff,stroke:#0b1626
+  style note fill:#1d3458,color:#e6edf7,stroke:#264064
+</pre>
+<figcaption>The modulo-rehash disaster vs. the ring. Changing <code>n</code> in <code>hash % n</code> reshuffles almost everyone; the ring confines the churn to the departed server's share.</figcaption>
+  </figure>
+</section>
+
+<section id="sharing">
+  <h2>Arc-Shared Upstreams &amp; the L4 Seam</h2>
+  <p class="lead">Every <code>Upstream</code> is built once at startup and shared read-only behind an <code>Arc</code>. And every selection routes only among <em>available</em> servers &mdash; a seam that was hardcoded <code>true</code> at Level 3 so Level 4 could fill it with zero call-site changes.</p>
+
+  <article class="concept">
+    <h3>Lock-free sharing via <code>Arc&lt;Upstream&gt;</code></h3>
+    <p>A <code>Route</code> holds <code>upstream: Arc&lt;Upstream&gt;</code>; matching a route is an <code>Arc</code> clone, no lock. The pool itself is never mutated after construction &mdash; the only "mutation" is through interior-mutable atomics (<code>cursor</code>, per-server <code>inflight</code>/<code>ewma_us</code>). So <code>pick()</code> takes <code>&amp;self</code> and many request tasks call it concurrently without any lock. This is the same lock-free-shared-config pattern the router uses for its route table: build immutable, share via <code>Arc</code>, mutate only atomics. Multiple routes can point at the <em>same</em> <code>Arc&lt;Upstream&gt;</code>, sharing one pool (and one set of counters) across routes for free.</p>
+  </article>
+
+  <article class="concept">
+    <h3>The Level 4 seam: <code>Server::available()</code></h3>
+    <p>Every selection branch filters on <code>Server::available()</code>. At Level 3 it is hardcoded to return <code>true</code>, so nothing is filtered &mdash; a genuinely dead backend is still picked and still yields <code>502</code>. The O(1) algorithms express the filter through a helper <code>first_available_from(start)</code>: a linear probe from the chosen index, wrapping, for the first available server. With everything available, the first probe always succeeds, so O(1) stays O(1); the loop is <em>latent</em>, waiting for Level 4. The O(n) scans simply add <code>.filter(|s| s.available())</code>, and consistent hash walks the ring past unavailable servers.</p>
+    <div class="callout analogy"><strong>Why leave a seam instead of building it later?</strong> Because retrofitting a filter into seven algorithms after the fact is where bugs breed &mdash; you'd inevitably miss a branch. By threading <code>available()</code> through <em>every</em> selection path up front (even as a no-op), Level 4 only had to flip one function's body from <code>true</code> to <code>breaker.allows_traffic()</code>. The end-to-end test confirms the seam works today: <code>rr</code> over <code>[alive, dead]</code> alternates <code>200 502</code> &mdash; the dead server is still picked, proving the filter is wired and merely disabled.</div>
+  </article>
+</section>
+
+<section id="code-map">
+  <h2>Code Map</h2>
+  <p class="lead">What Level 3 added or changed, verified against <code>rproxy/src/</code>.</p>
+  <table>
+    <thead><tr><th>File / item</th><th>New?</th><th>Responsibility</th></tr></thead>
+    <tbody>
+      <tr><td><code>balancer.rs</code> &middot; <code>Algorithm</code></td><td>NEW</td><td>The 7-variant enum plus <code>tag()</code> / <code>from_tag()</code> and <code>uses_weight()</code>.</td></tr>
+      <tr><td><code>balancer.rs</code> &middot; <code>Server</code></td><td>NEW</td><td>Immutable <code>addr</code> + <code>inflight: AtomicUsize</code> + <code>ewma_us: AtomicU64</code>; <code>available()</code> (L4 seam), <code>record_rtt</code> (EWMA fold).</td></tr>
+      <tr><td><code>balancer.rs</code> &middot; <code>Upstream</code></td><td>NEW</td><td>Named pool: servers, algorithm, <code>cursor</code>, <code>wrr_index</code>, <code>ring</code>; <code>select()</code> (the 7 branches), <code>pick()</code> (returns a <code>Lease</code>).</td></tr>
+      <tr><td><code>balancer.rs</code> &middot; <code>Lease&lt;'a&gt;</code></td><td>NEW</td><td>RAII handle: <code>new</code> bumps inflight; <code>Drop</code> releases it unconditionally + records RTT if <code>served</code>; <code>mark_served</code>, <code>addr</code>.</td></tr>
+      <tr><td><code>balancer.rs</code> &middot; <code>fnv1a</code> / <code>hash_ip</code></td><td>NEW</td><td>Hand-written FNV-1a and IP-octet hashing, shared by IP hash and the ring.</td></tr>
+      <tr><td><code>balancer.rs</code> &middot; xorshift PRNG</td><td>NEW</td><td><code>thread_local!</code> <code>Cell&lt;u64&gt;</code> + <code>next_random()</code>; seeded from <code>PROCESS_START</code> &times; <code>SEED_COUNTER</code>.</td></tr>
+      <tr><td><code>balancer.rs</code> &middot; <code>from_spec</code> / <code>is_host_port</code> / <code>parse_server</code></td><td>NEW</td><td>Parse <code>algo:server[*w][,...]</code>; validate <code>host:port</code> shape; startup rejects bad configs.</td></tr>
+      <tr><td><code>balancer.rs</code> &middot; <code>Upstream::single</code></td><td>NEW</td><td>Wrap one bare address as a 1-server <code>rr</code> pool (the backward-compat path).</td></tr>
+      <tr><td><code>router.rs</code> &middot; <code>Route.upstream</code> / <code>find()</code></td><td>changed</td><td><code>backend: String</code> &rarr; <code>upstream: Arc&lt;Upstream&gt;</code>; <code>find()</code> returns <code>Option&lt;&amp;Arc&lt;Upstream&gt;&gt;</code>.</td></tr>
+      <tr><td><code>proxy.rs</code> &middot; <code>serve_one</code></td><td>changed</td><td>One new step between route and connect: <code>let lease = upstream.pick(peer.ip())</code>; connect to <code>lease.addr()</code>; <code>mark_served()</code> on success.</td></tr>
+      <tr><td><code>main.rs</code> + CLI</td><td>changed</td><td><code>--upstream NAME=SPEC</code> parsing; 3-rule route resolution; startup validation with exit 1.</td></tr>
+    </tbody>
+  </table>
+  <div class="callout warn"><strong>A note on later-level drift:</strong> the shipped <code>balancer.rs</code> now also carries a per-server <code>Breaker</code> (Level 4), a <code>HealthConfig</code>, and a connection <code>idle</code> pool with <code>PoolConfig</code> (Level 7). Those are <em>not</em> Level 3 &mdash; this page describes the Level 3 constructs only. The Level 3 mechanisms (RR cursor, WRR expansion, xorshift Random, LC/LRT scans, FNV-1a IP hash, the 160-vnode ring, and the RAII <code>Lease</code> with its <code>served</code> gate) are all present and verified against the current file; <code>Server::available()</code> today reads the breaker rather than the literal <code>true</code> it held at Level 3.</div>
+</section>
+
+<section id="industry">
+  <h2>Industry Comparison</h2>
+  <p class="lead">Every serious proxy load-balances, and the algorithm menu is broadly similar. The differences are in the affinity machinery, the smoothness of weighting, and how much statistical sophistication they layer on top. Ours is a teaching build.</p>
+  <table>
+    <thead><tr><th>Proxy</th><th>Algorithms</th><th>Affinity / hashing</th><th>Trade-off chosen</th></tr></thead>
+    <tbody>
+      <tr><td><strong>nginx</strong></td><td>round-robin, weighted RR (<em>smooth</em>), least-conn, <code>hash</code>, <code>ip_hash</code>; <code>random</code> (incl. two-choices) in recent versions.</td><td><code>ip_hash</code> is modulo-style; <code>hash ... consistent</code> gives a Ketama ring. Cookie affinity via <code>sticky</code> (Plus).</td><td>Smooth WRR avoids bursts; consistent hashing is opt-in per upstream. Mature, config-driven.</td></tr>
+      <tr><td><strong>Apache httpd</strong> (mod_proxy_balancer)</td><td><code>byrequests</code> (RR-like), <code>bytraffic</code>, <code>bybusyness</code> (least-busy).</td><td>Route-based stickiness via <code>stickysession</code> (cookie / URL param), not a hash ring.</td><td>Fewer algorithms, session stickiness centered on app cookies; general-purpose web server first.</td></tr>
+      <tr><td><strong>HAProxy</strong></td><td><code>roundrobin</code>, <code>static-rr</code>, <code>leastconn</code>, <code>random</code>, <code>source</code>, <code>uri</code>, <code>hdr</code>, <code>first</code>.</td><td><code>hash-type consistent</code> selects a Ketama-style ring; <code>source</code> = IP hash. Rich, per-backend.</td><td>Broadest algorithm set, per-backend hash tuning. The reference for L4/L7 balancing.</td></tr>
+      <tr><td><strong>Envoy</strong></td><td>round-robin, weighted least-request, random, ring-hash, <strong>Maglev</strong>.</td><td><em>Maglev</em>: a lookup-table consistent hash with better disruption bounds and O(1) lookup than a sorted ring; plus ring-hash.</td><td>Statistical machinery: locality-weighted LB, zone-aware routing, subset load balancing.</td></tr>
+      <tr><td><strong>Ferrum (ours)</strong></td><td>All 7: rr, wrr (<em>bursty</em>), rand, lc, lrt, iphash, chash.</td><td>Single sorted FNV-1a ring, 160 vnodes/server (Ketama-like). IP hash is plain modulo.</td><td>Teaching-first: simple weight expansion, one hash ring (not Maglev), documented LC race instead of a lock, no cookie affinity.</td></tr>
+    </tbody>
+  </table>
+  <div class="callout"><strong>The honest trade-off:</strong> our algorithm menu is genuinely the same list the big proxies offer, and our consistent-hash ring is the same Ketama idea nginx/HAProxy expose. Where we stop short, deliberately: weighted RR is <em>bursty</em> (nginx smooths it), the ring is a single sorted <code>Vec</code> (Envoy's Maglev has tighter disruption guarantees and O(1) lookup), least-connections tolerates a one-request race rather than locking, and there is no cookie-based session affinity (that needs header rewriting from Level 5 and middleware from Level 6). Each simplification is a lesson about the mechanism underneath, not a claim to production parity. As of 2026, nginx's <code>random two</code> (power-of-two-choices) is stock OSS; Envoy's Maglev remains its distinguishing consistent-hash implementation.</div>
+</section>
+
+<section id="quiz">
+  <h2>Quiz</h2>
+  <p class="lead">Copied verbatim from PROGRESS.md (<code>### Level 3 quiz</code>). Vessey answers these before Level 4 &mdash; no answers provided here.</p>
+  <div class="qa">
+    <ol>
+      <li><code>Lease</code> releases the in-flight count in <code>Drop</code> rather than an explicit <code>release()</code> call. Give a concrete request flow where an explicit call would leak the counter, and explain why the leak specifically penalizes a <em>healthy</em> server under least-connections.</li>
+      <li>The <code>Lease</code> decrements inflight unconditionally on drop but records RTT into the EWMA <em>only</em> after <code>mark_served()</code>. What goes wrong with least-response-time if a failed (instantly-refused) connect records its RTT?</li>
+      <li>Round robin uses <code>fetch_add(1, Relaxed)</code>. Why is <code>Relaxed</code> ordering sufficient here, and what would <code>SeqCst</code> buy you (or not)?</li>
+      <li>Weighted RR pre-expands weights <code>5:1</code> into <code>[0,0,0,0,0,1]</code> and does plain RR over it. Nginx instead uses "smooth" WRR. What observable difference in the request pattern does the simple expansion produce, and when would it matter?</li>
+      <li>IP hash is <code>hash(ip) % n</code>. Walk through what happens to client&rarr;server mappings when <code>n</code> goes from 4 to 3. Roughly what fraction of clients move?</li>
+      <li>Consistent hashing keeps &ge;70% of keys on their original server under the same 4&rarr;3 change. What is the role of the 160 virtual nodes per server &mdash; what breaks if you use 1 vnode per server instead?</li>
+      <li>Why does the code use a hand-written FNV-1a instead of <code>std</code>'s <code>DefaultHasher</code> for both IP hash and the ring? (Two reasons.)</li>
+      <li>Least-connections has a documented race: two tasks can pick the same idle server simultaneously. Why is this acceptable, and what would the fix cost?</li>
+    </ol>
+  </div>
+  <div class="callout warn"><strong>Note on Q1 &amp; Q2:</strong> both are about the <a href="#lease">RAII Lease</a> &mdash; Q1 is the <em>unconditional</em> release (why <code>Drop</code>, not an explicit call), Q2 is the <em>conditional</em> RTT record (why gate on <code>served</code>). Same <code>Drop</code> body, two different rules.</div>
+</section>
+
+<section id="cheatsheet">
+  <h2>Cheat Sheet &amp; Glossary</h2>
+  <p class="lead">The algorithms, their costs, the flags, and the vocabulary.</p>
+
+  <h3>Algorithm complexity &amp; when to use</h3>
+  <table>
+    <thead><tr><th>Tag</th><th>Algorithm</th><th>pick() cost</th><th>State</th><th>When to use</th></tr></thead>
+    <tbody>
+      <tr><td><code>rr</code></td><td>Round Robin (default)</td><td>O(1)</td><td>one <code>AtomicUsize</code></td><td>Uniform backends; the sensible default.</td></tr>
+      <tr><td><code>wrr</code></td><td>Weighted Round Robin</td><td>O(1)</td><td>pre-expanded index vec + cursor</td><td>Backends of unequal capacity (bigger box gets more).</td></tr>
+      <tr><td><code>rand</code></td><td>Random</td><td>O(1)</td><td>none (thread-local PRNG)</td><td>Zero coordination wanted; competitive with RR at scale.</td></tr>
+      <tr><td><code>lc</code></td><td>Least Connections</td><td>O(n)</td><td>per-server <code>AtomicUsize</code></td><td>Long-lived / uneven request durations; balance live load.</td></tr>
+      <tr><td><code>lrt</code></td><td>Least Response Time</td><td>O(n)</td><td>per-server <code>AtomicU64</code> EWMA</td><td>Latency-sensitive; steer toward the fastest-responding backend.</td></tr>
+      <tr><td><code>iphash</code></td><td>IP Hash</td><td>O(1)</td><td>none</td><td>Cheap client affinity when the server set is stable.</td></tr>
+      <tr><td><code>chash</code></td><td>Consistent Hash</td><td>O(log(n&middot;v))</td><td>sorted ring, v=160</td><td>Client/key affinity that must survive add/remove of servers (caches).</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Constants &amp; defaults</h3>
+  <table>
+    <thead><tr><th>Name</th><th>Value</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>VNODES_PER_SERVER</code></td><td>160</td><td>Virtual nodes per real server on the consistent-hash ring (Ketama value).</td></tr>
+      <tr><td>EWMA &alpha;</td><td>0.2 (1/5)</td><td>Smoothing: <code>new = (old*4 + sample)/5</code>. Integer arithmetic.</td></tr>
+      <tr><td>EWMA sentinel</td><td><code>0</code></td><td>"No samples yet" &rarr; sorts first (untried servers get traffic).</td></tr>
+      <tr><td>RTT floor</td><td>1µs</td><td>Samples floored so a fast reply can't masquerade as the <code>0</code> sentinel.</td></tr>
+      <tr><td>FNV-1a basis / prime</td><td><code>0xcbf29ce484222325</code> / <code>0x100000001b3</code></td><td>64-bit FNV-1a constants, written out for stable affinity.</td></tr>
+      <tr><td>Default algorithm</td><td><code>rr</code></td><td>Used when the spec omits a tag.</td></tr>
+      <tr><td>Default weight</td><td>1</td><td>When no <code>*N</code> suffix is given.</td></tr>
+      <tr><td>Atomic ordering</td><td><code>Relaxed</code></td><td>Everywhere &mdash; counters guide a heuristic, not protect data.</td></tr>
+      <tr><td>Unit tests</td><td>52</td><td>36 pre-existing kept green + 16 new (Level 3 total).</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Run it</h3>
+  <pre><code>cargo run -- 127.0.0.1:8080 \
+  --upstream 'api=lc:127.0.0.1:9001,127.0.0.1:9002' \
+  '/api/**=api' '/=127.0.0.1:9000'</code></pre>
+
+  <h3>Per-request log line</h3>
+  <pre><code>[127.0.0.1:54321] GET /api/users HTTP/1.1 -&gt; api[lc] 127.0.0.1:9002 (inflight=3)</code></pre>
+
+  <h3>Glossary</h3>
+  <table>
+    <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Upstream</strong></td><td>A named pool of servers plus one selection algorithm; shared behind an <code>Arc</code>.</td></tr>
+      <tr><td><strong>Server</strong></td><td>One backend: immutable address + live <code>inflight</code> and <code>ewma_us</code> atomics.</td></tr>
+      <tr><td><strong>Lease</strong></td><td>RAII handle to a picked server; counts one in-flight request, releases in <code>Drop</code>.</td></tr>
+      <tr><td><strong>RAII</strong></td><td>Resource Acquisition Is Initialization: tie cleanup to a value's scope so it always runs.</td></tr>
+      <tr><td><strong>EWMA</strong></td><td>Exponentially-weighted moving average &mdash; here of round-trip time, &alpha;=0.2, in µs.</td></tr>
+      <tr><td><strong>Weight expansion</strong></td><td>Turning weights <code>5:1</code> into an index list <code>[0,0,0,0,0,1]</code> for plain RR.</td></tr>
+      <tr><td><strong>Smooth WRR</strong></td><td>Nginx's interleaved weighted RR that avoids the bursty consecutive run our expansion produces.</td></tr>
+      <tr><td><strong>FNV-1a</strong></td><td>A simple, fast, non-cryptographic hash (XOR-then-multiply); chosen for stable, teachable affinity.</td></tr>
+      <tr><td><strong>Virtual node (vnode)</strong></td><td>One of 160 ring points per server, scattering its ownership for even load and cheap removal.</td></tr>
+      <tr><td><strong>Consistent hashing</strong></td><td>Ring-based affinity where changing the server set moves only ~1/n of keys.</td></tr>
+      <tr><td><strong>Relaxed ordering</strong></td><td>Atomic access with no cross-thread ordering guarantee &mdash; atomicity only.</td></tr>
+      <tr><td><strong>L4 seam</strong></td><td><code>Server::available()</code>, hardcoded <code>true</code> at L3, filtered by every branch so L4 could enable ejection with no call-site changes.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+</main>
+</div>
+
+<footer>
+  <p>Ferrum KB &mdash; Level 3: Load Balancing &bull; Built 2026-09-02</p>
+  <p class="muted">A teaching reverse proxy. Verified against <code>rproxy/src/balancer.rs</code>, <code>router.rs</code>, <code>proxy.rs</code> and PROGRESS.md. Comparisons to nginx / Apache httpd / HAProxy / Envoy reflect their architecture as of 2026 and are qualified where uncertain.</p>
+</footer>
+</body>
+</html>

@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ferrum KB — Level 5: Proxy Headers & Rewriting</title>
+<meta name="description" content="A complete, plain-English map of the Barracuda Networks product portfolio: every product family (Email, Application, Network, Data Protection, Managed XDR, MSP) and the BarracudaONE platform — what each product is, what it does, and what problem it solves." />
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    flowchart: { htmlLabels: true, useMaxWidth: true, padding: 12, nodeSpacing: 55, rankSpacing: 55 },
+    startOnLoad: true, theme: 'base', securityLevel: 'loose',
+    themeVariables: {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '15px',
+      primaryColor: '#e7e8ea', primaryTextColor: '#15203a', primaryBorderColor: '#7e848c',
+      lineColor: '#6a6f77', secondaryColor: '#dddfe2', tertiaryColor: '#f3f4f6',
+      noteBkgColor: '#fff3d6', noteTextColor: '#3a2f12', noteBorderColor: '#caa84a',
+      actorBkg: '#e7e8ea', actorTextColor: '#15203a', actorBorder: '#7e848c',
+      clusterBkg: '#eef0f2', clusterBorder: '#a0a4aa'
+    }
+  });
+</script>
+<style>
+  :root{--bg:#0f1320;--panel:#161c2e;--panel-2:#1d2540;--ink:#e8ecf5;--muted:#9aa6c4;--accent:#7c5cff;--accent-2:#22d3a6;--warn:#ffb454;--danger:#ff6b81;--line:#2a3354;--code-bg:#0b0f1a;--max:1100px;}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:linear-gradient(180deg,#0c1020,#0f1320 40%);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  a{color:var(--accent-2);text-decoration:none}a:hover{text-decoration:underline}
+  header.hero{padding:56px 24px 40px;text-align:center;background:radial-gradient(1200px 400px at 50% -10%,rgba(255,107,129,.18),transparent 60%);border-bottom:1px solid var(--line);}
+  header.hero .eyebrow{letter-spacing:.25em;text-transform:uppercase;color:var(--accent-2);font-size:.75rem;font-weight:700}
+  header.hero h1{font-size:clamp(1.9rem,4vw,3rem);margin:.3em 0 .2em;line-height:1.1}
+  header.hero p.sub{color:var(--muted);max-width:790px;margin:0 auto;font-size:1.05rem}
+  .badges{margin-top:18px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .badge{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);padding:4px 12px;border-radius:999px;font-size:.8rem}
+  .layout{display:grid;grid-template-columns:260px 1fr;gap:32px;align-items:start;max-width:1320px;margin:0 auto;padding:0 22px}
+  nav.toc{position:sticky;top:0;max-height:100vh;overflow:auto;padding:28px 10px 60px;border-right:1px solid var(--line);font-size:.9rem;}
+  nav.toc h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.18em;color:var(--muted);margin:18px 8px 6px}
+  nav.toc a{display:block;color:var(--muted);padding:5px 10px;border-radius:8px;border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--panel);color:var(--ink);text-decoration:none;border-left-color:var(--accent)}
+  main{padding:34px 0 80px;min-width:0}
+  section{margin:0 0 46px;scroll-margin-top:18px}
+  section>h2{font-size:1.7rem;margin:0 0 .5em;padding-bottom:.3em;border-bottom:2px solid var(--line);display:flex;align-items:center;gap:.5em;}
+  h3{font-size:1.25rem;margin:1.6em 0 .4em;color:#fff}
+  h4{font-size:1.02rem;margin:1.2em 0 .3em;color:var(--accent-2);text-transform:uppercase;letter-spacing:.04em}
+  p,li{color:var(--ink)}.muted{color:var(--muted)}
+  article.concept{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin:22px 0}
+  article.concept>h3:first-child{margin-top:0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr} .layout{grid-template-columns:1fr} nav.toc{position:static;max-height:none;border-right:none;border-bottom:1px solid var(--line)}}
+  .card{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card h4{margin-top:.2em}
+  .callout{border-left:4px solid var(--accent);background:var(--panel-2);padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  .callout.analogy{border-left-color:var(--accent-2)}.callout.warn{border-left-color:var(--warn)}.callout.danger{border-left-color:var(--danger)}.callout.story{border-left-color:#5ec2ff}
+  .tag{display:inline-block;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:2px 8px;border-radius:6px;margin-bottom:6px}
+  .tag.beg{background:rgba(34,211,166,.15);color:var(--accent-2)}.tag.tech{background:rgba(124,92,255,.18);color:#b9a6ff}.tag.adv{background:rgba(255,107,129,.15);color:var(--danger)}
+  code{background:var(--code-bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.86em;color:#ffd9a0}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.85rem;line-height:1.55}
+  pre code{background:none;border:none;padding:0;color:#d7e0f5}
+  pre.art{color:#ffd9a0;font-size:.95rem;line-height:1.4;letter-spacing:.04em}
+  pre.mermaid{background:#f7f8fc;color:#111;text-align:center}
+  .mermaid svg text,.mermaid text{fill:#15203a !important}
+  .mermaid .nodeLabel,.mermaid .edgeLabel,.mermaid .label,.mermaid span,.mermaid p,.mermaid div,.mermaid foreignObject *{color:#15203a !important;fill:#15203a !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p{background:#f3f5fc !important}
+  .mermaid .cluster-label .nodeLabel,.mermaid .cluster-label p,.mermaid .cluster span,.mermaid .cluster p{color:#3c4046 !important}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.92rem;overflow:hidden;border-radius:10px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel-2);color:#fff}
+  tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  details{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:12px 0}
+  details summary{cursor:pointer;font-weight:600;color:var(--accent-2);padding:6px 0}
+  details[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px}
+  figure{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  figcaption{color:var(--muted);font-size:.85rem;text-align:center;margin-top:8px;font-style:italic}
+  .qa{margin:10px 0}.qa .q{font-weight:600}.qa .a{color:var(--muted);margin:2px 0 0}
+  ol.flow{counter-reset:step;list-style:none;padding-left:0}
+  ol.flow>li{counter-increment:step;position:relative;padding:10px 0 10px 52px;border-bottom:1px dashed var(--line)}
+  ol.flow>li::before{content:counter(step);position:absolute;left:0;top:8px;width:34px;height:34px;background:var(--accent);color:#fff;border-radius:50%;display:grid;place-items:center;font-weight:700}
+  .rank{font-weight:800;color:var(--accent);margin-right:6px}
+  footer{border-top:1px solid var(--line);padding:30px 22px;text-align:center;color:var(--muted);font-size:.88rem}
+  .lead{font-size:1.08rem}
+  .formula{background:var(--code-bg);border:1px dashed var(--accent);border-radius:10px;padding:12px 16px;font-family:monospace;color:#ffd9a0;text-align:center;margin:14px 0}
+
+  /* KB-THEME START */
+  /* Azure (blue palette) */
+  :root{--bg:#0e1c30;--panel:#152740;--panel-2:#1d3458;--ink:#e6edf7;--muted:#93a6c4;--accent:#1a8ae5;--accent-2:#41a7f5;--warn:#d6a96a;--danger:#d98a8a;--line:#264064;--code-bg:#0b1626;}
+  body{background:linear-gradient(180deg,var(--bg),var(--bg))}
+  header.hero{background:radial-gradient(1100px 400px at 50% -10%,rgba(20,119,210,.26),transparent 60%)}
+  h3,.parthead{color:var(--ink)}
+  th{color:var(--ink)}
+  .tag.tech{background:rgba(65,167,245,.16);color:var(--accent-2)}
+  ol.flow>li::before{color:#0b1626}
+  /* KB-THEME END */
+  /* prevent node/edge label clipping */
+  .mermaid foreignObject{overflow:visible !important}
+  .mermaid .nodeLabel,.mermaid .label,.mermaid foreignObject>div,.mermaid foreignObject span,.mermaid foreignObject p{white-space:nowrap !important;overflow:visible !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p,.mermaid .edgeLabel span{white-space:nowrap !important;overflow:visible !important;padding:1px 4px}
+  .mermaid svg{max-width:100%;height:auto}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyebrow">Ferrum KB &middot; Level 5 of 14 &middot; Proxy Headers &amp; Rewriting</div>
+  <h1>Being Honest About the Request<br/><span style="font-size:.6em;color:var(--muted)">Four forwarded headers, three different policies, and a path rewriter that won't lie to the backend</span></h1>
+  <p class="sub">Level 5 turns a dumb forwarder into a real reverse proxy. It tells the backend <em>who</em> really called (<code>X-Forwarded-For</code>, <code>X-Real-IP</code>, <code>X-Forwarded-Host</code>, <code>X-Forwarded-Proto</code>) and lets the proxy present a different URL space than the backend serves (segment-aware <code>strip</code>/<code>prefix</code>, <code>Host</code> rewrite, request/response header rules). Everything is a pure synchronous transform over a head struct — no sockets, no async — so the whole level is unit-testable. The security lessons live in the <em>differences</em>: XFF appends, X-Real-IP overwrites, XFH/XFP set-if-absent.</p>
+  <div class="badges">
+    <span class="badge">Audience: Vessey (building Ferrum)</span>
+    <span class="badge">Scope: rproxy/src/rewrite.rs</span>
+    <span class="badge">Reading time: ~26 min</span>
+  </div>
+  <p class="sub" style="margin-top:16px">
+    <a href="index.html">&larr; Course index</a>
+    &nbsp;&middot;&nbsp; <a href="Level-04-Health-Checks.html">&larr; Level 4: Health Checks</a>
+    &nbsp;&middot;&nbsp; <a href="Level-06-Middleware.html">Level 6: Middleware &rarr;</a>
+  </p>
+</header>
+
+<div class="layout">
+<nav class="toc">
+  <h2>Orientation</h2>
+  <a href="#exec-summary">Executive Summary</a>
+  <a href="#big-picture">The Big Picture</a>
+  <h2>Core</h2>
+  <a href="#pure-transform">The Pure-Transform Design</a>
+  <a href="#forwarded">Four Headers, Three Policies</a>
+  <a href="#trust-model">Observation, Not Assertion</a>
+  <a href="#path-rewrite">Segment-Aware Path Rewriting</a>
+  <a href="#host-rewrite">Host Rewrite &amp; the Ordering Bug</a>
+  <a href="#header-rules">Header Rules &amp; the Guardrail</a>
+  <a href="#crlf">CRLF-Injection Hardening</a>
+  <a href="#ordering">Fixed Transform Ordering</a>
+  <a href="#code-map">Code Map</a>
+  <h2>Compare</h2>
+  <a href="#industry">How the Giants Do It</a>
+  <h2>Reference</h2>
+  <a href="#quiz">Quiz</a>
+  <a href="#cheatsheet">Cheat Sheet &amp; Glossary</a>
+</nav>
+
+<main>
+<section id="exec-summary">
+  <h2>Executive Summary</h2>
+  <p class="lead">Level 5 is where the proxy stops pretending the request came from itself and starts telling the backend the truth.</p>
+  <p>Through Level 4 the backend saw a request on the proxy's own terms: the client's IP was lost, the original <code>Host</code> was whatever the client sent, and the path was whatever the client asked for. Level 5 adds the two halves of being a <em>reverse proxy</em> rather than a dumb forwarder. First, <strong>forwarded headers</strong> tell the backend who really called: <code>X-Forwarded-For</code>, <code>X-Real-IP</code>, <code>X-Forwarded-Host</code>, and <code>X-Forwarded-Proto</code>. Second, <strong>rewriting</strong> changes what the backend sees — the path, the <code>Host</code>, and arbitrary request/response headers — so the proxy's public URL space can differ from the backend's internal one.</p>
+  <p>The single most important idea is that the four headers have <strong>three different injection policies</strong>, and each difference is a security decision. <code>X-Forwarded-For</code> <strong>appends</strong> — it is a chain of custody, and replacing it would erase the record while trusting an inbound value would let any client forge its origin. <code>X-Real-IP</code> <strong>overwrites</strong> — it is single-valued, so a client-sent value is a forgery to be replaced, not a hop to be preserved. <code>X-Forwarded-Host</code> and <code>X-Forwarded-Proto</code> are <strong>set-if-absent</strong> — a legitimate upstream proxy already knows the true original, so we must not clobber it.</p>
+  <p>The whole module (<code>rewrite.rs</code>) is a <strong>pure synchronous transform over a head struct</strong>: <code>apply_request</code> mutates a <code>RequestHead</code>, <code>apply_response</code> mutates a <code>ResponseHead</code>, no I/O anywhere. Path rewriting is <strong>segment-aware</strong> (<code>strip=/api</code> turns <code>/api/users</code> into <code>/users</code> but leaves <code>/apixyz</code> alone) and preserves the query string. Host rewriting captures the original <code>Host</code> <em>before</em> the clobber so <code>X-Forwarded-Host</code> can still report it. Header rules (<code>set-header</code>/<code>remove-header</code> and their response twins) refuse framing headers at boot, and every serialized value is checked for CR/LF so a config string can't smuggle an extra header line. A fixed transform order — path &rarr; Host &rarr; forwarded &rarr; explicit rules — runs entirely before the proxy re-declares its framing, so Level 1's anti-smuggling guarantees stay intact. Ferrum here is a teaching build: no RFC&nbsp;7239 <code>Forwarded:</code>, no regex path capture groups, and it always appends XFF rather than trusting a configured proxy allowlist. Those gaps are documented, not hidden.</p>
+</section>
+
+<section id="big-picture">
+  <h2>The Big Picture</h2>
+  <p class="lead">Level 5 is one fixed transform stage, dropped into the forwarding path between hop-by-hop stripping and framing re-declaration.</p>
+  <p>Two placement facts anchor the whole level. The transform runs <strong>after <code>strip_hop_by_hop</code></strong> — so a client cannot smuggle a <code>Connection</code>-listed header that our rewrite then re-adds — and <strong>before the framing re-declaration</strong> — so a misconfigured header rule can never displace the <code>Content-Length</code> / <code>Transfer-Encoding</code> / <code>Connection</code> headers the proxy owns. It is deliberately <em>not</em> a middleware pipeline: that is Level 6's job. Level 5 is a single fixed step, which is exactly enough to teach the header and rewriting mechanics without an abstraction the next level would only have to replace.</p>
+  <figure>
+<pre class="mermaid">
+flowchart TD
+  C["client request"] --> P["parse + framing (L1)"]
+  P --> R["route match (L2/L3/L4)"]
+  R --> POOL["pool pick + connect (L3/L4)"]
+  POOL --> SHH["strip_hop_by_hop (remove hop-by-hop headers)"]
+  SHH --> T["TRANSFORM (L5) — apply_request:<br/>1 path rewrite · 2 Host rewrite ·<br/>3 forwarded inject · 4 explicit header rules"]
+  T --> FR["framing re-declaration<br/>(Connection, Transfer-Encoding)"]
+  FR --> U["backend"]
+  U --> RH["read response head (L1)"]
+  RH --> SHH2["strip_hop_by_hop"]
+  SHH2 --> T2["TRANSFORM (L5) — apply_response:<br/>set-resp-header / remove-resp-header"]
+  T2 --> FR2["framing re-declaration"]
+  FR2 --> CL["client"]
+  style T fill:#1a8ae5,color:#fff,stroke:#0b1626
+  style T2 fill:#1a8ae5,color:#fff,stroke:#0b1626
+</pre>
+<figcaption>Where the transform plugs into <code>serve_one</code>. Two highlighted stages: a request transform after hop-by-hop stripping and before framing, and a smaller response transform (explicit header rules only) on the way back.</figcaption>
+  </figure>
+  <div class="callout analogy"><strong>Analogy — a mailroom that stamps and re-labels.</strong> A dumb forwarder just relays the envelope. A reverse proxy is the corporate mailroom: it stamps the envelope with <em>where it actually arrived from</em> (the forwarded headers — and it <em>adds</em> to the routing history rather than erasing it), it can re-address the internal envelope so the outside world's PO-box scheme differs from the internal floor-and-desk scheme (path and Host rewriting), and it refuses to let anyone hand-write the postal barcodes the sorting machines depend on (the protected framing headers). The one rule the mailroom never breaks: it records what it <em>observed</em>, and treats anything the sender <em>claimed</em> as unverified.</div>
+</section>
+
+<section id="pure-transform">
+  <h2>The Pure-Transform Design</h2>
+  <p class="lead">The whole level is a function from a head struct to a head struct. No sockets, no async, no I/O — and that is the deliberate choice everything else hangs off.</p>
+  <p>The module <code>rewrite.rs</code> owns <code>RewriteRules</code> (the parsed per-route config) and exactly two transform entry points:</p>
+  <pre><code>pub fn apply_request(&amp;self, req: &amp;mut RequestHead, ctx: &amp;ForwardContext)
+pub fn apply_response(&amp;self, resp: &amp;mut ResponseHead)</code></pre>
+  <p>Both are <strong>pure synchronous functions over a head struct</strong>. Neither touches a socket, neither awaits, neither allocates a buffer. That is not an accident of the current implementation — it is the design goal. It makes the entire level unit-testable by constructing a <code>RequestHead</code> by hand, applying rules, and asserting on the mutated head. The same discipline that kept Level 4's <code>Breaker</code> testable without a network, and Level 3's balancer algorithms testable without a backend, keeps Level 5 testable without either. The result is <strong>99 unit tests</strong> (72 carried green from Level 4, +27 new) that run in milliseconds and never open a port.</p>
+
+  <h3>ForwardContext — the facts the head doesn't carry</h3>
+  <p>A request head knows its method, target, version, and headers. It does <em>not</em> know the client's socket-observed IP, nor the scheme of the client leg, nor — crucially — the <code>Host</code> the client asked for <em>before</em> any rewrite mangled it. Those come in through a small borrowed context:</p>
+  <pre><code>pub struct ForwardContext&lt;'a&gt; {
+    /// The immediate peer's IP: the real client, or the last proxy in a
+    /// chain. The one value in the forwarded headers that CANNOT be forged —
+    /// we observed it on the socket.
+    pub client_ip: IpAddr,
+    /// The Host the client originally asked for, captured BEFORE any
+    /// rewriting. This is why X-Forwarded-Host stays honest.
+    pub original_host: Option&lt;&amp;'a str&gt;,
+    /// Scheme on the client leg. "http" today; Level 8's TLS termination
+    /// sets "https" here and X-Forwarded-Proto follows automatically.
+    pub scheme: &amp;'static str,
+}</code></pre>
+  <p>The <code>'a</code> lifetime lets <code>original_host</code> borrow the captured string rather than clone it, and the <code>scheme</code> being <code>&amp;'static str</code> encodes that today it is always the literal <code>"http"</code> — Level 8 flips it to <code>"https"</code> after TLS termination and <code>X-Forwarded-Proto</code> follows with zero extra code. This is the deliberate seam the spec calls out.</p>
+
+  <h3>The meaning-preserving Default</h3>
+  <p><code>RewriteRules</code> hand-writes its <code>Default</code> rather than deriving it, and the reason is a real footgun:</p>
+  <pre><code>impl Default for RewriteRules {
+    fn default() -&gt; RewriteRules {
+        RewriteRules { /* all rules None/empty, */ forwarded: true }
+    }
+}</code></pre>
+  <p>The single <code>forwarded: bool</code> field is <code>true</code> by default. If we had <code>#[derive(Default)]</code>, <code>bool</code>'s default is <code>false</code> — the exact opposite of what the struct <em>means</em>. A route declared with no options should still inject the four forwarded headers; forwarding is the near-universal common case, and requiring opt-in would make the common case wrong. So a stray <code>RewriteRules::default()</code> anywhere in the codebase can never silently disable forwarded headers. <code>--no-forwarded</code> is the one thing that flips the field, via <code>RewriteRules::no_forwarded()</code>.</p>
+  <div class="callout"><strong>Pattern name — the "make the default the safe/expected thing" invariant.</strong> When a boolean's semantic default disagrees with the language default, you spell it out. Deriving <code>Default</code> here would be a correctness bug hiding as a convenience.</div>
+</section>
+
+<section id="forwarded">
+  <h2>Four Headers, Three Policies</h2>
+  <p class="lead">The lesson of the level is not that we inject four headers. It is that we inject them with <em>three different policies</em>, and each difference is a security decision.</p>
+  <p>Forwarded injection is <strong>on by default for every route</strong> — these headers are near-universal, and requiring opt-in would make the common case wrong. <code>--no-forwarded</code> disables all four globally. Injection lives in <code>inject_forwarded</code>, and the append-vs-overwrite-vs-set-if-absent split is the entire point.</p>
+  <table>
+    <thead><tr><th>Header</th><th>Policy</th><th>Value</th><th>Why this policy</th></tr></thead>
+    <tbody>
+      <tr><td><code>X-Forwarded-For</code></td><td><strong>APPEND</strong></td><td><code>existing, client_ip</code></td><td>It is a chain of custody. Replacing erases upstream history; trusting an inbound value lets any client forge its origin.</td></tr>
+      <tr><td><code>X-Real-IP</code></td><td><strong>OVERWRITE</strong></td><td><code>client_ip</code></td><td>Single-valued by convention — not a chain. A client-sent value is purely a forgery attempt, so replace it.</td></tr>
+      <tr><td><code>X-Forwarded-Host</code></td><td><strong>SET-IF-ABSENT</strong></td><td><code>ctx.original_host</code></td><td>A legitimate upstream proxy already knows the true original; it is closer to the truth than we are, so don't clobber it.</td></tr>
+      <tr><td><code>X-Forwarded-Proto</code></td><td><strong>SET-IF-ABSENT</strong></td><td><code>ctx.scheme</code></td><td>Same reasoning: the first proxy in the chain knows the real client-leg scheme.</td></tr>
+    </tbody>
+  </table>
+
+  <article class="concept">
+    <span class="tag tech">append</span>
+    <h3>X-Forwarded-For — the chain of custody</h3>
+    <p><strong>What it does:</strong> appends the socket-observed <code>client_ip</code> to any existing value; creates the header from just our IP when absent.</p>
+    <pre><code>let xff = match http::header(&amp;req.headers, "x-forwarded-for") {
+    Some(existing) if !existing.trim().is_empty() =&gt; format!("{existing}, {ip}"),
+    _ =&gt; ip.clone(),
+};
+http::set_header(&amp;mut req.headers, "X-Forwarded-For", &amp;xff);</code></pre>
+    <p><strong>Why append and not replace or trust.</strong> A value like <code>1.2.3.4, 10.0.0.1</code> means the original client was <code>1.2.3.4</code> and it passed through the proxy at <code>10.0.0.1</code>. <em>Replacing</em> would let this proxy erase the chain recorded by upstream proxies. <em>Trusting</em> an inbound value outright would let any client forge its own origin by simply sending <code>X-Forwarded-For: 1.2.3.4</code>. Appending is honest in both directions: the <strong>rightmost entry is always the one we observed on the socket and cannot be forged</strong>; anything to its left is hearsay from upstream.</p>
+    <div class="callout warn"><strong>The teaching point that trips everyone up.</strong> A backend reading XFF must <strong>count from the right, not the left</strong>, and must know exactly how many proxies it sits behind. The leftmost entry is the <em>least</em> trustworthy — a client can put anything there. If you trust <code>xff.split(',')[0]</code> you have just built an IP-spoofing oracle.</div>
+  </article>
+
+  <article class="concept">
+    <span class="tag tech">overwrite</span>
+    <h3>X-Real-IP — never trust inbound</h3>
+    <p><strong>What it does:</strong> unconditionally overwrites with the observed peer — <code>http::set_header(&amp;mut req.headers, "X-Real-IP", &amp;ip)</code>.</p>
+    <p><strong>Why overwrite.</strong> Unlike XFF, <code>X-Real-IP</code> is not a chain — there is no legitimate multi-hop meaning to preserve. It is single-valued: "the immediate peer." So a client-supplied <code>X-Real-IP: 9.9.9.9</code> is purely an attempt to spoof its own address, and the only correct response is to replace it with what we actually saw. <code>set_header</code> is remove-then-push, so a forged inbound value leaves <strong>exactly one</strong> <code>X-Real-IP</code> — no duplicate for a confused backend to pick the wrong one from.</p>
+    <div class="callout danger"><strong>The opposite choice is a vulnerability.</strong> If XFF overwrote, you would erase forensic history. If X-Real-IP appended (or trusted inbound), a client could pin any address it liked into the field a backend most naively trusts as "the real client." The asymmetry is the security posture: <em>append what is additive, overwrite what is singular.</em></div>
+  </article>
+
+  <article class="concept">
+    <span class="tag tech">set-if-absent</span>
+    <h3>X-Forwarded-Host / -Proto — the first proxy knows best</h3>
+    <p><strong>What it does:</strong> sets each only when the header is absent, from <code>ctx.original_host</code> and <code>ctx.scheme</code> respectively.</p>
+    <pre><code>if http::header(&amp;req.headers, "x-forwarded-host").is_none() {
+    if let Some(h) = ctx.original_host {
+        http::set_header(&amp;mut req.headers, "X-Forwarded-Host", h);
+    }
+}
+if http::header(&amp;req.headers, "x-forwarded-proto").is_none() {
+    http::set_header(&amp;mut req.headers, "X-Forwarded-Proto", ctx.scheme);
+}</code></pre>
+    <p><strong>Why set-if-absent.</strong> If a legitimate upstream proxy already set these, <em>its</em> value is closer to the truth than ours — it spoke to the real client and knows the true original Host and scheme; we only know the leg between us and it. Clobbering would throw that away. Absent an upstream value, we fill in what we know. Note that <code>X-Forwarded-Host</code> reads <code>ctx.original_host</code>, not the live <code>Host</code> header — the reason is the ordering bug in its own section below.</p>
+  </article>
+  <figure>
+<pre class="mermaid">
+flowchart TD
+  START["inject_forwarded(req, ctx)"] --> XFF{"X-Forwarded-For<br/>present &amp; non-empty?"}
+  XFF -->|yes| XFFA["append: existing + ', ' + client_ip"]
+  XFF -->|no| XFFB["set: client_ip"]
+  XFFA --> XRI["X-Real-IP: OVERWRITE = client_ip<br/>(forgery replaced)"]
+  XFFB --> XRI
+  XRI --> XFH{"X-Forwarded-Host present?"}
+  XFH -->|yes| SKIPH["keep upstream value"]
+  XFH -->|no| SETH["set = ctx.original_host"]
+  SKIPH --> XFP{"X-Forwarded-Proto present?"}
+  SETH --> XFP
+  XFP -->|yes| SKIPP["keep upstream value"]
+  XFP -->|no| SETP["set = ctx.scheme (http)"]
+  style XFFA fill:#41a7f5,color:#15203a,stroke:#0b1626
+  style XRI fill:#d98a8a,color:#15203a,stroke:#0b1626
+  style SETH fill:#d6a96a,color:#15203a,stroke:#0b1626
+  style SETP fill:#d6a96a,color:#15203a,stroke:#0b1626
+</pre>
+<figcaption>Three policies, one function. Blue = append (additive chain), red = overwrite (replace forgery), amber = set-if-absent (defer to upstream).</figcaption>
+  </figure>
+</section>
+
+<section id="trust-model">
+  <h2>Observation, Not Assertion</h2>
+  <p class="lead">Every policy above is one principle applied four times: trust what you <em>observed</em>, treat what the client <em>asserted</em> as unverified.</p>
+  <p>The <code>client_ip</code> in <code>ForwardContext</code> is the only value in the entire forwarded set that the proxy <em>observed</em> — it read it off the socket, and TCP's handshake makes it hard to forge at scale. Every other candidate — an inbound <code>X-Forwarded-For</code>, a client-sent <code>X-Real-IP</code>, a hand-crafted <code>X-Forwarded-Host</code> — is an <em>assertion</em> made by whoever sent the request, and the sender may be an attacker. The design never conflates the two:</p>
+  <ul>
+    <li>The <strong>observed</strong> peer IP is written authoritatively into both XFF (as the rightmost, unforgeable entry) and X-Real-IP (as the sole value).</li>
+    <li>An <strong>asserted</strong> inbound XFF chain is <em>preserved but demoted</em> — kept for forensic continuity, but only the rightmost entry we added carries our guarantee.</li>
+    <li>An <strong>asserted</strong> X-Real-IP is <em>discarded</em> — it claims to be the immediate peer, a fact only we can know.</li>
+    <li>An <strong>asserted</strong> XFH/XFP from a genuine upstream proxy is <em>trusted</em>, because in a correct topology that upstream is itself an observation point closer to the client than we are.</li>
+  </ul>
+  <div class="callout warn"><strong>Where this model stops — and who owns the rest.</strong> Ferrum <em>always appends</em> XFF and never does trust-and-replace against a configured proxy allowlist. That is the safe default: with no allowlist, you cannot know which inbound values to believe, so you believe none of them and only vouch for your own observation. Selective trust of inbound XFF (a trusted-proxy allowlist that lets you collapse the chain to a known client) is a Level 13 (WAF / reputation) concern, explicitly deferred by this level's spec. Saying "trust nothing you didn't see" is not a limitation to apologize for — it is the correct posture until a reputation layer gives you a reason to relax it.</div>
+</section>
+
+<section id="path-rewrite">
+  <h2>Segment-Aware Path Rewriting</h2>
+  <p class="lead">Two operations — <code>strip</code> and <code>prefix</code> — that let the proxy expose one URL space and the backend serve another, without ever mangling the query string.</p>
+  <p>Path rewriting operates on the request target's path while preserving everything after the <code>?</code>. Two forms:</p>
+  <ul>
+    <li><code>strip=/api</code> — remove the prefix. <code>/api/users?p=2</code> &rarr; <code>/users?p=2</code>. The single most common reverse-proxy rewrite: the proxy exposes <code>/api/**</code>, the backend serves <code>/**</code>.</li>
+    <li><code>prefix=/v2</code> — prepend. <code>/users</code> &rarr; <code>/v2/users</code>.</li>
+  </ul>
+  <p>They compose in a fixed order — <strong><code>strip</code> first, then <code>prefix</code></strong> — so <code>strip=/api;prefix=/v2</code> takes <code>/api/users?a=b</code> to <code>/v2/users?a=b</code>. The result is always normalized to start with <code>/</code>.</p>
+
+  <h3>The query string is split off first</h3>
+  <p><code>rewrite_path</code> splits the target on the first <code>?</code> <em>before</em> touching the path, and re-appends the query after:</p>
+  <pre><code>let (path, query) = match target.split_once('?') {
+    Some((p, q)) =&gt; (p, Some(q)),
+    None =&gt; (target, None),
+};
+// ... strip/prefix arithmetic on `path` only ...
+match query { Some(q) =&gt; format!("{out}?{q}"), None =&gt; out }</code></pre>
+  <p>So a <code>?</code> (or a <code>#</code> inside the query) can never be swallowed by prefix arithmetic, and a backend that depends on its query parameters keeps getting them intact. This is verified directly: <code>strip=/api</code> on <code>/api/users?page=2</code> yields <code>/users?page=2</code>.</p>
+
+  <h3>Segment boundary, not raw byte prefix — the /apixyz trap</h3>
+  <p>The subtle correctness bug this design exists to prevent: a naive <code>str::strip_prefix("/api")</code> would strip <code>/api</code> from <code>/apixyz</code> and yield <code>/xyz</code>. But <code>/apixyz</code> is a <em>different path</em> that merely shares a textual prefix — an operator writing <code>strip=/api</code> means "the <code>/api</code> segment," exactly as nginx and Traefik interpret it. So the strip only fires when what remains after the prefix is <strong>empty or begins with <code>/</code></strong>:</p>
+  <pre><code>if let Some(rest) = out.strip_prefix(s.as_str()) {
+    if rest.is_empty() || rest.starts_with('/') {
+        out = rest.to_string();   // clean segment break — strip
+    }
+    // else: /apixyz -> rest is "xyz", no leading '/' — DON'T strip
+}</code></pre>
+  <p><code>/api/users</code> leaves <code>/users</code> (leading slash &rarr; strip). <code>/api</code> leaves <code>""</code> (empty &rarr; strip). <code>/apixyz</code> leaves <code>xyz</code> (no boundary &rarr; pass through untouched). A raw prefix strip would silently misroute the third case — and silent misrouting is the worst outcome, because nothing errors and traffic just goes to the wrong place.</p>
+
+  <h3>Empty target normalizes to "/"</h3>
+  <p>Stripping <code>/api</code> from exactly <code>/api</code> yields <code>""</code>, and an empty request target is malformed HTTP — a backend would reject it. So the code forces a root:</p>
+  <pre><code>if out.is_empty() { out.push('/'); }
+else if !out.starts_with('/') { out.insert(0, '/'); }</code></pre>
+  <p><code>/api</code> &rarr; <code>/</code>, and <code>/api?x=1</code> &rarr; <code>/?x=1</code>. This distinction matters because <code>/</code> is a valid "the root resource" while <code>""</code> is a protocol error.</p>
+
+  <h3>Trailing-slash normalization at parse time</h3>
+  <p>The segment-aware strip introduced a sharp edge: <code>strip=/api/</code> (trailing slash) against <code>/api/users</code> leaves remainder <code>users</code> — no leading slash — so the strip would silently become a no-op. A trailing slash is a plausible typo, so it is normalized <em>at parse time</em> (config normalization belongs at parse time, not on the hot request path): <code>value.trim_end_matches('/')</code> makes <code>strip=/api/</code> behave exactly like <code>strip=/api</code>. But <code>strip=/</code> (all slashes) would trim to <code>""</code>, which names no segment — that is a <strong>hard startup error</strong>, not a silent no-op.</p>
+
+  <div class="callout warn"><strong>Non-origin-form targets are left alone.</strong> <code>rewrite_path</code> only touches origin-form targets (starting with <code>/</code>). An absolute-form target (<code>http://host/path</code>, used to proxies) or asterisk-form (<code>*</code>, for <code>OPTIONS *</code>) is returned unchanged — rooting or prefixing them would corrupt the request line (<code>http://evil.com/api</code> becoming <code>/http://evil.com/api</code>, or <code>*</code> becoming <code>/*</code>). RFC&nbsp;9112 §3.2 defines these forms; strip/prefix simply do not apply to them.</div>
+  <figure>
+<pre class="mermaid">
+flowchart TD
+  T["target = /api/users?page=2"] --> Q["split on first '?' →<br/>path=/api/users, query=page=2"]
+  Q --> S{"strip set &amp; matches<br/>on segment boundary?"}
+  S -->|"/api → rest '/users'"| S1["strip → /users"]
+  S -->|"/apixyz → rest 'xyz'"| S2["NO strip → /apixyz"]
+  S1 --> PF{"prefix set?"}
+  S2 --> PF
+  PF -->|"prefix=/v2"| P1["prepend → /v2/users"]
+  PF -->|none| P2["unchanged"]
+  P1 --> N["normalize: empty → '/', ensure leading '/'"]
+  P2 --> N
+  N --> RE["re-append query → /v2/users?page=2"]
+  style S1 fill:#41a7f5,color:#15203a,stroke:#0b1626
+  style S2 fill:#d6a96a,color:#15203a,stroke:#0b1626
+  style RE fill:#41a7f5,color:#15203a,stroke:#0b1626
+</pre>
+<figcaption>The path pipeline: query split off, segment-aware strip, prefix prepend, root normalization, query re-appended. The <code>/apixyz</code> branch is the trap the segment check closes.</figcaption>
+  </figure>
+</section>
+
+<section id="host-rewrite">
+  <h2>Host Rewrite &amp; the Ordering Bug</h2>
+  <p class="lead"><code>host=backend.local</code> replaces the <code>Host</code> the backend sees — and the entire reason <code>ForwardContext.original_host</code> exists is to keep <code>X-Forwarded-Host</code> honest when it does.</p>
+  <p>Host rewriting is one line in <code>apply_request</code>:</p>
+  <pre><code>if let Some(h) = &amp;self.host {
+    http::set_header(&amp;mut req.headers, "Host", h);
+}</code></pre>
+  <p><code>set_header</code> is <strong>remove-then-push</strong>, so exactly one <code>Host</code> survives. That matters: a duplicate <code>Host</code> header is a request-smuggling vector — different servers in a chain may disagree about which one is authoritative. One Host in, one Host out.</p>
+
+  <h3>Capture before the clobber — the load-bearing ordering</h3>
+  <p>Here is the bug the whole design is arranged to prevent. <code>X-Forwarded-Host</code> is supposed to tell the backend <em>what the client asked for</em>. But if injection read the live <code>Host</code> header at injection time, and the Host rewrite had already run, XFH would report <code>backend.local</code> — the rewritten value — and the backend could never learn the client's real Host. The fix is to capture the original into <code>ctx.original_host</code> <strong>before any rewriting</strong>, at the top of the request path in <code>proxy.rs</code>, and have <code>inject_forwarded</code> read <em>that</em>, never the live header.</p>
+  <div class="callout"><strong>Why the step-3/step-4 order is actually not observable — and that's the point.</strong> Because injection reads <code>ctx.original_host</code> and not the live <code>Host</code>, the relative order of the Host rewrite (step 3) and forwarded injection (step 4) produces the same honest XFH either way. The ordering <em>would</em> matter if injection ever read the live header; it deliberately does not. Reading the captured context rather than the mutated head is exactly what makes XFH robust against the Host rewrite.</div>
+  <div class="callout story"><strong>Verified end-to-end (2026-08-07).</strong> With <code>/api/**=...;strip=/api;host=backend.local;remove-resp-header=Server</code>, a client GET to <code>/api/users?page=2</code> (Host <code>example.com</code>) reached the backend as <code>"path": "/users?page=2"</code> (prefix stripped, query intact), <code>"host": "backend.local"</code> (rewritten), and <em>still</em> <code>x-forwarded-host: example.com</code> — the client's original Host, preserved despite the rewrite. That last fact is the whole-level ordering guarantee, observable.</div>
+</section>
+
+<section id="header-rules">
+  <h2>Header Rules &amp; the Protected-Header Guardrail</h2>
+  <p class="lead">Four repeatable rules let config add or drop arbitrary headers on both legs — bounded by a guardrail that refuses framing headers at boot.</p>
+  <table>
+    <thead><tr><th>Option</th><th>Effect</th></tr></thead>
+    <tbody>
+      <tr><td><code>set-header=Name:Value</code></td><td>Add or overwrite a request header.</td></tr>
+      <tr><td><code>remove-header=Name</code></td><td>Remove a request header (case-insensitive).</td></tr>
+      <tr><td><code>set-resp-header=Name:Value</code></td><td>Add or overwrite a response header.</td></tr>
+      <tr><td><code>remove-resp-header=Name</code></td><td>Remove a response header (case-insensitive).</td></tr>
+    </tbody>
+  </table>
+  <p><code>set</code> is an <strong>overwrite</strong> (remove-then-push), not an append, so a rule is idempotent and can't accumulate duplicates across retries. On both legs, <strong>removals run before sets</strong>, so a <code>(remove X, set X)</code> pair is order-independent — it always lands on a clean slate rather than depending on which was declared first. The response path (<code>apply_response</code>) has <em>only</em> these rules — there is nothing to "forward" back toward the client, since the client is the final hop.</p>
+
+  <h3>The guardrail — protected headers rejected at boot</h3>
+  <p>A rule may not target a framing or connection header. Attempting it is a <strong>hard startup error (exit 1)</strong>, never a silent ignore — a config that <em>appears</em> to set <code>Transfer-Encoding</code> but doesn't would be a trap, and one that <em>actually did</em> would reopen the Level 1 smuggling holes. The protected set is checked case-insensitively in <code>check_not_protected</code>:</p>
+  <pre><code>const PROTECTED_HEADERS: [&amp;str; 7] = [
+    "content-length", "transfer-encoding", "connection", "host",
+    "upgrade", "te", "trailer",
+];</code></pre>
+  <table>
+    <thead><tr><th>Header</th><th>Why protected</th></tr></thead>
+    <tbody>
+      <tr><td><code>Content-Length</code></td><td>Body framing the proxy owns; a wrong value desyncs the connection.</td></tr>
+      <tr><td><code>Transfer-Encoding</code></td><td>The other framing header; a smuggled <code>chunked</code> is the classic request-smuggling primitive.</td></tr>
+      <tr><td><code>Connection</code></td><td>Keep-alive semantics the proxy manages end to end.</td></tr>
+      <tr><td><code>Host</code></td><td>Has a dedicated <code>host=</code> option that also feeds <code>X-Forwarded-Host</code> — <code>set-header</code> would bypass that.</td></tr>
+      <tr><td><code>Upgrade</code>, <code>TE</code>, <code>Trailer</code></td><td>The remaining hop-by-hop headers <code>strip_hop_by_hop</code> deletes. Without protection, step 5's <code>set-header</code> could <em>re-add</em> a hop-by-hop header after the strip, defeating it — a <code>set-header=Upgrade:websocket</code> would sail back onto the wire.</td></tr>
+    </tbody>
+  </table>
+  <div class="callout warn"><strong>Note the honest discrepancy.</strong> The Level 5 spec listed <em>four</em> protected headers (<code>Content-Length</code>, <code>Transfer-Encoding</code>, <code>Connection</code>, <code>Host</code>). The shipped code protects <strong>seven</strong> — it added <code>Upgrade</code>, <code>TE</code>, and <code>Trailer</code> during a review-finding pass, because those are hop-by-hop headers that a <code>set-header</code> rule running <em>after</em> <code>strip_hop_by_hop</code> could otherwise resurrect. The extra three are the correct call; the spec is the one that was incomplete. Ferrum deliberately does <em>not</em> protect <code>Content-Encoding</code> or <code>Expect</code>: those are hazardous but legitimately settable, so blocking them would be over-reach.</div>
+</section>
+
+<section id="crlf">
+  <h2>CRLF-Injection Hardening</h2>
+  <p class="lead">The protected-header list guards header <em>names</em>. It does nothing about a malicious <em>value</em> — and a <code>\r\n</code> inside a value is a request-smuggling vector all its own.</p>
+  <p>Three validators run <strong>at parse time</strong>, because the only place to stop a smuggled byte is before it is ever accepted — once it is stored raw and serialized by <code>write_request_head</code>, it is bytes on the wire.</p>
+
+  <article class="concept">
+    <span class="tag adv">check_header_value</span>
+    <h3>CR/LF in header values</h3>
+    <p>A <code>set-header=X-Foo:bar\r\nTransfer-Encoding: chunked</code> is a smuggling payload: <code>str::trim()</code> only strips <em>surrounding</em> whitespace, so an interior CRLF sails through and <code>write_request_head</code> renders it as a header <em>separator</em> — turning one config value into an extra header line on the wire. It bypasses <code>PROTECTED_HEADERS</code> entirely, because that guard inspects only the header <em>name</em>. So any value containing a control character (chiefly CR and LF) is a hard error.</p>
+    <div class="callout danger"><strong>Why the framing re-declaration does NOT save you.</strong> The framing block in <code>proxy.rs</code> does <code>remove_header("transfer-encoding")</code> then re-pushes it — and <code>remove_header</code> matches on the header <em>name</em>. A <code>Transfer-Encoding</code> smuggled <em>inside another header's value</em> (say <code>X-Foo</code>'s value) is not a distinct header entry — it is bytes in <code>X-Foo</code> — so <code>remove_header</code> never sees it and it reaches the backend intact. The value check is the only door that stops it.</div>
+  </article>
+
+  <article class="concept">
+    <span class="tag adv">check_header_name</span>
+    <h3>Header names must be valid tokens</h3>
+    <p>RFC&nbsp;9110 §5.1 defines a field name as a <code>token</code> — ASCII letters, digits, and <code>!#$%&amp;'*+-.^_`|~</code> only. A name like <code>Foo Bar</code> would render as <code>Foo Bar: x</code>, a line this proxy's own Level 1 parser would reject off the wire. So a config-injected name must clear the same bar: spaces, <code>:</code>, control chars, and non-ASCII bytes are refused. Legitimate names using token-special characters (<code>X-My_Header.v1</code>) still pass.</p>
+  </article>
+
+  <div class="grid2">
+    <article class="concept">
+      <span class="tag adv">check_host</span>
+      <h3>host= must look like an authority</h3>
+      <p><code>host</code> flows into the <code>Host</code> header value, so it gets the same CR/LF check (reusing <code>check_header_value</code>, so the two doors enforce identical rules). Beyond that, a <code>Host</code> carries an authority (<code>uri-host [":" port]</code>), so it must <em>look</em> like one: ASCII alphanumerics plus <code>-._~:[]</code> (unreserved chars, host/port separator, IPv6 literal brackets). A space is refused — it would render a malformed header line — while <code>backend.local</code> and <code>backend.local:8080</code> are accepted.</p>
+    </article>
+    <article class="concept">
+      <span class="tag adv">check_prefix</span>
+      <h3>prefix= lands in the request line</h3>
+      <p><code>prefix</code> is prepended to the target, which lands in the <em>request line</em> (<code>METHOD SP request-target SP HTTP-version</code>). Two byte classes are catastrophic there: CR/LF (splits the line into a bogus header line) and a literal <strong>space</strong> — arguably worse, since the request line is space-delimited, so an interior space turns the rest of the target into a bogus HTTP-version field (<code>GET /v2 X-Inj: yes/test HTTP/1.1</code>). Both are refused. <code>strip</code> needs no such check — it is only ever a match argument, never serialized.</p>
+    </article>
+  </div>
+  <div class="callout"><strong>Two doors, one rule.</strong> <code>set-header</code> and <code>host=</code> both serialize into a header value, so both call <code>check_header_value</code>. A findings review caught that the first fix wave hardened <code>set-header</code> but left the identical vector open through <code>host=</code> and <code>prefix=</code> — both store their values raw and serialize them. All three doors are now closed with the exact reproduced payloads as regression tests.</div>
+</section>
+
+<section id="ordering">
+  <h2>Fixed Transform Ordering</h2>
+  <p class="lead">Inside <code>apply_request</code> the four operations run in a fixed order — and the order is a set of correctness guarantees, not a style choice.</p>
+  <ol class="flow">
+    <li><strong>Path rewrite</strong> (<code>strip</code> &rarr; <code>prefix</code>). First, so everything downstream — including the log line — sees the target the backend will actually receive.</li>
+    <li><strong>Host rewrite</strong> (<code>host=</code>). Remove-then-push, exactly one Host survives.</li>
+    <li><strong>Forwarded injection</strong> (XFF/XRI/XFH/XFP). Reads <code>ctx.original_host</code>, not the live Host clobbered in step 2 — so XFH reports what the client asked for regardless of step-2/step-3 order.</li>
+    <li><strong>Explicit header rules</strong> (removes then sets). <strong>Last</strong>, on purpose.</li>
+  </ol>
+  <p><strong>Why explicit rules run last.</strong> It lets an operator deliberately override an injected forwarded value — for example, pinning <code>X-Forwarded-Proto: https</code> when an external TLS terminator sits in front of Ferrum. If rules ran <em>before</em> injection, the injection would clobber the operator's value back. This is tested with a probe that only bites under the correct order: an explicit <code>set-header=X-Real-IP:10.9.9.9</code> must win, because injection <em>unconditionally</em> overwrites X-Real-IP — rules-last yields <code>10.9.9.9</code>, rules-first yields the client IP.</p>
+
+  <h3>All of this runs before framing re-declaration</h3>
+  <p>The transform sits between <code>strip_hop_by_hop</code> and the proxy's framing re-declaration in <code>serve_one</code>. That placement is the outermost guarantee: after all four steps, <code>proxy.rs</code> re-declares <code>Connection</code> and <code>Transfer-Encoding</code> itself, so <strong>no rewrite rule can ever desync <code>Content-Length</code> / <code>Transfer-Encoding</code></strong> — even if the guardrail somehow missed one, the framing the proxy owns has the final word. Level 1's smuggling guarantees stay intact end to end.</p>
+
+  <h3>The route-spec ; grammar hazard</h3>
+  <p>Rewrite options attach to a route with <code>;</code>-separated options, the same shape Level 4 used for <code>;health=</code>. There is a real parsing hazard: option values <em>contain</em> <code>=</code> (<code>strip=/api</code>), so the options must be severed on the first <code>;</code> <strong>before</strong> the <code>=TARGET</code> split. The naive order (split on <code>=</code> first) would swallow the target into the option string and mis-route.</p>
+  <pre class="art">CORRECT:  /api/**=api;strip=/api
+          └─ sever ';' first ─┘
+          route "/api/**=api"  +  options "strip=/api"   ✓
+
+NAIVE (bug): split on '=' first
+          key "/api/**"  value "api;strip=/api"
+          → target becomes "api;strip=/api", a bogus backend  ✗</pre>
+  <p>Because options are severed on the first <code>;</code>, a route's options cannot themselves contain a literal <code>;</code>. And <code>--no-forwarded</code> is applied even to the two friendly catch-all default routes, so the flag is never a silent no-op.</p>
+  <div class="callout story"><strong>Two <code>;</code> grammars coexist, verified.</strong> An <code>--upstream 'pool=rr:...;health=/health'</code> (Level 4's <code>;</code> grammar) ran in the same invocation as <code>/api/**=...;strip=...;host=...</code> (Level 5's <code>;</code> grammar). Both routes served correctly — the two grammars did not interfere.</div>
+</section>
+
+<section id="code-map">
+  <h2>Code Map</h2>
+  <p class="lead">One new module, one new call site — <code>rewrite.rs</code> holds the whole level; <code>proxy.rs</code> and <code>router.rs</code> wire it in.</p>
+  <table>
+    <thead><tr><th>File / item</th><th>Responsibility</th></tr></thead>
+    <tbody>
+      <tr><td><code>rewrite.rs</code></td><td>The entire level: <code>RewriteRules</code>, <code>ForwardContext</code>, the transforms, the parser, and all validators. Pure, no I/O.</td></tr>
+      <tr><td><code>RewriteRules</code> (struct)</td><td>Parsed per-route config: <code>strip</code>, <code>prefix</code>, <code>host</code>, four header-rule vecs, and the <code>forwarded: bool</code>. Hand-written <code>Default</code> (forwarded = true).</td></tr>
+      <tr><td><code>ForwardContext&lt;'a&gt;</code></td><td>Per-connection facts the head lacks: <code>client_ip</code> (observed), <code>original_host</code> (captured pre-rewrite), <code>scheme</code>.</td></tr>
+      <tr><td><code>RewriteRules::from_options</code></td><td>Parse a <code>;</code>-severed option string into rules; runs every validator; hard-errors on unknown option, empty value, missing <code>:</code>, or protected header.</td></tr>
+      <tr><td><code>RewriteRules::apply_request</code></td><td>The fixed 4-step request transform: path &rarr; Host &rarr; forwarded &rarr; explicit rules.</td></tr>
+      <tr><td><code>RewriteRules::apply_response</code></td><td>Response transform: explicit <code>set-resp-header</code>/<code>remove-resp-header</code> only (removes before sets).</td></tr>
+      <tr><td><code>RewriteRules::rewrite_path</code></td><td>Query-preserving, segment-aware <code>strip</code>/<code>prefix</code>; leaves non-origin-form targets untouched; normalizes empty &rarr; <code>/</code>.</td></tr>
+      <tr><td><code>RewriteRules::inject_forwarded</code></td><td>The four headers with their three policies (append / overwrite / set-if-absent).</td></tr>
+      <tr><td><code>check_not_protected</code></td><td>Rejects the 7 protected header names case-insensitively (framing + hop-by-hop).</td></tr>
+      <tr><td><code>check_header_name</code> / <code>check_header_value</code></td><td>RFC&nbsp;9110 token validation for names; control-char (CR/LF) rejection for values.</td></tr>
+      <tr><td><code>check_host</code> / <code>check_prefix</code></td><td>Authority-shape + CRLF for <code>host=</code>; space + control rejection for <code>prefix=</code> (request-line safety).</td></tr>
+      <tr><td><code>L5_KEYS</code></td><td>Static list of the 7 option keys Level 5 owns; the router's option partition (Level 6) uses it to route each <code>;</code> segment to the right sub-parser.</td></tr>
+      <tr><td><code>http::set_header</code> / <code>remove_header</code> / <code>header</code></td><td>The head-mutation primitives in <code>http.rs</code>: <code>set_header</code> is remove-then-push (overwrite), <code>remove_header</code> and <code>header</code> match case-insensitively.</td></tr>
+      <tr><td><code>proxy.rs::serve_one</code></td><td>Captures <code>original_host</code>, builds <code>ForwardContext</code>, and calls the transforms at the documented positions (after <code>strip_hop_by_hop</code>, before framing).</td></tr>
+    </tbody>
+  </table>
+  <div class="callout"><strong>Verified against the source.</strong> <code>PROTECTED_HEADERS</code> has <strong>7</strong> entries; <code>L5_KEYS</code> has <strong>7</strong> keys; the suite is <strong>99 tests</strong> (72 kept from Level 4, +27 new). The scheme is the literal <code>"http"</code> until Level 8. One claim not fully re-verified line-by-line in this pass: the exact <code>serve_one</code> line where <code>original_host</code> is captured (the spec cites &ldquo;around line 456&rdquo;); the mechanism — capture before rewrite, feed <code>ForwardContext</code> — is confirmed by the code and tests.</div>
+</section>
+
+<section id="industry">
+  <h2>How the Giants Do It</h2>
+  <p class="lead">Every production proxy forwards origin headers and rewrites paths. The interesting differences are in trust defaults, the standardized <code>Forwarded:</code> header, and how much rewriting the config language expresses.</p>
+  <div class="grid2">
+    <div class="card">
+      <span class="tag tech">nginx</span>
+      <h4>Explicit, and trust-what-you-configure</h4>
+      <p>nginx sets forwarded headers explicitly with <code>proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for</code> — the <code>$proxy_add_...</code> variable appends the connection IP to any inbound value, the same append semantics Ferrum bakes in. <code>X-Real-IP</code> is typically set to <code>$remote_addr</code>. The <code>realip</code> module can <em>trust</em> inbound XFF from a configured <code>set_real_ip_from</code> allowlist — the trusted-proxy feature Ferrum defers to Level 13. Path rewriting is <code>rewrite</code> regexes plus the <code>proxy_pass</code> trailing-slash rule (the classic <code>location /api/ { proxy_pass http://b/; }</code> strips <code>/api/</code>) — more powerful and more footgun-prone than <code>strip</code>/<code>prefix</code>.</p>
+    </div>
+    <div class="card">
+      <span class="tag tech">Apache httpd</span>
+      <h4>mod_proxy + mod_remoteip</h4>
+      <p>httpd's <code>ProxyPass</code>/<code>ProxyPassReverse</code> handle path mapping and rewrite response headers (e.g. <code>Location</code>) back to the public space — the reverse-rewrite Ferrum doesn't yet do. <code>mod_remoteip</code> parses <code>X-Forwarded-For</code> from trusted proxies (<code>RemoteIPTrustedProxy</code>) and rewrites the client address the rest of the server sees — again the allowlist model. <code>RequestHeader</code>/<code>Header</code> directives are the analogue of <code>set-header</code>/<code>set-resp-header</code>. Classic C, synchronous per-request hooks.</p>
+    </div>
+    <div class="card">
+      <span class="tag tech">HAProxy</span>
+      <h4>Declarative, source-IP native</h4>
+      <p>HAProxy sets XFF with <code>option forwardfor</code> (append, with an <code>except</code> for trusted nets) and expresses arbitrary header work with <code>http-request set-header</code> / <code>set-path</code> / <code>replace-path</code>. Its <code>src</code> fetch is the connection IP — the same unforgeable identity Ferrum keys on. Everything is config directives against a tuned C event loop, not pluggable code. Its trust model, like nginx's, is "trust the proxies you name."</p>
+    </div>
+    <div class="card">
+      <span class="tag tech">Envoy</span>
+      <h4>XFF numbers, and RFC 7239</h4>
+      <p>Envoy is the most explicit about the append-and-count trust model: <code>xff_num_trusted_hops</code> tells it exactly how many proxies sit in front so it can pick the real client from the <em>right</em> of the XFF chain — the counting discipline this page keeps hammering. It supports the standardized <code>Forwarded:</code> header (RFC&nbsp;7239), which Ferrum deliberately skips. Header manipulation and path rewriting (<code>prefix_rewrite</code>, regex rewrite) are route-config; filters can do far more.</p>
+    </div>
+  </div>
+  <table>
+    <thead><tr><th>Concern</th><th>Ferrum (teaching)</th><th>Production proxies</th></tr></thead>
+    <tbody>
+      <tr><td>XFF policy</td><td>Always append; never trust inbound</td><td>Append too, but with a trusted-proxy allowlist to collapse/trust the chain (nginx realip, httpd remoteip, Envoy trusted-hops)</td></tr>
+      <tr><td>X-Real-IP</td><td>Overwrite with observed peer</td><td>Same intent (nginx <code>$remote_addr</code>); some derive the client from a trusted XFF instead</td></tr>
+      <tr><td>Standardized <code>Forwarded:</code></td><td>Not built (documented gap)</td><td>Envoy supports RFC&nbsp;7239; others partially</td></tr>
+      <tr><td>Path rewrite</td><td>Segment-aware <code>strip</code>/<code>prefix</code>, query preserved</td><td>Full regex + capture groups (nginx <code>rewrite</code>, Envoy regex, HAProxy <code>replace-path</code>)</td></tr>
+      <tr><td>Response rewrite</td><td>Header set/remove only</td><td>Also <code>Location</code>/cookie-domain rewriting (httpd <code>ProxyPassReverse</code>) — Ferrum's documented gap</td></tr>
+      <tr><td>Framing guardrail</td><td>Protected headers rejected at boot; CRLF refused at parse</td><td>Generally enforced internally; not usually a config-time error</td></tr>
+    </tbody>
+  </table>
+  <div class="callout"><strong>Honest positioning.</strong> Ferrum's rewriting is a teaching build. It has <code>strip</code>/<code>prefix</code>, not regex capture groups; it forwards the <code>X-*</code> family, not RFC&nbsp;7239 <code>Forwarded:</code>; it always appends XFF rather than offering a trusted-proxy allowlist; and it doesn't yet reverse-rewrite <code>Location</code> or <code>Set-Cookie</code> domains. What it gets <em>right</em> — and shares with the giants — is the append/overwrite/set-if-absent trust split, the count-from-the-right XFF discipline, keying trust on the observed socket IP, and refusing to let config touch framing headers. As of the current codebase these comparisons reflect the well-known architectures of each proxy; specific directive names and defaults may drift across versions.</div>
+</section>
+
+<section id="quiz">
+  <h2>Quiz</h2>
+  <p class="lead">The Level 5 questions, copied verbatim from <code>PROGRESS.md</code>. Vessey answers these before Level 6.</p>
+  <div class="qa"><p class="q">1. <code>X-Forwarded-For</code> is appended but <code>X-Real-IP</code> is overwritten. Explain why each choice is the secure one, and what a client could forge if we made the opposite choice for either.</p></div>
+  <div class="qa"><p class="q">2. A backend behind two proxies reads <code>X-Forwarded-For: 1.2.3.4, 10.0.0.1, 10.0.0.2</code>. Which entry is trustworthy, and why must it count from the right?</p></div>
+  <div class="qa"><p class="q">3. <code>X-Forwarded-Host</code> is populated from <code>ForwardContext.original_host</code> rather than from the <code>Host</code> header at injection time. What breaks if you read the header instead, and which config makes the bug visible?</p></div>
+  <div class="qa"><p class="q">4. The transform runs after <code>strip_hop_by_hop</code> and before the framing re-declaration. Give a concrete attack or bug that each ordering constraint prevents.</p></div>
+  <div class="qa"><p class="q">5. <code>set-header</code> refuses <code>Content-Length</code>, <code>Transfer-Encoding</code>, <code>Connection</code>, and <code>Host</code> at startup. For each, say what would break if it were allowed.</p></div>
+  <div class="qa"><p class="q">6. Route specs sever <code>;</code> options before splitting on <code>=</code>. Show what <code>/api/**=api;strip=/api</code> parses to under the naive order, and why the bug would be hard to notice in production.</p></div>
+  <div class="qa"><p class="q">7. Explicit header rules run last, after forwarded injection. Name a real deployment where that ordering is required.</p></div>
+  <div class="qa"><p class="q">8. <code>strip</code> of the entire path yields <code>/</code> rather than <code>""</code>. Why does the distinction matter to a backend?</p></div>
+</section>
+
+<section id="cheatsheet">
+  <h2>Cheat Sheet &amp; Glossary</h2>
+  <h3>The four forwarded headers at a glance</h3>
+  <table>
+    <thead><tr><th>Header</th><th>Policy</th><th>Source</th><th>Read from…</th></tr></thead>
+    <tbody>
+      <tr><td><code>X-Forwarded-For</code></td><td>append</td><td>observed <code>client_ip</code></td><td>the RIGHT (rightmost = unforgeable)</td></tr>
+      <tr><td><code>X-Real-IP</code></td><td>overwrite</td><td>observed <code>client_ip</code></td><td>the whole value (single-valued)</td></tr>
+      <tr><td><code>X-Forwarded-Host</code></td><td>set-if-absent</td><td><code>ctx.original_host</code></td><td>upstream's value if present</td></tr>
+      <tr><td><code>X-Forwarded-Proto</code></td><td>set-if-absent</td><td><code>ctx.scheme</code> (<code>http</code>)</td><td>upstream's value if present</td></tr>
+    </tbody>
+  </table>
+  <h3>Numbers, constants &amp; defaults</h3>
+  <table>
+    <thead><tr><th>Constant / default</th><th>Value</th><th>Where / why</th></tr></thead>
+    <tbody>
+      <tr><td>Transform order (fixed)</td><td>path &rarr; Host &rarr; forwarded &rarr; explicit rules</td><td><code>apply_request</code>; explicit rules last so operators can override</td></tr>
+      <tr><td>Protected headers</td><td>7: Content-Length, Transfer-Encoding, Connection, Host, Upgrade, TE, Trailer</td><td><code>PROTECTED_HEADERS</code>; rejected at startup, exit 1</td></tr>
+      <tr><td>Level 5 option keys</td><td>7: strip, prefix, host, set-header, remove-header, set-resp-header, remove-resp-header</td><td><code>L5_KEYS</code></td></tr>
+      <tr><td>Forwarded default</td><td>ON for every route</td><td>hand-written <code>Default</code> (<code>forwarded: true</code>); off via <code>--no-forwarded</code></td></tr>
+      <tr><td>Scheme today</td><td><code>"http"</code></td><td><code>ctx.scheme</code>; Level 8 flips to <code>"https"</code></td></tr>
+      <tr><td>strip semantics</td><td>segment boundary only</td><td><code>/api</code> strips <code>/api/users</code> not <code>/apixyz</code></td></tr>
+      <tr><td>Empty target</td><td>normalized to <code>/</code></td><td>an empty request target is malformed HTTP</td></tr>
+      <tr><td>Unit tests</td><td>99 (72 from L4 + 27 new)</td><td>all pure, no sockets</td></tr>
+    </tbody>
+  </table>
+  <h3>Option grammar</h3>
+  <pre class="art">ROUTE = [METHOD ][host]path_expr=TARGET[;opt=val]...
+
+strip=/p            remove path prefix (segment-aware)
+prefix=/p           prepend path prefix
+host=h              rewrite the Host header (feeds X-Forwarded-Host)
+set-header=N:V      set/overwrite a request header
+remove-header=N     remove a request header
+set-resp-header=N:V set/overwrite a response header
+remove-resp-header=N remove a response header
+--no-forwarded      global: turn off all four X-Forwarded-* / X-Real-IP
+
+Example:
+rproxy 127.0.0.1:8080 \
+  '/api/**=127.0.0.1:9001;strip=/api;host=backend.local;remove-resp-header=Server' \
+  '/=127.0.0.1:9000'</pre>
+  <h3>Glossary</h3>
+  <table>
+    <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td>Chain of custody (XFF)</td><td>The comma-separated list of proxy hops; each proxy appends its observed peer, so the rightmost entry is the one that proxy vouches for.</td></tr>
+      <tr><td>Count from the right</td><td>A backend reading XFF must index from the trusted end; the leftmost (client-supplied) entry is the least trustworthy.</td></tr>
+      <tr><td>Observation vs assertion</td><td>The observed socket IP is trusted; any header the sender claims is unverified until a trust layer says otherwise.</td></tr>
+      <tr><td>Set-if-absent</td><td>Write a header only when it isn't already present, deferring to a legitimate upstream proxy's value.</td></tr>
+      <tr><td>Segment-aware strip</td><td>Strip a path prefix only on a <code>/</code>-boundary, so <code>/api</code> never mangles <code>/apixyz</code>.</td></tr>
+      <tr><td>Original-host capture</td><td>Recording the client's <code>Host</code> before any rewrite, so <code>X-Forwarded-Host</code> stays honest after <code>host=</code>.</td></tr>
+      <tr><td>Protected header</td><td>A framing/hop-by-hop header a rewrite rule may never touch; violating it is a startup error.</td></tr>
+      <tr><td>CRLF injection</td><td>A <code>\r\n</code> smuggled into a header value/name/host/prefix that becomes an extra header line on the wire — refused at parse time.</td></tr>
+      <tr><td>Origin-form target</td><td>A request target starting with <code>/</code>; the only form strip/prefix rewrite (absolute/asterisk forms pass through).</td></tr>
+      <tr><td>Pure transform</td><td>A function over a head struct with no I/O — the property that makes the whole level unit-testable.</td></tr>
+    </tbody>
+  </table>
+</section>
+</main>
+</div>
+
+<footer>
+  <p>Ferrum KB &mdash; Level 5: Proxy Headers &amp; Rewriting &bull; Built 2026-09-02</p>
+  <p class="muted">A teaching reverse proxy in Rust. Grounded in <code>rproxy/src/rewrite.rs</code>, the Level 5 design spec, and PROGRESS.md; industry comparisons reflect well-known nginx / Apache httpd / HAProxy / Envoy architectures and may drift across versions.</p>
+</footer>
+</body>
+</html>

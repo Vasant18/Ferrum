@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ferrum KB — Level 9: OS Internals</title>
+<meta name="description" content="A complete, plain-English map of the Barracuda Networks product portfolio: every product family (Email, Application, Network, Data Protection, Managed XDR, MSP) and the BarracudaONE platform — what each product is, what it does, and what problem it solves." />
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    flowchart: { htmlLabels: true, useMaxWidth: true, padding: 12, nodeSpacing: 55, rankSpacing: 55 },
+    startOnLoad: true, theme: 'base', securityLevel: 'loose',
+    themeVariables: {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '15px',
+      primaryColor: '#e7e8ea', primaryTextColor: '#15203a', primaryBorderColor: '#7e848c',
+      lineColor: '#6a6f77', secondaryColor: '#dddfe2', tertiaryColor: '#f3f4f6',
+      noteBkgColor: '#fff3d6', noteTextColor: '#3a2f12', noteBorderColor: '#caa84a',
+      actorBkg: '#e7e8ea', actorTextColor: '#15203a', actorBorder: '#7e848c',
+      clusterBkg: '#eef0f2', clusterBorder: '#a0a4aa'
+    }
+  });
+</script>
+<style>
+  :root{--bg:#0f1320;--panel:#161c2e;--panel-2:#1d2540;--ink:#e8ecf5;--muted:#9aa6c4;--accent:#7c5cff;--accent-2:#22d3a6;--warn:#ffb454;--danger:#ff6b81;--line:#2a3354;--code-bg:#0b0f1a;--max:1100px;}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:linear-gradient(180deg,#0c1020,#0f1320 40%);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  a{color:var(--accent-2);text-decoration:none}a:hover{text-decoration:underline}
+  header.hero{padding:56px 24px 40px;text-align:center;background:radial-gradient(1200px 400px at 50% -10%,rgba(255,107,129,.18),transparent 60%);border-bottom:1px solid var(--line);}
+  header.hero .eyebrow{letter-spacing:.25em;text-transform:uppercase;color:var(--accent-2);font-size:.75rem;font-weight:700}
+  header.hero h1{font-size:clamp(1.9rem,4vw,3rem);margin:.3em 0 .2em;line-height:1.1}
+  header.hero p.sub{color:var(--muted);max-width:790px;margin:0 auto;font-size:1.05rem}
+  .badges{margin-top:18px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .badge{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);padding:4px 12px;border-radius:999px;font-size:.8rem}
+  .layout{display:grid;grid-template-columns:260px 1fr;gap:32px;align-items:start;max-width:1320px;margin:0 auto;padding:0 22px}
+  nav.toc{position:sticky;top:0;max-height:100vh;overflow:auto;padding:28px 10px 60px;border-right:1px solid var(--line);font-size:.9rem;}
+  nav.toc h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.18em;color:var(--muted);margin:18px 8px 6px}
+  nav.toc a{display:block;color:var(--muted);padding:5px 10px;border-radius:8px;border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--panel);color:var(--ink);text-decoration:none;border-left-color:var(--accent)}
+  main{padding:34px 0 80px;min-width:0}
+  section{margin:0 0 46px;scroll-margin-top:18px}
+  section>h2{font-size:1.7rem;margin:0 0 .5em;padding-bottom:.3em;border-bottom:2px solid var(--line);display:flex;align-items:center;gap:.5em;}
+  h3{font-size:1.25rem;margin:1.6em 0 .4em;color:#fff}
+  h4{font-size:1.02rem;margin:1.2em 0 .3em;color:var(--accent-2);text-transform:uppercase;letter-spacing:.04em}
+  p,li{color:var(--ink)}.muted{color:var(--muted)}
+  article.concept{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin:22px 0}
+  article.concept>h3:first-child{margin-top:0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr} .layout{grid-template-columns:1fr} nav.toc{position:static;max-height:none;border-right:none;border-bottom:1px solid var(--line)}}
+  .card{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card h4{margin-top:.2em}
+  .callout{border-left:4px solid var(--accent);background:var(--panel-2);padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  .callout.analogy{border-left-color:var(--accent-2)}.callout.warn{border-left-color:var(--warn)}.callout.danger{border-left-color:var(--danger)}.callout.story{border-left-color:#5ec2ff}
+  .tag{display:inline-block;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:2px 8px;border-radius:6px;margin-bottom:6px}
+  .tag.beg{background:rgba(34,211,166,.15);color:var(--accent-2)}.tag.tech{background:rgba(124,92,255,.18);color:#b9a6ff}.tag.adv{background:rgba(255,107,129,.15);color:var(--danger)}
+  code{background:var(--code-bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.86em;color:#ffd9a0}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.85rem;line-height:1.55}
+  pre code{background:none;border:none;padding:0;color:#d7e0f5}
+  pre.art{color:#ffd9a0;font-size:.95rem;line-height:1.4;letter-spacing:.04em}
+  pre.mermaid{background:#f7f8fc;color:#111;text-align:center}
+  .mermaid svg text,.mermaid text{fill:#15203a !important}
+  .mermaid .nodeLabel,.mermaid .edgeLabel,.mermaid .label,.mermaid span,.mermaid p,.mermaid div,.mermaid foreignObject *{color:#15203a !important;fill:#15203a !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p{background:#f3f5fc !important}
+  .mermaid .cluster-label .nodeLabel,.mermaid .cluster-label p,.mermaid .cluster span,.mermaid .cluster p{color:#3c4046 !important}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.92rem;overflow:hidden;border-radius:10px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel-2);color:#fff}
+  tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  details{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:12px 0}
+  details summary{cursor:pointer;font-weight:600;color:var(--accent-2);padding:6px 0}
+  details[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px}
+  figure{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  figcaption{color:var(--muted);font-size:.85rem;text-align:center;margin-top:8px;font-style:italic}
+  .qa{margin:10px 0}.qa .q{font-weight:600}.qa .a{color:var(--muted);margin:2px 0 0}
+  ol.flow{counter-reset:step;list-style:none;padding-left:0}
+  ol.flow>li{counter-increment:step;position:relative;padding:10px 0 10px 52px;border-bottom:1px dashed var(--line)}
+  ol.flow>li::before{content:counter(step);position:absolute;left:0;top:8px;width:34px;height:34px;background:var(--accent);color:#fff;border-radius:50%;display:grid;place-items:center;font-weight:700}
+  .rank{font-weight:800;color:var(--accent);margin-right:6px}
+  footer{border-top:1px solid var(--line);padding:30px 22px;text-align:center;color:var(--muted);font-size:.88rem}
+  .lead{font-size:1.08rem}
+  .formula{background:var(--code-bg);border:1px dashed var(--accent);border-radius:10px;padding:12px 16px;font-family:monospace;color:#ffd9a0;text-align:center;margin:14px 0}
+
+  /* KB-THEME START */
+  /* Azure (blue palette) */
+  :root{--bg:#0e1c30;--panel:#152740;--panel-2:#1d3458;--ink:#e6edf7;--muted:#93a6c4;--accent:#1a8ae5;--accent-2:#41a7f5;--warn:#d6a96a;--danger:#d98a8a;--line:#264064;--code-bg:#0b1626;}
+  body{background:linear-gradient(180deg,var(--bg),var(--bg))}
+  header.hero{background:radial-gradient(1100px 400px at 50% -10%,rgba(20,119,210,.26),transparent 60%)}
+  h3,.parthead{color:var(--ink)}
+  th{color:var(--ink)}
+  .tag.tech{background:rgba(65,167,245,.16);color:var(--accent-2)}
+  ol.flow>li::before{color:#0b1626}
+  /* KB-THEME END */
+  /* prevent node/edge label clipping */
+  .mermaid foreignObject{overflow:visible !important}
+  .mermaid .nodeLabel,.mermaid .label,.mermaid foreignObject>div,.mermaid foreignObject span,.mermaid foreignObject p{white-space:nowrap !important;overflow:visible !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p,.mermaid .edgeLabel span{white-space:nowrap !important;overflow:visible !important;padding:1px 4px}
+  .mermaid svg{max-width:100%;height:auto}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyebrow">Ferrum KB &middot; Level 9 of 14 &middot; OS Internals</div>
+  <h1>OS Internals<br/><span style="font-size:.6em;color:var(--muted)">What async actually is &mdash; from <code>.await</code> down to <code>kevent</code></span></h1>
+  <p class="sub">You have written <code>stream.read(&amp;mut buf).await</code> a hundred times across eight levels. This level opens the floor and shows the machinery underneath: non-blocking sockets, the kernel readiness APIs, and the Tokio runtime as a well-organized event loop. It is a <strong>theory level</strong> for a real reason &mdash; there is nothing to build, because Levels 1&ndash;8 already run on this machinery. The work is reading the code you already have through a lower lens, and where that reading turns up something real, saying so. It turned up two things.</p>
+  <div class="badges">
+    <span class="badge">Audience: Vessey (revising the build)</span>
+    <span class="badge">Scope: async runtime, kqueue/epoll, no code changed</span>
+    <span class="badge">Reading time: ~24 min</span>
+  </div>
+  <p class="muted" style="margin-top:18px">
+    <a href="index.html">&larr; Course index</a> &nbsp;&middot;&nbsp;
+    <a href="Level-08-Security-TLS.html">&larr; Level 8: Security &amp; TLS</a> &nbsp;&middot;&nbsp;
+    <a href="Level-10-Observability.html">Level 10: Observability &rarr;</a>
+  </p>
+</header>
+
+<div class="layout">
+<nav class="toc">
+  <h2>Orientation</h2>
+  <a href="#exec-summary">Executive Summary</a>
+  <a href="#big-picture">The Big Picture</a>
+  <h2>Core</h2>
+  <a href="#c10k">The Problem: read() Blocks</a>
+  <a href="#readiness">select &rarr; poll &rarr; epoll/kqueue</a>
+  <a href="#machine">This Machine: kqueue, mio, 8 Workers</a>
+  <a href="#await-path">From .await to kevent</a>
+  <a href="#await-map">The .await Map</a>
+  <a href="#no-lock">No Lock Across await (Compiler-Enforced)</a>
+  <a href="#findings">Two Findings, Recorded Not Fixed</a>
+  <a href="#code-map">Code Map</a>
+  <h2>Compare</h2>
+  <a href="#industry">How the Industry Does It</a>
+  <h2>Reference</h2>
+  <a href="#quiz">Quiz</a>
+  <a href="#cheatsheet">Cheat Sheet &amp; Glossary</a>
+</nav>
+
+<main>
+<section id="exec-summary">
+  <h2>Executive Summary</h2>
+  <p class="lead">Async is not magic. It is a compiler-generated state machine riding a kernel readiness API, and Ferrum has been running on it since Level 1.</p>
+  <p>A blocking <code>read()</code> on a socket with no data parks the calling thread until bytes arrive. Fine for one connection, fatal for ten thousand &mdash; that is the <strong>C10K problem</strong>, and it is why every serious proxy is event-driven. The fix changes the question from <em>"give me data on THIS socket, I'll wait"</em> to <em>"here are 10,000 sockets, wake me when ANY has data."</em> Two ingredients make that possible: <code>O_NONBLOCK</code> sockets (Tokio sets these, Ferrum never does) and a kernel readiness API.</p>
+  <p>That API evolved: <code>select()</code> and <code>poll()</code> re-scan every watched FD on every call &mdash; <strong>O(n)</strong> &mdash; while <code>epoll</code> (Linux) and <code>kqueue</code> (BSD/macOS) register FDs once in a kernel object and return only the ready ones &mdash; <strong>O(ready)</strong>. That O(n)&nbsp;&rarr;&nbsp;O(ready) transition is the whole ballgame: it is the precise reason 9,999 idle connections cost nothing until they have data.</p>
+  <p>On this machine (Darwin 25.6.0 arm64) the reactor is <strong>kqueue, not epoll</strong>, wrapped by <code>mio 1.2.2</code> &mdash; a transitive dependency Ferrum never names. The runtime is <code>tokio 1.53.1</code> with <code>features = ["full"]</code>, giving a multi-threaded work-stealing scheduler with <strong>8 worker threads</strong> (one per core), all implied by <code>#[tokio::main]</code> and stated nowhere in the source.</p>
+  <p>Read through this lens, Ferrum's own architecture becomes legible. The full path from <code>.await</code> to <code>kevent</code> traces cleanly through <code>Conn::read_head</code>, including a non-blocking fast path that skips the reactor entirely when data is already buffered. Only <strong>3 of 13 files</strong> hold a production <code>.await</code> (72 production, 61 test); <code>balancer.rs</code> has zero despite 1,750+ lines of algorithms. And "never hold a lock across an <code>.await</code>" is <strong>compiler-enforced</strong> here, because every locking function is a plain <code>fn</code>. The reading turned up two honest findings &mdash; per-connect DNS re-resolution and an entirely implicit runtime shape &mdash; both recorded, neither fixed.</p>
+</section>
+
+<section id="big-picture">
+  <h2>The Big Picture</h2>
+  <p>Level 9 does not add a stage to the request pipeline &mdash; it explains the substrate <em>every</em> stage already stands on. The highlighted layer below is the one this level makes visible: the executor + reactor loop that sits underneath every <code>.await</code> in the proxy, from <code>accept()</code> in <code>main.rs</code> through <code>read_head</code> in <code>proxy.rs</code>.</p>
+  <figure>
+<pre class="mermaid">
+flowchart TD
+  APP["Ferrum async code<br/>(serve_one, read_head, probe_loop)"] --> SM["Compiler-generated<br/>state machines (Futures)"]
+  SM --> EXE["EXECUTOR: Tokio multi-thread scheduler<br/>8 worker threads + work stealing"]
+  EXE --> REA["REACTOR: mio 1.2.2<br/>one kqueue instance, FD to Waker map"]
+  REA --> KQ["kevent() syscall"]
+  KQ --> KERN["KERNEL: non-blocking sockets (O_NONBLOCK)"]
+  KERN -.->|"fd 12 readable"| KQ
+  KQ -.->|"waker.wake()"| EXE
+  EXE -.->|"re-poll task"| SM
+  SM -.->|"resume at await point"| APP
+</pre>
+<figcaption>The layers this level exposes. Solid arrows are the "park" direction (app code compiles down to a state machine that registers interest and sleeps); dashed arrows are the "wake" direction (the kernel signals readiness, the reactor wakes the task, the executor re-polls, and the state machine resumes exactly where it paused). Nothing here is new code &mdash; it is what Levels 1&ndash;8 have always run on.</figcaption>
+  </figure>
+  <div class="callout analogy"><strong>Analogy:</strong> Blocking I/O is a waiter standing at your table until you decide your order. Async is the waiter handing you a pager and serving other tables; the kitchen bell (kqueue) tells them which pager to buzz. The waiter never stands idle at a silent table &mdash; and 10,000 tables need only as many waiters as there are tables <em>currently talking</em>.</div>
+</section>
+
+<section id="c10k">
+  <h2>1 &middot; The Problem: <code>read()</code> Blocks</h2>
+  <p class="lead">Everything in this level exists to escape one fact: a naive <code>read()</code> parks a whole OS thread just to wait for bytes.</p>
+  <p>A normal blocking <code>read()</code> on a socket with no data parks the calling thread until bytes arrive. That is fine for one connection and fatal for many. Thread-per-connection at 10,000 connections means <strong>10,000 threads</strong>, each with a stack measured in hundreds of KB to megabytes, and a scheduler doing nothing but context-switching between them. This is the <strong>C10K problem</strong>, and it is the reason every serious proxy &mdash; nginx, HAProxy, Envoy, and Ferrum &mdash; is event-driven rather than thread-per-connection.</p>
+  <p>The fix is to change the question being asked:</p>
+<pre class="art">Blocking asks:       "give me data on THIS socket — I'll wait."
+Event-driven asks:   "here are 10,000 sockets — wake me when ANY has data."</pre>
+  <p>One thread now serves them all, sleeping until there is genuine work. Two ingredients are required:</p>
+  <div class="grid2">
+    <div class="card">
+      <span class="tag tech">Ingredient 1</span>
+      <h4>O_NONBLOCK sockets</h4>
+      <p>So a <code>read()</code> with no data returns <code>EWOULDBLOCK</code> immediately instead of parking the thread.</p>
+      <p><strong>Who sets it:</strong> Ferrum <em>never</em> sets <code>O_NONBLOCK</code> itself. Tokio does it when constructing every <code>TcpStream</code> and <code>TcpListener</code> &mdash; including the ones this proxy gets from <code>listener.accept()</code> in <code>main.rs</code>. It is the first piece of machinery the abstraction hides.</p>
+    </div>
+    <div class="card">
+      <span class="tag tech">Ingredient 2</span>
+      <h4>A kernel readiness API</h4>
+      <p>So the thread can sleep until something is actually ready, instead of busy-polling every socket in a loop (which would just move the waste from threads to CPU).</p>
+      <p><strong>Who provides it:</strong> the kernel &mdash; <code>epoll</code> on Linux, <code>kqueue</code> on BSD/macOS &mdash; reached through <code>mio</code>. This is the ingredient whose evolution is the entire story of high-performance servers (next section).</p>
+    </div>
+  </div>
+  <div class="callout"><strong>Why a task, not a thread, is the unit here.</strong> Async lets you keep the <em>mental model</em> of "one worker per connection" &mdash; each connection reads a straight-line <code>async fn</code> &mdash; while the <em>physical</em> cost collapses from a thread-with-a-stack to a small heap state machine. You write it like it blocks; it doesn't.</div>
+</section>
+
+<section id="readiness">
+  <h2>2 &middot; <code>select</code> &rarr; <code>poll</code> &rarr; <code>epoll</code>/<code>kqueue</code> &rarr; <code>io_uring</code></h2>
+  <p class="lead">The whole story of high-performance servers is the evolution of ingredient&nbsp;2 &mdash; and one line of it, O(n)&nbsp;&rarr;&nbsp;O(ready), is the whole ballgame.</p>
+  <table>
+    <thead><tr><th>API</th><th>Model</th><th>Cost per wait</th><th>Why it won / its fatal flaw</th></tr></thead>
+    <tbody>
+      <tr><td><code>select()</code><br/>(1983)</td><td>Pass a bitmask of FDs on <em>every</em> call</td><td>O(n) scan, ~1024 FD cap</td><td>Kernel re-scans every FD every call; the cap is compiled in</td></tr>
+      <tr><td><code>poll()</code><br/>(1986)</td><td>Pass an array of FDs on <em>every</em> call</td><td>O(n) scan, no cap</td><td>Removes the cap but still re-passes and re-scans everything each time</td></tr>
+      <tr><td><strong><code>epoll</code></strong><br/>(Linux, 2002)</td><td>Register FDs <strong>once</strong> in a kernel object; <code>epoll_wait()</code> returns only the ready ones</td><td><strong>O(ready)</strong></td><td>The kernel keeps the interest list, so waiting costs nothing per <em>idle</em> FD. This is precisely why 10k idle connections are cheap</td></tr>
+      <tr><td><strong><code>kqueue</code></strong><br/>(BSD/macOS, 2000)</td><td>Same idea, arguably a cleaner API (<code>kevent</code> also covers files, signals, timers)</td><td><strong>O(ready)</strong></td><td><strong>What Ferrum uses on this machine</strong></td></tr>
+      <tr><td><code>IOCP</code> (Windows) /<br/><code>io_uring</code> (modern Linux)</td><td><strong>Completion</strong>-based: "start this read, tell me when it is DONE" rather than "tell me when I <em>may</em> read"</td><td>O(done), fewer syscalls</td><td><code>io_uring</code> batches submissions and completions through shared-memory rings &mdash; the current performance frontier</td></tr>
+    </tbody>
+  </table>
+  <div class="callout warn"><strong>The one line that matters.</strong> The O(n)&nbsp;&rarr;&nbsp;O(ready) transition is the entire ballgame. With <code>select</code>/<code>poll</code>, 9,999 idle connections cost you work on <em>every single wait</em> &mdash; the kernel walks the whole list to find the one socket that spoke. With <code>epoll</code>/<code>kqueue</code>, those 9,999 idle FDs cost nothing until they have data, because the kernel already holds the interest list and hands back only the ready ones. C10K dissolves at exactly this line.</div>
+
+  <h3>Readiness vs. completion</h3>
+  <p>There is a second axis worth separating from the O(n)/O(ready) one. <code>epoll</code> and <code>kqueue</code> are <strong>readiness</strong>-based: they tell you <em>"you may now read without blocking"</em>, and you still issue the <code>read()</code> syscall yourself. <code>io_uring</code> and Windows <code>IOCP</code> are <strong>completion</strong>-based: you hand the kernel the buffer and the operation up front, and it tells you <em>"the read is DONE, here are your bytes"</em>. Completion models need fewer syscalls because the read-attempt-and-wait round trip is collapsed into one submission plus one completion, batched through shared-memory rings rather than a syscall per operation.</p>
+  <div class="callout"><strong>Ferrum sits on the readiness side.</strong> Tokio's <code>TcpStream::read</code> is "wait for readable, then <code>read()</code>". No <code>io_uring</code> experiment was done here &mdash; it is Linux-only and this machine is Darwin (kqueue). Reading about the completion model is the whole deliverable, not building one.</div>
+</section>
+
+<section id="machine">
+  <h2>3 &middot; This Machine: kqueue, mio 1.2.2, 8 Workers</h2>
+  <p class="lead">Every mental model in this KB is written around <code>epoll</code> because Linux is where proxies deploy. The code exercised <em>locally</em> is the BSD path. Verified, not assumed.</p>
+  <div class="grid3">
+    <div class="card">
+      <span class="tag tech">Platform</span>
+      <h4>kqueue, not epoll</h4>
+      <p><code>Darwin 25.6.0 arm64</code> &rarr; the reactor uses <strong>kqueue</strong>. Same O(ready) idea as epoll, cleaner API surface (<code>kevent</code> covers sockets, files, signals, timers in one call).</p>
+    </div>
+    <div class="card">
+      <span class="tag tech">Reactor crate</span>
+      <h4>mio 1.2.2</h4>
+      <p>A <strong>transitive</strong> dependency via Tokio &mdash; it is in <code>Cargo.lock</code>, <em>not</em> <code>Cargo.toml</code>. <code>mio</code> is the thin portability layer presenting kqueue, epoll, and IOCP behind one interface.</p>
+    </div>
+    <div class="card">
+      <span class="tag tech">Runtime</span>
+      <h4>tokio 1.53.1, 8 workers</h4>
+      <p><code>features = ["full"]</code> &rarr; the <strong>multi-threaded</strong> scheduler. Default worker count is one per core &rarr; <strong>8 workers</strong> here (<code>hw.ncpu = 8</code>).</p>
+    </div>
+  </div>
+  <p>That last point is worth pausing on. Ferrum has never called <code>Runtime::new_multi_thread</code> or configured a worker count. <code>#[tokio::main]</code> on <code>async fn main</code> picks the multi-threaded scheduler by default. <strong>Eight OS threads exist and steal work from each other, and nothing in this codebase says so anywhere.</strong> Level 9's job is that this is no longer invisible &mdash; and finding &sect;7.2 records it explicitly as a latent tuning surprise.</p>
+  <div class="callout warn"><strong>Watch out:</strong> <code>features = ["full"]</code> reads like "give me every feature" but it is also the thing that selects the multi-threaded scheduler and the blocking pool. The runtime's entire shape &mdash; 8 workers, work stealing, a separate blocking pool &mdash; is implied by that one line and <code>#[tokio::main]</code>, and stated in no comment. See the second finding.</div>
+</section>
+
+<section id="await-path">
+  <h2>4 &middot; From <code>.await</code> to <code>kevent</code>: the Full Stack</h2>
+  <p class="lead">An <code>async fn</code> compiles to a state machine &mdash; an anonymous type implementing <code>Future</code>. Each <code>.await</code> is a possible pause point where the machine returns <code>Poll::Pending</code> and parks.</p>
+  <div class="callout danger"><strong>The load-bearing consequence &mdash; the thing that trips up everyone from threads or JavaScript promises:</strong> Nothing runs in the background. <strong>A future is inert until polled.</strong> There is no thread behind an un-awaited future. Constructing one does no work at all.</div>
+
+  <h3>The path, traced through Ferrum's own <code>Conn::read_head</code></h3>
+  <p>The diagram below is the mandatory one: a single <code>.await</code> suspension and resumption, traced layer by layer through this proxy's real code &mdash; not a toy example. Follow the numbered steps beneath it.</p>
+  <figure>
+<pre class="mermaid">
+sequenceDiagram
+  participant A as "serve_one / Conn::read_head (async)"
+  participant F as "Future (state machine)"
+  participant E as "Executor (8 workers)"
+  participant R as "Reactor (mio + kqueue)"
+  participant K as "Kernel"
+  A->>F: ".await on stream.read(&amp;buf[filled..])"
+  F->>K: "non-blocking read() attempted NOW"
+  alt data already buffered (FAST PATH)
+    K-->>F: "bytes returned immediately"
+    F-->>A: "resume — no reactor, no scheduler hop"
+  else EWOULDBLOCK
+    F->>R: "register interest: wake task #417 when fd 12 readable"
+    F->>E: "return Poll::Pending (store Waker)"
+    Note over E,F: "task parked: 0 CPU, no thread held"
+    E->>E: "run + steal OTHER ready tasks"
+    K-->>R: "kevent() returns: fd 12 readable"
+    R->>E: "waker.wake() — task #417 back on run queue"
+    E->>F: "re-poll task #417"
+    F->>K: "read() now returns data"
+    F-->>A: "resume EXACTLY at the await point (locals intact)"
+  end
+</pre>
+<figcaption>One <code>.await</code>, both outcomes. The fast path (data already in the kernel) skips the reactor and the scheduler entirely &mdash; async is not "always slower by a scheduler hop". The slow path parks the task at zero CPU cost, lets the executor steal other work, and resumes the identical state machine when <code>kevent()</code> reports the FD readable.</figcaption>
+  </figure>
+
+  <ol class="flow">
+    <li><strong>The read attempt (fast path first).</strong> <code>serve_one</code> reaches <code>client.read_head().await</code>, which bottoms out in <code>self.stream.read(&amp;mut self.buf[self.filled..]).await</code> (<code>proxy.rs:130</code>, inside <code>Conn::read_head</code>). The <code>filled</code> offset is Level 1's over-read buffer, which is why a pipelined request that arrived in the same packet is not lost. Tokio's <code>TcpStream</code> attempts the <strong>non-blocking <code>read()</code> syscall right now</strong>. If data is already buffered in the kernel, it returns immediately &mdash; no waiting, no reactor involvement, no magic. This fast path is the common case.</li>
+    <li><strong><code>EWOULDBLOCK</code>? Park.</strong> The future registers interest &mdash; <em>"wake task&nbsp;#417 when FD&nbsp;12 is readable"</em> &mdash; with the reactor, stores a <code>Waker</code>, and returns <code>Poll::Pending</code>. The task is now parked: <strong>zero CPU, no thread held</strong>, and its only cost is the memory of its own state machine.</li>
+    <li><strong>The executor keeps working.</strong> It runs other ready tasks on its worker threads. Idle workers <strong>steal</strong> queued tasks from busy ones, which is why one slow connection does not starve a core.</li>
+    <li><strong>The kernel signals.</strong> Bytes arrive on FD&nbsp;12. The reactor's <code>kevent()</code> call returns, the reactor looks up FD&nbsp;12 &rarr; <code>waker.wake()</code> &rarr; task&nbsp;#417 goes back on a run queue.</li>
+    <li><strong>Re-poll, resume in place.</strong> The executor re-polls task&nbsp;#417. <strong>The state machine resumes exactly at the await point</strong> &mdash; all its local variables intact, because they are fields of the generated struct. The <code>read()</code> now returns data, and execution continues to the next <code>.await</code>. Repeat forever.</li>
+  </ol>
+  <div class="callout"><strong>Where the locals live.</strong> Because a paused future must resume with every local variable it had before the <code>.await</code>, those locals become <em>fields of the compiler-generated struct</em>. That is the whole cost model of async: a 500-line <code>async fn</code> with 100 await points generates a large state machine (many live locals across many suspension points); a pure-sync function generates none. Keep the state machine small &mdash; the theme of the next two sections.</div>
+
+  <h3>Task-per-connection: how C10K is sidestepped here</h3>
+  <p>Exactly <strong>three</strong> places in production code create tasks:</p>
+  <table>
+    <thead><tr><th>Site</th><th>What it spawns</th><th>Lifetime</th></tr></thead>
+    <tbody>
+      <tr><td><code>main.rs:291</code></td><td>One task per accepted connection</td><td>The connection</td></tr>
+      <tr><td><code>health.rs:25</code></td><td>One prober task per upstream pool</td><td>The process</td></tr>
+      <tr><td><code>health.rs:70</code></td><td>One task per concurrent health probe</td><td>One probe round</td></tr>
+    </tbody>
+  </table>
+  <p>That is the whole concurrency structure of an 8,800-line proxy. Everything else is <code>.await</code> inside one of those three. <strong>Task-per-connection is what sidesteps C10K here:</strong> a task is not a thread &mdash; it is a state machine on the heap, scheduled onto one of 8 workers. 10,000 connections means 10,000 parked state machines, not 10,000 stacks. This was Level 1's choice, made before there was any vocabulary in the project to justify it; this level supplies the vocabulary.</p>
+</section>
+
+<section id="await-map">
+  <h2>5 &middot; The <code>.await</code> Map, and the Decision Hiding in It</h2>
+  <p class="lead">Counting <code>.await</code> in code (comment mentions excluded &mdash; this project discusses <code>.await</code> in prose enough that a naive <code>grep -c</code> overcounts by ~5%), split by production vs. test:</p>
+  <table>
+    <thead><tr><th>File</th><th style="text-align:right">prod</th><th style="text-align:right">test</th><th>Reading</th></tr></thead>
+    <tbody>
+      <tr><td><code>proxy.rs</code></td><td style="text-align:right"><strong>57</strong></td><td style="text-align:right">46</td><td>The engine. Almost every suspension point in the proxy is here</td></tr>
+      <tr><td><code>health.rs</code></td><td style="text-align:right">10</td><td style="text-align:right">1</td><td>Prober loop and probe I/O</td></tr>
+      <tr><td><code>main.rs</code></td><td style="text-align:right">5</td><td style="text-align:right">0</td><td><code>bind</code>, <code>accept</code>, the TLS handshake, <code>handle_client</code></td></tr>
+      <tr><td><code>balancer.rs</code></td><td style="text-align:right"><strong>0</strong></td><td style="text-align:right">13</td><td>&mdash;</td></tr>
+      <tr><td><code>security.rs</code></td><td style="text-align:right"><strong>0</strong></td><td style="text-align:right">0</td><td>&mdash;</td></tr>
+      <tr><td><code>tls.rs</code></td><td style="text-align:right"><strong>0</strong></td><td style="text-align:right">0</td><td>&mdash;</td></tr>
+      <tr><td><code>http.rs</code></td><td style="text-align:right"><strong>0</strong></td><td style="text-align:right">0</td><td>&mdash;</td></tr>
+      <tr><td><code>rewrite.rs</code></td><td style="text-align:right"><strong>0</strong></td><td style="text-align:right">0</td><td>&mdash;</td></tr>
+      <tr><td><code>router.rs</code></td><td style="text-align:right"><strong>0</strong></td><td style="text-align:right">0</td><td>&mdash;</td></tr>
+      <tr><td><code>middleware/mod.rs</code>, <code>auth.rs</code>, <code>observe.rs</code></td><td style="text-align:right"><strong>0</strong></td><td style="text-align:right">0</td><td>&mdash;</td></tr>
+      <tr><td><code>middleware/ratelimit.rs</code></td><td style="text-align:right"><strong>0</strong></td><td style="text-align:right">1</td><td>&mdash;</td></tr>
+      <tr><td><strong>Total</strong></td><td style="text-align:right"><strong>72</strong></td><td style="text-align:right"><strong>61</strong></td><td></td></tr>
+    </tbody>
+  </table>
+  <p><strong>Only three files in an 8,800-line crate contain a production <code>.await</code>.</strong> Everything else &mdash; all seven load-balancing algorithms, the circuit breaker, the connection pool, the router, the header rewriter, all five middleware, the TLS config builder, the connection limiter, the CIDR matcher &mdash; is entirely synchronous code that happens to be <em>called from</em> async contexts.</p>
+  <p><code>balancer.rs</code> is the sharpest case: 1,750+ lines implementing round-robin, weighted RR, random, least-connections, least-response-time, IP hash, consistent hashing, a three-state circuit breaker, and a LIFO connection pool, with <strong>zero</strong> production await points. Its 13 awaits are all in tests, where they exist only to build real <code>TcpStream</code> pairs.</p>
+
+  <h3>Four levels, one un-named optimization</h3>
+  <p>The zeros are not an accident. Four separate levels independently chose to keep their logic pure and synchronous:</p>
+  <div class="grid2">
+    <div class="card"><span class="tag beg">L1</span><h4>http.rs</h4><p>Parsing and framing as functions over byte slices &mdash; no sockets in the parser.</p></div>
+    <div class="card"><span class="tag beg">L5</span><h4>rewrite.rs</h4><p>Pure transforms over head structs &mdash; "no sockets, no async, no I/O", in that level's own words.</p></div>
+    <div class="card"><span class="tag beg">L6</span><h4>middleware</h4><p>Deliberately rejected the textbook <code>async fn handle(req, next)</code> trait for a synchronous two-phase one (see below).</p></div>
+    <div class="card"><span class="tag beg">L8</span><h4>tls.rs</h4><p>Config construction only; the handshake <code>.await</code> lives in <code>main.rs</code>, not in the module that builds the <code>ServerConfig</code>.</p></div>
+  </div>
+  <p>Read through Level 9's lens, those four decisions are the same decision: <strong>keep the state machine small.</strong> Every <code>.await</code> in a function becomes a suspension point the compiler must be able to resume from, which means every live local becomes a field in the generated future. The pure-sync modules generate <em>none</em> at all. That is why <code>serve_one</code> being long is tolerable but <code>rewrite.rs</code> being async would not have been.</p>
+  <div class="callout"><strong>Why L6 rejected <code>async fn handle(req, next) -&gt; Response</code>.</strong> An async middleware trait would have forced two things: an <em>owned</em> <code>Response</code> return value (so every body must be buffered into memory before the next stage runs), and an async suspension point in every middleware. The first pre-breaks Level 7's streaming &mdash; you cannot stream a body you have already collected into a <code>Vec</code>. So L6 chose a synchronous two-phase trait instead, and the streaming path survived to be built.</div>
+</section>
+
+<section id="no-lock">
+  <h2>6 &middot; No Lock Across <code>.await</code> &mdash; Compiler-Enforced</h2>
+  <p class="lead">A worker thread that blocks is a worker thread that cannot poll anything else. With 8 workers, blocking one is a 12.5% capacity loss and a mysterious p99 spike; blocking all 8 is an outage that looks like a hang.</p>
+  <p>The three classic ways to block a Tokio worker:</p>
+  <div class="grid3">
+    <div class="card"><span class="tag adv">Cause 1</span><h4>Synchronous I/O</h4><p><code>std::fs</code>, blocking DNS, a synchronous HTTP client.</p></div>
+    <div class="card"><span class="tag adv">Cause 2</span><h4>CPU-heavy work</h4><p>A pathological regex, crypto, compression &mdash; anything that runs long without an <code>.await</code>.</p></div>
+    <div class="card"><span class="tag adv">Cause 3</span><h4>Lock held across <code>.await</code></h4><p>The worst: the task parks <em>while holding the lock</em>, and the thread that could release it is now running someone else's code. Also a deadlock risk.</p></div>
+  </div>
+
+  <h3>Cause 3 audited: structurally impossible here</h3>
+  <p>Every production function that takes a lock is a plain <code>fn</code>, not an <code>async fn</code>:</p>
+  <table>
+    <thead><tr><th>Function</th><th>Signature (abbreviated)</th><th>Guards</th></tr></thead>
+    <tbody>
+      <tr><td><code>Server::take_conn</code></td><td><code>fn take_conn(&amp;self) -&gt; Option&lt;Conn&lt;TcpStream&gt;&gt;</code></td><td>L7 idle pool</td></tr>
+      <tr><td><code>Server::return_conn</code></td><td><code>fn return_conn(&amp;self, conn: Conn&lt;TcpStream&gt;)</code></td><td>L7 idle pool</td></tr>
+      <tr><td><code>ConnLimiter::try_acquire</code></td><td><code>fn try_acquire(self: &amp;Arc&lt;Self&gt;, ip) -&gt; Result&lt;ConnGuard, Refusal&gt;</code></td><td>L8 per-IP map</td></tr>
+      <tr><td><code>ConnLimiter::release</code></td><td><code>fn release(&amp;self, ip: IpAddr)</code></td><td>L8 per-IP map</td></tr>
+      <tr><td><code>RateLimiter::allow</code></td><td><code>fn allow(&amp;self, ip: IpAddr, now: Instant) -&gt; Result&lt;(), u64&gt;</code></td><td>L6 bucket shards</td></tr>
+    </tbody>
+  </table>
+  <div class="callout danger"><strong>This is stronger than a code-review convention.</strong> You <em>cannot write <code>.await</code> inside a non-<code>async fn</code></em> &mdash; it is a compile error. So the compiler enforces "never hold a lock across an <code>.await</code>" rather than trusting a reviewer to spot it. Three levels each wrote a comment explaining why they used <code>std::sync::Mutex</code> over <code>tokio::sync::Mutex</code>; this signature list is the proof those comments are still true. A comment can rot; a plain <code>fn</code> signature cannot silently grow an <code>.await</code>.</div>
+  <p>Corroborating facts, verified against the tree: <code>tokio::sync</code> appears in this codebase <strong>only inside comments explaining why it is not used</strong> &mdash; there is not one real use. <code>spawn_blocking</code> appears <strong>zero</strong> times. <code>thread::sleep</code> appears <strong>zero</strong> times.</p>
+
+  <h3>Causes 1 and 2 audited</h3>
+  <div class="grid2">
+    <div class="card">
+      <span class="tag tech">Cause 1</span>
+      <h4>Synchronous <code>std::fs</code>: present but harmless</h4>
+      <p><code>tls.rs</code> uses <code>File::open</code> / <code>std::fs::metadata</code> to load certificates. This runs in <code>TlsArgs::build()</code>, which <code>main.rs</code> calls <strong>before <code>TcpListener::bind</code></strong> &mdash; so it executes once, at startup, while the runtime has no request work to starve. Level 8 chose that ordering to fail with exit&nbsp;1 before announcing a listener; the async-hygiene benefit is a coincidence, recorded as one rather than claimed as foresight. For it to become a bug, the file read would have to move <em>into the request path</em>.</p>
+    </div>
+    <div class="card">
+      <span class="tag tech">Cause 2</span>
+      <h4>CPU-bound regex: safe for a non-obvious reason</h4>
+      <p><code>router.rs:53</code> runs <code>re.is_match(path)</code> on the worker thread for every request matched against a <code>~regex</code> route. In nginx or any PCRE-based proxy this would be a genuine hazard &mdash; catastrophic backtracking can turn one crafted path into seconds of CPU, freezing a worker. It is safe in Ferrum only because Rust's <code>regex</code> crate <strong>has no backtracking and guarantees linear time in the input length</strong>; the pathological blowup is not expressible. The safety comes from a Level 2 dependency choice. Swap that crate for a backtracking engine and this line becomes a DoS vector.</p>
+    </div>
+  </div>
+</section>
+
+<section id="findings">
+  <h2>7 &middot; Two Findings This Reading Turned Up</h2>
+  <p class="lead">Neither is a bug; both are the kind of thing only visible from this level. Both are <strong>recorded, not fixed</strong> &mdash; and the "not fixed" is a deliberate call, not laziness.</p>
+
+  <article class="concept">
+    <h3>7.1 &middot; Backend addresses are re-resolved on every connect</h3>
+    <p><code>Server.addr</code> is a <code>String</code> (<code>balancer.rs:402</code>). Startup validation (<code>balancer.rs:973</code>) only checks the <em>shape</em> &mdash; a non-empty host and a port that parses as a <code>u16</code>&nbsp;&ge;&nbsp;1 &mdash; and then keeps the string. So <code>TcpStream::connect(&amp;addr)</code> at <code>proxy.rs:853</code> goes through <code>ToSocketAddrs</code> on <em>every</em> pool miss.</p>
+    <p>For an IP literal like <code>127.0.0.1:9001</code> that parse is trivial. For a DNS name like <code>api.internal:8080</code>, which the shape check happily accepts, it is a <code>getaddrinfo</code> call. Tokio routes that through its <strong>blocking pool</strong> rather than the worker, so it does not freeze a core &mdash; but it does consume a blocking-pool thread per connect, with <strong>no DNS caching and no respect for TTLs</strong>.</p>
+    <p>Level 7's connection pooling hides most of this: a pool hit skips <code>connect</code> entirely, so the cost appears only on misses. That is why it has never shown up. The clean-looking fix &mdash; resolve once at startup into a <code>SocketAddr</code> &mdash; is a <em>worse</em> answer for DNS-named backends, where re-resolution is the only way to follow a backend that moves. The genuinely correct version is a small resolver cache with TTL awareness, which is real work and belongs in a level of its own, not smuggled into a theory chapter.</p>
+    <p class="muted"><strong>Recorded, not fixed.</strong></p>
+  </article>
+
+  <article class="concept">
+    <h3>7.2 &middot; The runtime's shape is entirely implicit</h3>
+    <p>Eight worker threads, a multi-threaded work-stealing scheduler, and a blocking pool all exist because <code>#[tokio::main]</code> defaults to them. Nothing in the codebase mentions any of it. <code>features = ["full"]</code> in <code>Cargo.toml</code> is the only hint, and it points the wrong way &mdash; it reads like "give me everything" rather than "select the multi-threaded scheduler."</p>
+    <p>This matters the first time someone tunes the proxy, because the worker count is a real dial and it is currently invisible. Not changed, because changing a default with no benchmark behind it is exactly the "measure, don't guess" mistake the KB warns about in Level 7 &mdash; and there is still no benchmark.</p>
+    <p class="muted"><strong>Recorded, not fixed.</strong></p>
+  </article>
+
+  <div class="callout warn"><strong>Deliberately not done, and why.</strong> No <code>io_uring</code> experiment (Linux-only; this machine is kqueue). No runtime tuning (see 7.2 &mdash; no benchmark to justify it). No DNS caching (see 7.1 &mdash; a real feature, not a theory aside). No <code>spawn_blocking</code> added for symmetry (nothing in the request path needs it; adding one would be cargo-culting). No benchmarks &mdash; the missing <code>wrk</code>/<code>oha</code> baseline stays Level 7's recorded debt rather than being quietly reassigned here.</div>
+</section>
+
+<section id="code-map">
+  <h2>8 &middot; Code Map</h2>
+  <p>Level 9 changed <strong>no production code</strong>. This table maps the files and functions the <em>reading</em> touched &mdash; where the machinery lives, verified against <code>rproxy/src/</code>. Line numbers follow the Level 9 write-up (<code>docs/level-9-os-internals.md</code>); the mechanisms are confirmed present, and a few sites have drifted by a handful of lines as the tree evolved (noted below).</p>
+  <table>
+    <thead><tr><th>File / function</th><th>Role in the async story</th></tr></thead>
+    <tbody>
+      <tr><td><code>proxy.rs</code> &middot; <code>Conn::read_head</code> (<code>proxy.rs:114</code>)</td><td>The traced <code>.await</code>: <code>self.stream.read(&amp;mut self.buf[self.filled..]).await</code> (<code>proxy.rs:130</code>), with the <code>filled</code> over-read buffer from Level 1</td></tr>
+      <tr><td><code>proxy.rs</code> &middot; backend connect</td><td><code>TcpStream::connect(&amp;addr)</code> on every pool miss (finding 7.1); the doc cites <code>proxy.rs:853</code>, present in the current tree wrapped in <code>tokio::time::timeout(...)</code></td></tr>
+      <tr><td><code>proxy.rs</code> &middot; <code>take_conn</code> / <code>return_conn</code></td><td>Plain <code>fn</code>s guarding the L7 idle pool &mdash; locks that cannot cross <code>.await</code></td></tr>
+      <tr><td><code>main.rs</code> &middot; accept loop + spawn (<code>main.rs:291</code>)</td><td>One <code>tokio::spawn</code> per accepted connection &mdash; task-per-connection; also where the TLS handshake <code>.await</code> lives</td></tr>
+      <tr><td><code>health.rs</code> &middot; <code>spawn_probers</code> (<code>health.rs:25</code>) + probe fan-out (<code>health.rs:70</code>)</td><td>The other two spawn sites: one prober per upstream, one task per concurrent probe</td></tr>
+      <tr><td><code>balancer.rs</code> &middot; <code>Server</code> / algorithms</td><td>1,750+ lines, seven algorithms, breaker, LIFO pool &mdash; <strong>zero production <code>.await</code></strong>; <code>Server.addr: String</code> (<code>balancer.rs:402</code>), shape-only validation (<code>balancer.rs:973</code>)</td></tr>
+      <tr><td><code>router.rs</code> &middot; <code>is_match</code> (<code>router.rs:53</code>)</td><td>The one CPU-bound call on a worker; safe only because Rust's <code>regex</code> is linear-time</td></tr>
+      <tr><td><code>tls.rs</code> &middot; <code>TlsArgs::build</code></td><td>Synchronous <code>std::fs</code> cert loading, run once before <code>bind</code> &mdash; harmless by ordering</td></tr>
+      <tr><td><code>security.rs</code> &middot; <code>ConnLimiter</code>; <code>middleware/ratelimit.rs</code> &middot; <code>RateLimiter::allow</code></td><td>Plain-<code>fn</code> lock holders; comments here argue for <code>std::sync::Mutex</code>, and &sect;6 is the proof they still hold</td></tr>
+      <tr><td><code>Cargo.toml</code> / <code>Cargo.lock</code></td><td><code>tokio = "1.53.1"</code>, <code>features = ["full"]</code> (declared); <code>mio 1.2.2</code> (transitive, lock-only)</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="industry">
+  <h2>9 &middot; How the Industry Does It</h2>
+  <p class="lead">Everyone solves C10K the same way &mdash; an <code>epoll</code>/<code>kqueue</code> event loop over non-blocking sockets. The differences are <em>who writes the state machines</em> and <em>whether workers share memory</em>.</p>
+
+  <h3>nginx, read back through this level's vocabulary</h3>
+  <p>With Level 9's words, nginx's design reads fluently:</p>
+  <ul>
+    <li>One <strong>master</strong> process handles config and signals; it forks <em>N</em> single-threaded <strong>workers</strong>.</li>
+    <li>Each worker runs <code>epoll_wait</code> in a loop &mdash; the same loop <code>mio</code> runs.</li>
+    <li>All connection state lives in explicit hand-written C structs, where Ferrum has compiler-generated state machines.</li>
+    <li><code>SO_REUSEPORT</code> lets every worker accept on the same port, with the kernel spreading load.</li>
+  </ul>
+  <div class="callout analogy"><strong>The one-sentence version:</strong> Tokio and nginx are the same architecture wearing different clothes &mdash; both are an epoll/kqueue event loop over non-blocking sockets. The only difference is who writes the state machines: nginx's authors did it by hand in C, and Rust's compiler does it for you at zero runtime cost. That is the entire "fearless async" pitch.</div>
+  <p>One asymmetry worth naming: nginx's model is <strong>process-per-core with no shared mutable state</strong> between workers, so it has no lock-contention problem to solve. Tokio's is <strong>threads-per-core with shared state and work stealing</strong>, which is why Levels 6, 7, and 8 each had to make a deliberate sharding decision (16 hash shards, per-<code>Server</code> pools, one map behind a mutex). Ferrum pays a cost nginx does not &mdash; and buys the ability to share a route table and a connection pool across all cores without IPC.</p>
+
+  <div class="grid2">
+    <div class="card">
+      <span class="tag tech">nginx</span>
+      <h4>Process-per-core, hand-written C state machines</h4>
+      <p><strong>Mechanism:</strong> master + N single-threaded workers, each an <code>epoll_wait</code> loop; <code>SO_REUSEPORT</code> for accept spreading.</p>
+      <p><strong>Trade-off:</strong> no shared mutable state &rarr; no locks, but also no cheap cross-core sharing &mdash; caches and state are per-worker or go through shared memory / a separate store.</p>
+    </div>
+    <div class="card">
+      <span class="tag tech">HAProxy</span>
+      <h4>Event loop, historically single-process</h4>
+      <p><strong>Mechanism:</strong> an epoll/kqueue event loop; modern versions run multiple threads, and its heritage is a tightly optimized single-process reactor (as of recent releases).</p>
+      <p><strong>Trade-off:</strong> extremely low per-connection overhead and predictable latency; the concurrency model is more manual than a general-purpose async runtime.</p>
+    </div>
+    <div class="card">
+      <span class="tag tech">Apache httpd</span>
+      <h4>Pluggable MPMs, incl. thread/process-per-connection</h4>
+      <p><strong>Mechanism:</strong> Multi-Processing Modules &mdash; <code>prefork</code> (process-per-connection), <code>worker</code> (threads), <code>event</code> (an epoll-style loop to escape one-thread-per-idle-keepalive).</p>
+      <p><strong>Trade-off:</strong> the <code>prefork</code>/<code>worker</code> lineage is exactly the C10K-vulnerable thread-per-connection model Level 9 opens with; the <code>event</code> MPM was the retrofit toward readiness-driven I/O.</p>
+    </div>
+    <div class="card">
+      <span class="tag tech">Envoy</span>
+      <h4>Threaded event loops (libevent), C++ state machines</h4>
+      <p><strong>Mechanism:</strong> N worker threads, each running its own event loop; connections are pinned to a thread, and shared state uses thread-local slots with a main-thread update path to minimize locking (as of recent versions).</p>
+      <p><strong>Trade-off:</strong> a threads-per-core model like Tokio's, but the "avoid locks" work is done by an explicit thread-local architecture rather than by the compiler refusing <code>.await</code> in a locking <code>fn</code>.</p>
+    </div>
+  </div>
+  <div class="callout"><strong>Where Ferrum honestly sits.</strong> Ferrum is a teaching build. It gets the same O(ready) event loop as all four &mdash; for free, via Tokio and mio &mdash; and gets its "no lock across await" guarantee from the Rust compiler rather than from hand-written thread-local structures. What it lacks is the years of production hardening: no <code>SO_REUSEPORT</code> accept sharding, no tuned worker count (&sect;7.2), no benchmark to justify any of it. The architecture is right; the mileage is not there yet.</div>
+</section>
+
+<section id="quiz">
+  <h2>10 &middot; Quiz</h2>
+  <p class="muted">Copied verbatim from PROGRESS.md &mdash; <em>Level 9 quiz, Vessey to answer before Level 10.</em> No answers here; these are for revision.</p>
+  <ol>
+    <li><div class="qa"><p class="q"><code>select()</code> and <code>epoll</code> both let one thread watch many sockets. State the complexity difference precisely, and explain why it is the reason 10,000 <em>idle</em> connections are cheap under one and ruinous under the other.</p></div></li>
+    <li><div class="qa"><p class="q"><code>epoll</code> is readiness-based and <code>io_uring</code> is completion-based. Give the question each one answers, and say why the completion model needs fewer syscalls.</p></div></li>
+    <li><div class="qa"><p class="q">This proxy runs on <code>kqueue</code>, not <code>epoll</code>. What in the codebase had to change to make that true?</p></div></li>
+    <li><div class="qa"><p class="q">A future is "inert until polled." Someone writes <code>let f = fetch_backend(); do_other_work().await; f.await;</code> expecting the fetch to overlap with <code>do_other_work</code>. What actually happens, and what would they need instead?</p></div></li>
+    <li><div class="qa"><p class="q">When a task parks at an <code>.await</code>, its local variables survive. Where do they physically live, and why does that make a 500-line <code>async fn</code> with 100 await points more expensive than ten 50-line ones?</p></div></li>
+    <li><div class="qa"><p class="q">Tokio attempts the non-blocking <code>read()</code> syscall <em>before</em> involving the reactor at all. Why is that fast path important, and what would the latency profile look like without it?</p></div></li>
+    <li><div class="qa"><p class="q">Only three files in this crate hold a production <code>.await</code>, and <code>balancer.rs</code> holds none despite implementing seven algorithms, a circuit breaker, and a connection pool. Explain why that is a design achievement rather than a coincidence.</p></div></li>
+    <li><div class="qa"><p class="q">Level 6 rejected the textbook <code>async fn handle(req, next) -&gt; Response</code> middleware signature. Name the two things that trait would have forced, and which later level it would have broken before it was written.</p></div></li>
+    <li><div class="qa"><p class="q">Every production function in this codebase that takes a lock is a plain <code>fn</code>. Explain why that makes "never hold a lock across <code>.await</code>" a <em>compiler-enforced</em> property rather than a convention &mdash; and why that is stronger than the comments in <code>ratelimit.rs</code>, <code>balancer.rs</code>, and <code>security.rs</code> that argue for it.</p></div></li>
+    <li><div class="qa"><p class="q"><code>router.rs:53</code> runs a regex on a worker thread for every request on a <code>~regex</code> route. Explain why this is safe in Ferrum but would be a denial-of-service vector in nginx, and name the single change that would make it dangerous here.</p></div></li>
+    <li><div class="qa"><p class="q"><code>tls.rs</code> performs synchronous <code>std::fs</code> I/O. Why is that not a blocking-the-executor bug, and what would have to move for it to become one?</p></div></li>
+    <li><div class="qa"><p class="q">nginx forks single-threaded workers; Tokio runs 8 threads with work stealing. Name one problem nginx's model does not have, and the corresponding capability Ferrum gets in exchange &mdash; citing a specific decision from Levels 6, 7, or 8.</p></div></li>
+    <li><div class="qa"><p class="q"><code>TcpStream::connect(&amp;addr)</code> takes a <code>String</code> here. Describe what happens on each pool miss when that string is a DNS name, why it does not freeze a worker, and why "just resolve once at startup" is the wrong fix.</p></div></li>
+    <li><div class="qa"><p class="q">This proxy runs 8 worker threads and nothing in the source says so. Where does that number come from, and what would you need before changing it?</p></div></li>
+  </ol>
+</section>
+
+<section id="cheatsheet">
+  <h2>11 &middot; Cheat Sheet &amp; Glossary</h2>
+
+  <h3>Numbers, versions, and constants</h3>
+  <table>
+    <thead><tr><th>Thing</th><th>Value</th><th>Source</th></tr></thead>
+    <tbody>
+      <tr><td>Platform / reactor</td><td>Darwin 25.6.0 arm64 &rarr; <strong>kqueue</strong></td><td>verified on machine</td></tr>
+      <tr><td>Reactor crate</td><td><code>mio 1.2.2</code> (transitive)</td><td><code>Cargo.lock</code></td></tr>
+      <tr><td>Runtime</td><td><code>tokio 1.53.1</code>, <code>features = ["full"]</code></td><td><code>Cargo.toml</code></td></tr>
+      <tr><td>Scheduler</td><td>multi-threaded, work-stealing (implicit)</td><td><code>#[tokio::main]</code> default</td></tr>
+      <tr><td>Worker threads</td><td><strong>8</strong> (one per core, <code>hw.ncpu = 8</code>)</td><td>Tokio default</td></tr>
+      <tr><td>Production <code>tokio::spawn</code> sites</td><td><strong>3</strong> (<code>main.rs:291</code>, <code>health.rs:25</code>, <code>health.rs:70</code>)</td><td>PROGRESS.md / src</td></tr>
+      <tr><td>Production <code>.await</code> count</td><td><strong>72</strong> (proxy.rs 57, health.rs 10, main.rs 5)</td><td>counted in code</td></tr>
+      <tr><td>Test <code>.await</code> count</td><td><strong>61</strong></td><td>counted in code</td></tr>
+      <tr><td>Files with a production <code>.await</code></td><td><strong>3 of 13</strong></td><td>&sect;5 table</td></tr>
+      <tr><td><code>balancer.rs</code> production awaits</td><td><strong>0</strong> (13 in tests)</td><td>&sect;5 table</td></tr>
+      <tr><td><code>spawn_blocking</code> / <code>thread::sleep</code> uses</td><td><strong>0</strong> / <strong>0</strong></td><td>verified</td></tr>
+      <tr><td>Real <code>tokio::sync</code> uses</td><td><strong>0</strong> (comment mentions only)</td><td>verified</td></tr>
+      <tr><td>Cost of blocking one worker</td><td>12.5% capacity (1 of 8)</td><td>&sect;6</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Readiness API complexity at a glance</h3>
+  <table>
+    <thead><tr><th>API</th><th>Register model</th><th>Wait cost</th><th>Model</th></tr></thead>
+    <tbody>
+      <tr><td><code>select</code></td><td>bitmask, every call</td><td>O(n), ~1024 cap</td><td>readiness</td></tr>
+      <tr><td><code>poll</code></td><td>array, every call</td><td>O(n), no cap</td><td>readiness</td></tr>
+      <tr><td><code>epoll</code> / <code>kqueue</code></td><td>register once</td><td><strong>O(ready)</strong></td><td>readiness</td></tr>
+      <tr><td><code>io_uring</code> / <code>IOCP</code></td><td>submit op + buffer</td><td>O(done), fewer syscalls</td><td>completion</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Glossary</h3>
+  <div class="grid2">
+    <div class="card"><h4>C10K</h4><p>The problem of serving 10,000 concurrent connections. Fatal under thread-per-connection; dissolved by event-driven I/O.</p></div>
+    <div class="card"><h4>O_NONBLOCK</h4><p>Socket flag making <code>read()</code>/<code>write()</code> return <code>EWOULDBLOCK</code> instead of parking the thread. Tokio sets it; Ferrum never does.</p></div>
+    <div class="card"><h4>Readiness vs. completion</h4><p>Readiness (epoll/kqueue): "you may read now" &mdash; you still call <code>read()</code>. Completion (io_uring/IOCP): "the read is DONE" &mdash; kernel did it for you.</p></div>
+    <div class="card"><h4>Reactor</h4><p>The component (here <code>mio</code>) holding one kernel readiness object, mapping FDs to <code>Waker</code>s, and calling <code>kevent</code>/<code>epoll_wait</code>.</p></div>
+    <div class="card"><h4>Executor</h4><p>The scheduler that polls ready futures on worker threads and steals work between them. Tokio's multi-threaded scheduler here.</p></div>
+    <div class="card"><h4>Future / state machine</h4><p>What an <code>async fn</code> compiles to. Inert until polled; its live locals are struct fields so it can resume at the await point.</p></div>
+    <div class="card"><h4>Waker</h4><p>A handle stored at park time; calling <code>wake()</code> puts the task back on a run queue for re-polling.</p></div>
+    <div class="card"><h4>Poll::Pending</h4><p>The value a future returns when it cannot make progress yet &mdash; the signal to park the task.</p></div>
+    <div class="card"><h4>Work stealing</h4><p>Idle workers pull queued tasks from busy ones, so one slow connection cannot starve a core.</p></div>
+    <div class="card"><h4>Blocking pool</h4><p>A separate Tokio thread pool for blocking operations (e.g. <code>getaddrinfo</code>), so they do not freeze a worker &mdash; where finding 7.1's DNS resolution lands.</p></div>
+  </div>
+</section>
+</main>
+</div>
+
+<footer>
+  <p>Ferrum &mdash; Level 9: OS Internals &bull; Knowledge Base &bull; Built 2026-09-02</p>
+  <p class="muted">A teaching reverse proxy in Rust. Grounded in <code>rproxy/src/</code>, <code>docs/level-9-os-internals.md</code>, and PROGRESS.md. Industry comparisons are the author's own knowledge of nginx/httpd/HAProxy/Envoy, qualified where uncertain.</p>
+</footer>
+</body>
+</html>

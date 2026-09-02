@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ferrum KB — Course Index</title>
+<meta name="description" content="A complete, plain-English map of the Barracuda Networks product portfolio: every product family (Email, Application, Network, Data Protection, Managed XDR, MSP) and the BarracudaONE platform — what each product is, what it does, and what problem it solves." />
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    flowchart: { htmlLabels: true, useMaxWidth: true, padding: 12, nodeSpacing: 55, rankSpacing: 55 },
+    startOnLoad: true, theme: 'base', securityLevel: 'loose',
+    themeVariables: {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '15px',
+      primaryColor: '#e7e8ea', primaryTextColor: '#15203a', primaryBorderColor: '#7e848c',
+      lineColor: '#6a6f77', secondaryColor: '#dddfe2', tertiaryColor: '#f3f4f6',
+      noteBkgColor: '#fff3d6', noteTextColor: '#3a2f12', noteBorderColor: '#caa84a',
+      actorBkg: '#e7e8ea', actorTextColor: '#15203a', actorBorder: '#7e848c',
+      clusterBkg: '#eef0f2', clusterBorder: '#a0a4aa'
+    }
+  });
+</script>
+<style>
+  :root{--bg:#0f1320;--panel:#161c2e;--panel-2:#1d2540;--ink:#e8ecf5;--muted:#9aa6c4;--accent:#7c5cff;--accent-2:#22d3a6;--warn:#ffb454;--danger:#ff6b81;--line:#2a3354;--code-bg:#0b0f1a;--max:1100px;}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:linear-gradient(180deg,#0c1020,#0f1320 40%);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  a{color:var(--accent-2);text-decoration:none}a:hover{text-decoration:underline}
+  header.hero{padding:56px 24px 40px;text-align:center;background:radial-gradient(1200px 400px at 50% -10%,rgba(255,107,129,.18),transparent 60%);border-bottom:1px solid var(--line);}
+  header.hero .eyebrow{letter-spacing:.25em;text-transform:uppercase;color:var(--accent-2);font-size:.75rem;font-weight:700}
+  header.hero h1{font-size:clamp(1.9rem,4vw,3rem);margin:.3em 0 .2em;line-height:1.1}
+  header.hero p.sub{color:var(--muted);max-width:790px;margin:0 auto;font-size:1.05rem}
+  .badges{margin-top:18px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .badge{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);padding:4px 12px;border-radius:999px;font-size:.8rem}
+  .layout{display:grid;grid-template-columns:260px 1fr;gap:32px;align-items:start;max-width:1320px;margin:0 auto;padding:0 22px}
+  nav.toc{position:sticky;top:0;max-height:100vh;overflow:auto;padding:28px 10px 60px;border-right:1px solid var(--line);font-size:.9rem;}
+  nav.toc h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.18em;color:var(--muted);margin:18px 8px 6px}
+  nav.toc a{display:block;color:var(--muted);padding:5px 10px;border-radius:8px;border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--panel);color:var(--ink);text-decoration:none;border-left-color:var(--accent)}
+  main{padding:34px 0 80px;min-width:0}
+  section{margin:0 0 46px;scroll-margin-top:18px}
+  section>h2{font-size:1.7rem;margin:0 0 .5em;padding-bottom:.3em;border-bottom:2px solid var(--line);display:flex;align-items:center;gap:.5em;}
+  h3{font-size:1.25rem;margin:1.6em 0 .4em;color:#fff}
+  h4{font-size:1.02rem;margin:1.2em 0 .3em;color:var(--accent-2);text-transform:uppercase;letter-spacing:.04em}
+  p,li{color:var(--ink)}.muted{color:var(--muted)}
+  article.concept{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin:22px 0}
+  article.concept>h3:first-child{margin-top:0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr} .layout{grid-template-columns:1fr} nav.toc{position:static;max-height:none;border-right:none;border-bottom:1px solid var(--line)}}
+  .card{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card h4{margin-top:.2em}
+  .callout{border-left:4px solid var(--accent);background:var(--panel-2);padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  .callout.analogy{border-left-color:var(--accent-2)}.callout.warn{border-left-color:var(--warn)}.callout.danger{border-left-color:var(--danger)}.callout.story{border-left-color:#5ec2ff}
+  .tag{display:inline-block;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:2px 8px;border-radius:6px;margin-bottom:6px}
+  .tag.beg{background:rgba(34,211,166,.15);color:var(--accent-2)}.tag.tech{background:rgba(124,92,255,.18);color:#b9a6ff}.tag.adv{background:rgba(255,107,129,.15);color:var(--danger)}
+  code{background:var(--code-bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.86em;color:#ffd9a0}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.85rem;line-height:1.55}
+  pre code{background:none;border:none;padding:0;color:#d7e0f5}
+  pre.art{color:#ffd9a0;font-size:.95rem;line-height:1.4;letter-spacing:.04em}
+  pre.mermaid{background:#f7f8fc;color:#111;text-align:center}
+  .mermaid svg text,.mermaid text{fill:#15203a !important}
+  .mermaid .nodeLabel,.mermaid .edgeLabel,.mermaid .label,.mermaid span,.mermaid p,.mermaid div,.mermaid foreignObject *{color:#15203a !important;fill:#15203a !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p{background:#f3f5fc !important}
+  .mermaid .cluster-label .nodeLabel,.mermaid .cluster-label p,.mermaid .cluster span,.mermaid .cluster p{color:#3c4046 !important}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.92rem;overflow:hidden;border-radius:10px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel-2);color:#fff}
+  tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  details{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:12px 0}
+  details summary{cursor:pointer;font-weight:600;color:var(--accent-2);padding:6px 0}
+  details[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px}
+  figure{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  figcaption{color:var(--muted);font-size:.85rem;text-align:center;margin-top:8px;font-style:italic}
+  .qa{margin:10px 0}.qa .q{font-weight:600}.qa .a{color:var(--muted);margin:2px 0 0}
+  ol.flow{counter-reset:step;list-style:none;padding-left:0}
+  ol.flow>li{counter-increment:step;position:relative;padding:10px 0 10px 52px;border-bottom:1px dashed var(--line)}
+  ol.flow>li::before{content:counter(step);position:absolute;left:0;top:8px;width:34px;height:34px;background:var(--accent);color:#fff;border-radius:50%;display:grid;place-items:center;font-weight:700}
+  .rank{font-weight:800;color:var(--accent);margin-right:6px}
+  footer{border-top:1px solid var(--line);padding:30px 22px;text-align:center;color:var(--muted);font-size:.88rem}
+  .lead{font-size:1.08rem}
+  .formula{background:var(--code-bg);border:1px dashed var(--accent);border-radius:10px;padding:12px 16px;font-family:monospace;color:#ffd9a0;text-align:center;margin:14px 0}
+
+  /* KB-THEME START */
+  /* Azure (blue palette) */
+  :root{--bg:#0e1c30;--panel:#152740;--panel-2:#1d3458;--ink:#e6edf7;--muted:#93a6c4;--accent:#1a8ae5;--accent-2:#41a7f5;--warn:#d6a96a;--danger:#d98a8a;--line:#264064;--code-bg:#0b1626;}
+  body{background:linear-gradient(180deg,var(--bg),var(--bg))}
+  header.hero{background:radial-gradient(1100px 400px at 50% -10%,rgba(20,119,210,.26),transparent 60%)}
+  h3,.parthead{color:var(--ink)}
+  th{color:var(--ink)}
+  .tag.tech{background:rgba(65,167,245,.16);color:var(--accent-2)}
+  ol.flow>li::before{color:#0b1626}
+  /* KB-THEME END */
+  /* prevent node/edge label clipping */
+  .mermaid foreignObject{overflow:visible !important}
+  .mermaid .nodeLabel,.mermaid .label,.mermaid foreignObject>div,.mermaid foreignObject span,.mermaid foreignObject p{white-space:nowrap !important;overflow:visible !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p,.mermaid .edgeLabel span{white-space:nowrap !important;overflow:visible !important;padding:1px 4px}
+  .mermaid svg{max-width:100%;height:auto}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyebrow">Ferrum KB &middot; Course Index &middot; 14 levels, from scratch</div>
+  <h1>Ferrum: Build Your Own Reverse Proxy<br/><span style="font-size:.6em;color:var(--muted)">The complete level-by-level knowledge base</span></h1>
+  <p class="sub">Ferrum is a production-shaped reverse proxy written from scratch in Rust across 14 course levels &mdash; ~13.4k lines, 280 unit tests, and exactly two dependencies (<code>regex</code>, <code>rustls</code>), everything else hand-rolled on purpose. Each page below teaches one level: what was built, the design decisions and the alternatives rejected, the algorithms and patterns by name, diagrams, the level quiz, and an honest comparison against nginx, Apache httpd, HAProxy, and Envoy.</p>
+  <div class="badges">
+    <span class="badge">Audience: Vessey (course learner)</span>
+    <span class="badge">Scope: all 14 levels</span>
+    <span class="badge">Code: rproxy/ &middot; 280 tests</span>
+  </div>
+</header>
+
+<div class="layout">
+<nav class="toc">
+  <h2>Orientation</h2>
+  <a href="#exec-summary">What Ferrum Is</a>
+  <a href="#big-picture">The Pipeline</a>
+  <h2>The Levels</h2>
+  <a href="#levels-build">Build Levels (1&ndash;8)</a>
+  <a href="#levels-ops">Ops Levels (10&ndash;13)</a>
+  <a href="#levels-theory">Theory Levels (9, 14)</a>
+  <h2>Reference</h2>
+  <a href="#tech-map">Tech &amp; Pattern Map</a>
+  <a href="#industry">Ferrum vs the Industry</a>
+  <a href="#stats">Course Stats</a>
+</nav>
+
+<main>
+
+<section id="exec-summary">
+  <h2>What Ferrum Is</h2>
+  <article class="concept">
+    <p>A <strong>reverse proxy</strong> sits between clients and backends: it accepts every request, decides which backend should serve it, forwards it (possibly editing headers), and relays the response &mdash; adding load balancing, health checking, caching, TLS termination, and security screening along the way. nginx, HAProxy, and Envoy are the production siblings; Ferrum is the same animal built limb by limb so every mechanism is understood rather than configured.</p>
+    <div class="callout analogy"><strong>Analogy.</strong> The proxy is a translator sitting between two phone calls: it listens to the client call, decides who to dial on the second phone, repeats the message (possibly editing it), and repeats the answer back. It can hang up either phone independently, keep the backend line open for the next caller (pooling), or answer from memory without dialing at all (caching).</div>
+    <p>The course rule that shaped everything: <strong>zero dependencies unless hand-rolling is dangerous</strong>. Only two exceptions were ever granted &mdash; <code>regex</code> (Level 2, and its no-backtracking guarantee quietly became a security property two levels later) and the <code>rustls</code> family (Level 8, because hand-rolling crypto is the level's named mistake #1). Everything else &mdash; HTTP parsing, connection pooling, the metrics registry, the Prometheus text format, the LRU cache, the TOML config parser, the WAF &mdash; is ours, with the design arguments written into the code as teaching comments.</p>
+  </article>
+</section>
+
+<section id="big-picture">
+  <h2>The Pipeline</h2>
+  <p>Every request walks this path. Each stage is one level's work; the pages linked below own the details.</p>
+  <figure>
+  <pre class="mermaid">
+flowchart LR
+  C["Client"] --> A["Accept + limits<br/>(L1, L8)"]
+  A --> T["TLS terminate<br/>(L8)"]
+  T --> P["Parse head<br/>(L1)"]
+  P --> R["Route<br/>(L2)"]
+  R --> M["Middleware: WAF, rate, auth<br/>(L6, L13)"]
+  M --> K["Cache lookup<br/>(L11)"]
+  K -->|hit| W["Write response"]
+  K -->|miss| B["Balance + breaker<br/>(L3, L4)"]
+  B --> F["Rewrite + forward<br/>(L5, L7 pool)"]
+  F --> O["Backend"]
+  O --> S["Store in cache<br/>(L11)"]
+  S --> W
+  W --> C
+  </pre>
+  <figcaption>The request lifecycle. Observability (L10) watches every stage; production features (L12) reload and drain the whole machine; L9 and L14 are about the machinery underneath and the fleet above.</figcaption>
+  </figure>
+</section>
+
+<section id="levels-build">
+  <h2>Build Levels (1&ndash;8)</h2>
+  <div class="grid2">
+    <div class="card"><h3><a href="Level-01-Core-Networking.html">Level 1 &mdash; Core Networking</a></h3><p>TCP accept loop, HTTP/1.1 parsing and body framing, forwarding, keep-alive, request-smuggling defenses. The <code>Conn&lt;S&gt;</code> generic and 16&nbsp;KB windowed streaming that every later level leans on.</p></div>
+    <div class="card"><h3><a href="Level-02-Routing.html">Level 2 &mdash; Routing</a></h3><p>RouteTable, path matchers (exact/prefix/wildcard/regex/any), host+method filters, specificity ranking, <code>Arc</code> sharing. The <code>regex</code> dependency decision.</p></div>
+    <div class="card"><h3><a href="Level-03-Load-Balancing.html">Level 3 &mdash; Load Balancing</a></h3><p>Seven algorithms from round-robin to a consistent-hash ring; the RAII <code>Lease</code> whose <code>Drop</code> releases inflight counts on every exit path.</p></div>
+    <div class="card"><h3><a href="Level-04-Health-Checks.html">Level 4 &mdash; Health Checks</a></h3><p>The three-state circuit breaker, passive+active feeds, exponential backoff, the prober task, and a real recovery-deadlock bug story.</p></div>
+    <div class="card"><h3><a href="Level-05-Proxy-Headers.html">Level 5 &mdash; Proxy Headers &amp; Rewriting</a></h3><p>XFF/X-Real-IP/XFH/XFP and why each has a different trust policy; path/Host rewriting; the protected-header guardrail; CRLF-injection hardening.</p></div>
+    <div class="card"><h3><a href="Level-06-Middleware.html">Level 6 &mdash; Middleware</a></h3><p>The synchronous two-phase pipeline (and why not the async onion), auth with constant-time compares, the sharded token-bucket rate limiter, rejection semantics.</p></div>
+    <div class="card"><h3><a href="Level-07-Performance.html">Level 7 &mdash; Performance</a></h3><p>The bounded LIFO connection pool, the five-condition poolability predicate, backend deadlines &mdash; and the cross-task TOCTOU bug only a whole-branch review could see.</p></div>
+    <div class="card"><h3><a href="Level-08-Security-TLS.html">Level 8 &mdash; Security &amp; TLS</a></h3><p>rustls termination and mTLS (the one from-scratch exception), the handshake-placement DoS decision, connection limits, CIDR policy, body/header caps.</p></div>
+  </div>
+</section>
+
+<section id="levels-ops">
+  <h2>Ops Levels (10&ndash;13)</h2>
+  <div class="grid2">
+    <div class="card"><h3><a href="Level-10-Observability.html">Level 10 &mdash; Observability</a></h3><p>Hand-rolled metrics (counters, gauges, histograms, Prometheus text format), leveled error log, JSON access log with stage timings, the separate admin plane.</p></div>
+    <div class="card"><h3><a href="Level-11-Caching.html">Level 11 &mdash; Caching</a></h3><p>Sharded approximately-LRU store, RFC 9111 semantics, the cache key as the level's one dangerous decision, both revalidation legs, streaming tee capture.</p></div>
+    <div class="card"><h3><a href="Level-12-Production-Features.html">Level 12 &mdash; Production Features</a></h3><p>Config file lowered onto the CLI vocabulary, <code>--validate</code>, graceful shutdown reusing the L8 limiter as drain tracker, hot reload via one pointer swap.</p></div>
+    <div class="card"><h3><a href="Level-13-Basic-WAF.html">Level 13 &mdash; Basic WAF</a></h3><p>Normalize-then-match-then-score (the CRS model), IP reputation as the breaker pointed inward, detect-before-block, and the honesty checkpoint.</p></div>
+  </div>
+</section>
+
+<section id="levels-theory">
+  <h2>Theory Levels (9, 14)</h2>
+  <div class="grid2">
+    <div class="card"><h3><a href="Level-09-OS-Internals.html">Level 9 &mdash; OS Internals</a></h3><p>epoll/kqueue, the C10K problem, the full <code>.await</code>&rarr;Waker&rarr;reactor path traced through Ferrum's own code, the await map, nginx as the same architecture.</p></div>
+    <div class="card"><h3><a href="Level-14-Scalability.html">Level 14 &mdash; Scalability &amp; HA</a></h3><p>Who balances the load balancers, the fleet state audit (don't share / share approximately / share for real), CDN integration, every level's cluster-scale reappearance.</p></div>
+  </div>
+</section>
+
+<section id="tech-map">
+  <h2>Tech &amp; Pattern Map</h2>
+  <p>The named patterns and algorithms, and where each first earns its keep. Details live on the level pages.</p>
+  <table>
+    <thead><tr><th>Pattern / Algorithm</th><th>Level</th><th>Where &amp; why</th></tr></thead>
+    <tbody>
+      <tr><td>Task-per-connection (async state machines)</td><td>1</td><td><code>tokio::spawn</code> per accept; 10k connections = 10k heap state machines, not 10k threads</td></tr>
+      <tr><td>Generic-over-stream (<code>Conn&lt;S&gt;</code>)</td><td>1&rarr;8</td><td>Static dispatch; the seam that let TLS drop in seven levels later with zero core changes</td></tr>
+      <tr><td>Specificity-ranked matching</td><td>2</td><td>Most-specific route wins, ties broken by host/method constraints</td></tr>
+      <tr><td>Consistent hashing (ring)</td><td>3</td><td><code>chash</code> upstreams; reappears at L14 as Maglev's job one tier up</td></tr>
+      <tr><td>RAII guards (<code>Drop</code> = release)</td><td>3, 7, 8, 10</td><td>Lease inflight counts, pooled connections, limiter slots, the conn gauge &mdash; cleanup that cannot be forgotten</td></tr>
+      <tr><td>Circuit breaker (3-state)</td><td>4</td><td>Closed/Open/HalfOpen with exponential backoff; reappears at L13 pointed at clients</td></tr>
+      <tr><td>Two-phase onion middleware (sync)</td><td>6</td><td>Forward <code>on_request</code>, reverse <code>on_response</code>, without owning the streamed body</td></tr>
+      <tr><td>Sharded locking (16 shards)</td><td>6, 11, 13</td><td>Rate limiter, cache, reputation &mdash; concurrency without a global mutex on the hot path</td></tr>
+      <tr><td>Token bucket</td><td>6</td><td>Lazy refill, no timer task; per-IP keyed on the socket peer, never XFF</td></tr>
+      <tr><td>Bounded LIFO pool + lazy eviction</td><td>7</td><td>Warmest-connection reuse; idle timeout checked on take, no sweeper</td></tr>
+      <tr><td>Serialize-once / retry-only-the-write</td><td>7</td><td>Non-idempotent rewrite runs once; dead pooled connections retry safely</td></tr>
+      <tr><td>Atomics + fixed label sets</td><td>10</td><td>Metrics that never lock or allocate on the hot path; cardinality bounded by config</td></tr>
+      <tr><td>Approximate LRU + lazy TTL</td><td>11</td><td>Recency scan per shard on insert-when-full; expiry checked on lookup</td></tr>
+      <tr><td>Arc snapshot swap (RwLock&lt;Arc&lt;T&gt;&gt;)</td><td>12</td><td>Hot reload: in-flight requests keep a consistent snapshot; old config frees on last drop</td></tr>
+      <tr><td>Weak-reference lifecycle</td><td>12</td><td>Probers die with their table &mdash; the <code>Weak</code> IS the shutdown signal</td></tr>
+      <tr><td>Normalize &rarr; match &rarr; anomaly-score</td><td>13</td><td>The ModSecurity CRS model: decode evasions first, convict on accumulated points</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="industry">
+  <h2>Ferrum vs the Industry</h2>
+  <div class="callout"><strong>Read this honestly.</strong> Ferrum is a teaching build: single process, one machine, ~16 WAF rules, no HTTP/2, no benchmark suite. The comparisons on each level page exist because the <em>disagreements</em> between production proxies are the lesson &mdash; not because Ferrum competes with them.</div>
+  <table>
+    <thead><tr><th>System</th><th>Concurrency model</th><th>Config</th><th>Famous for</th><th>Ferrum's kinship</th></tr></thead>
+    <tbody>
+      <tr><td><strong>nginx</strong> (2004, C)</td><td>Master + N single-threaded epoll workers</td><td>Static file, SIGHUP re-exec</td><td>Raw efficiency; ~half the web</td><td>Same event-loop architecture; Tokio writes the state machines nginx's authors wrote by hand (L9)</td></tr>
+      <tr><td><strong>Apache httpd</strong> (1995, C)</td><td>MPM modules: prefork/worker/event</td><td>Static file + .htaccess</td><td>The original extensible server; module ecosystem</td><td>Ferrum's middleware chain is the spiritual heir of the module hook chain (L6)</td></tr>
+      <tr><td><strong>HAProxy</strong> (2001, C)</td><td>Event loop, multi-threaded since 1.8</td><td>Static file</td><td>Extreme L4/L7 reliability; the classic LB</td><td>The balancer algorithms and health-check asymmetry are HAProxy's bread and butter (L3&ndash;L4)</td></tr>
+      <tr><td><strong>Envoy</strong> (2016, C++)</td><td>One event loop per thread</td><td>Dynamic xDS over gRPC</td><td>Service mesh sidecar; first-class observability</td><td>L10's metrics depth and L12's validate-and-swap reload are Envoy's philosophy in miniature</td></tr>
+      <tr><td><strong>Cloudflare Pingora</strong> (Rust)</td><td>Tokio async, work stealing</td><td>Control plane</td><td>Proof Rust+Tokio runs planet-scale proxy fleets</td><td>The same stack, literally &mdash; Ferrum follows the Pingora lineage (L9, L12)</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="stats">
+  <h2>Course Stats</h2>
+  <div class="grid3">
+    <div class="card"><h3>14 / 14</h3><p>levels complete (L9, L14 theory)</p></div>
+    <div class="card"><h3>280</h3><p>unit tests, all green</p></div>
+    <div class="card"><h3>~13.4k</h3><p>lines across 15 source files</p></div>
+    <div class="card"><h3>2</h3><p>dependencies: regex, rustls &mdash; everything else from scratch</p></div>
+    <div class="card"><h3>10</h3><p>design specs in docs/superpowers/specs/</p></div>
+    <div class="card"><h3>12</h3><p>level quizzes pending in PROGRESS.md</p></div>
+  </div>
+  <p style="margin-top:1em">Source of truth: <code>PROGRESS.md</code> (tracker + per-level write-ups + quizzes), <code>docs/superpowers/specs/</code> (design docs), <code>rproxy/src/</code> (the code, with teaching comments).</p>
+</section>
+
+</main>
+</div>
+
+<footer>
+  Ferrum Knowledge Base &middot; generated 2026-09-02 &middot; course repo: github.com/Vasant18/Ferrum
+</footer>
+
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral" });
+</script>
+</body>
+</html>

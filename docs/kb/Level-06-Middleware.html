@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ferrum KB — Level 6: Middleware</title>
+<meta name="description" content="A complete, plain-English map of the Barracuda Networks product portfolio: every product family (Email, Application, Network, Data Protection, Managed XDR, MSP) and the BarracudaONE platform — what each product is, what it does, and what problem it solves." />
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    flowchart: { htmlLabels: true, useMaxWidth: true, padding: 12, nodeSpacing: 55, rankSpacing: 55 },
+    startOnLoad: true, theme: 'base', securityLevel: 'loose',
+    themeVariables: {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '15px',
+      primaryColor: '#e7e8ea', primaryTextColor: '#15203a', primaryBorderColor: '#7e848c',
+      lineColor: '#6a6f77', secondaryColor: '#dddfe2', tertiaryColor: '#f3f4f6',
+      noteBkgColor: '#fff3d6', noteTextColor: '#3a2f12', noteBorderColor: '#caa84a',
+      actorBkg: '#e7e8ea', actorTextColor: '#15203a', actorBorder: '#7e848c',
+      clusterBkg: '#eef0f2', clusterBorder: '#a0a4aa'
+    }
+  });
+</script>
+<style>
+  :root{--bg:#0f1320;--panel:#161c2e;--panel-2:#1d2540;--ink:#e8ecf5;--muted:#9aa6c4;--accent:#7c5cff;--accent-2:#22d3a6;--warn:#ffb454;--danger:#ff6b81;--line:#2a3354;--code-bg:#0b0f1a;--max:1100px;}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:linear-gradient(180deg,#0c1020,#0f1320 40%);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  a{color:var(--accent-2);text-decoration:none}a:hover{text-decoration:underline}
+  header.hero{padding:56px 24px 40px;text-align:center;background:radial-gradient(1200px 400px at 50% -10%,rgba(255,107,129,.18),transparent 60%);border-bottom:1px solid var(--line);}
+  header.hero .eyebrow{letter-spacing:.25em;text-transform:uppercase;color:var(--accent-2);font-size:.75rem;font-weight:700}
+  header.hero h1{font-size:clamp(1.9rem,4vw,3rem);margin:.3em 0 .2em;line-height:1.1}
+  header.hero p.sub{color:var(--muted);max-width:790px;margin:0 auto;font-size:1.05rem}
+  .badges{margin-top:18px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .badge{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);padding:4px 12px;border-radius:999px;font-size:.8rem}
+  .layout{display:grid;grid-template-columns:260px 1fr;gap:32px;align-items:start;max-width:1320px;margin:0 auto;padding:0 22px}
+  nav.toc{position:sticky;top:0;max-height:100vh;overflow:auto;padding:28px 10px 60px;border-right:1px solid var(--line);font-size:.9rem;}
+  nav.toc h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.18em;color:var(--muted);margin:18px 8px 6px}
+  nav.toc a{display:block;color:var(--muted);padding:5px 10px;border-radius:8px;border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--panel);color:var(--ink);text-decoration:none;border-left-color:var(--accent)}
+  main{padding:34px 0 80px;min-width:0}
+  section{margin:0 0 46px;scroll-margin-top:18px}
+  section>h2{font-size:1.7rem;margin:0 0 .5em;padding-bottom:.3em;border-bottom:2px solid var(--line);display:flex;align-items:center;gap:.5em;}
+  h3{font-size:1.25rem;margin:1.6em 0 .4em;color:#fff}
+  h4{font-size:1.02rem;margin:1.2em 0 .3em;color:var(--accent-2);text-transform:uppercase;letter-spacing:.04em}
+  p,li{color:var(--ink)}.muted{color:var(--muted)}
+  article.concept{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin:22px 0}
+  article.concept>h3:first-child{margin-top:0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr} .layout{grid-template-columns:1fr} nav.toc{position:static;max-height:none;border-right:none;border-bottom:1px solid var(--line)}}
+  .card{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card h4{margin-top:.2em}
+  .callout{border-left:4px solid var(--accent);background:var(--panel-2);padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  .callout.analogy{border-left-color:var(--accent-2)}.callout.warn{border-left-color:var(--warn)}.callout.danger{border-left-color:var(--danger)}.callout.story{border-left-color:#5ec2ff}
+  .tag{display:inline-block;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:2px 8px;border-radius:6px;margin-bottom:6px}
+  .tag.beg{background:rgba(34,211,166,.15);color:var(--accent-2)}.tag.tech{background:rgba(124,92,255,.18);color:#b9a6ff}.tag.adv{background:rgba(255,107,129,.15);color:var(--danger)}
+  code{background:var(--code-bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.86em;color:#ffd9a0}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.85rem;line-height:1.55}
+  pre code{background:none;border:none;padding:0;color:#d7e0f5}
+  pre.art{color:#ffd9a0;font-size:.95rem;line-height:1.4;letter-spacing:.04em}
+  pre.mermaid{background:#f7f8fc;color:#111;text-align:center}
+  .mermaid svg text,.mermaid text{fill:#15203a !important}
+  .mermaid .nodeLabel,.mermaid .edgeLabel,.mermaid .label,.mermaid span,.mermaid p,.mermaid div,.mermaid foreignObject *{color:#15203a !important;fill:#15203a !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p{background:#f3f5fc !important}
+  .mermaid .cluster-label .nodeLabel,.mermaid .cluster-label p,.mermaid .cluster span,.mermaid .cluster p{color:#3c4046 !important}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.92rem;overflow:hidden;border-radius:10px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel-2);color:#fff}
+  tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  details{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:12px 0}
+  details summary{cursor:pointer;font-weight:600;color:var(--accent-2);padding:6px 0}
+  details[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px}
+  figure{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  figcaption{color:var(--muted);font-size:.85rem;text-align:center;margin-top:8px;font-style:italic}
+  .qa{margin:10px 0}.qa .q{font-weight:600}.qa .a{color:var(--muted);margin:2px 0 0}
+  ol.flow{counter-reset:step;list-style:none;padding-left:0}
+  ol.flow>li{counter-increment:step;position:relative;padding:10px 0 10px 52px;border-bottom:1px dashed var(--line)}
+  ol.flow>li::before{content:counter(step);position:absolute;left:0;top:8px;width:34px;height:34px;background:var(--accent);color:#fff;border-radius:50%;display:grid;place-items:center;font-weight:700}
+  .rank{font-weight:800;color:var(--accent);margin-right:6px}
+  footer{border-top:1px solid var(--line);padding:30px 22px;text-align:center;color:var(--muted);font-size:.88rem}
+  .lead{font-size:1.08rem}
+  .formula{background:var(--code-bg);border:1px dashed var(--accent);border-radius:10px;padding:12px 16px;font-family:monospace;color:#ffd9a0;text-align:center;margin:14px 0}
+
+  /* KB-THEME START */
+  /* Azure (blue palette) */
+  :root{--bg:#0e1c30;--panel:#152740;--panel-2:#1d3458;--ink:#e6edf7;--muted:#93a6c4;--accent:#1a8ae5;--accent-2:#41a7f5;--warn:#d6a96a;--danger:#d98a8a;--line:#264064;--code-bg:#0b1626;}
+  body{background:linear-gradient(180deg,var(--bg),var(--bg))}
+  header.hero{background:radial-gradient(1100px 400px at 50% -10%,rgba(20,119,210,.26),transparent 60%)}
+  h3,.parthead{color:var(--ink)}
+  th{color:var(--ink)}
+  .tag.tech{background:rgba(65,167,245,.16);color:var(--accent-2)}
+  ol.flow>li::before{color:#0b1626}
+  /* KB-THEME END */
+  /* prevent node/edge label clipping */
+  .mermaid foreignObject{overflow:visible !important}
+  .mermaid .nodeLabel,.mermaid .label,.mermaid foreignObject>div,.mermaid foreignObject span,.mermaid foreignObject p{white-space:nowrap !important;overflow:visible !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p,.mermaid .edgeLabel span{white-space:nowrap !important;overflow:visible !important;padding:1px 4px}
+  .mermaid svg{max-width:100%;height:auto}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyebrow">Ferrum KB &middot; Level 6 of 14 &middot; Middleware</div>
+  <h1>The Middleware Pipeline<br/><span style="font-size:.6em;color:var(--muted)">A synchronous two-phase onion — and why it is NOT the async-trait one</span></h1>
+  <p class="sub">Level 6 stops bolting cross-cutting policy onto the forwarding loop. It introduces a <code>Middleware</code> trait whose two phases are both <em>synchronous</em>, on purpose: <code>on_request</code> runs forward through the chain, the body streams untouched, and <code>on_response</code> runs in reverse — the onion's semantics without ever owning the response body. On that spine we stack five middleware: request-id, access-log, Basic/Bearer auth, require-user authz, and a 16-shard token-bucket rate limiter.</p>
+  <div class="badges">
+    <span class="badge">Audience: Vessey (building Ferrum)</span>
+    <span class="badge">Scope: rproxy/src/middleware/</span>
+    <span class="badge">Reading time: ~28 min</span>
+  </div>
+  <p class="sub" style="margin-top:16px">
+    <a href="index.html">&larr; Course index</a>
+    &nbsp;&middot;&nbsp; <a href="Level-05-Proxy-Headers.html">&larr; Level 5: Proxy Headers</a>
+    &nbsp;&middot;&nbsp; <a href="Level-07-Performance.html">Level 7: Performance &rarr;</a>
+  </p>
+</header>
+
+<div class="layout">
+<nav class="toc">
+  <h2>Orientation</h2>
+  <a href="#exec-summary">Executive Summary</a>
+  <a href="#big-picture">The Big Picture</a>
+  <h2>Core</h2>
+  <a href="#the-trait">The Synchronous Trait</a>
+  <a href="#why-not-async">Why NOT the Async Onion</a>
+  <a href="#reqctx">ReqCtx &amp; the Chain</a>
+  <a href="#order">Fixed Order &amp; the Reverse Unwind</a>
+  <a href="#five">The Five Middleware</a>
+  <a href="#ratelimit">The Rate Limiter</a>
+  <a href="#rejection">The Rejection Drain</a>
+  <a href="#code-map">Code Map</a>
+  <h2>Compare</h2>
+  <a href="#industry">How the Giants Do It</a>
+  <h2>Reference</h2>
+  <a href="#quiz">Quiz</a>
+  <a href="#cheatsheet">Cheat Sheet &amp; Glossary</a>
+</nav>
+
+<main>
+<section id="exec-summary">
+  <h2>Executive Summary</h2>
+  <p class="lead">Level 6 is the level where cross-cutting policy stops tangling into the core loop and starts stacking like Lego.</p>
+  <p>Levels 1&ndash;5 grew <code>serve_one</code> into a long function that reads, routes, balances, retries, and rewrites. Everything in it <em>is</em> forwarding. But auth, rate limiting, request IDs, and access logging are policy applied <em>around</em> forwarding, and adding each one inline would make the loop longer and more tangled. Level 6 builds the architecture that lets those features compose: a <strong>middleware pipeline</strong> — an ordered chain of interceptors that run before the backend is touched and again as the response leaves.</p>
+  <p>The central design decision, and the reason this level exists, is that the trait is <strong>synchronous and two-phase</strong>, a deliberate deviation from the textbook async onion (<code>async handle(req, next) -&gt; Response</code>). That signature needs an <em>owned</em> <code>Response</code>, and <code>serve_one</code> never has one — it streams the body through a 16&nbsp;KB window, so a 2&nbsp;GB download costs 16&nbsp;KB of memory. Buffering every body to satisfy an owned-response contract would throw away Level 1's flat-memory guarantee and pre-break Level 7. So we split the onion into <code>on_request</code> (forward) and <code>on_response</code> (reverse), neither of which awaits — meaning no <code>async fn</code> in a trait object, no <code>Pin&lt;Box&lt;dyn Future&gt;&gt;</code> allocation, and no <code>async-trait</code> dependency.</p>
+  <p>On that spine sit five middleware in a fixed in-code order: <strong>log &rarr; request-id &rarr; ratelimit &rarr; auth &rarr; authz</strong>. Rate-limit sits <em>before</em> auth so a credential-guessing flood is refused by a cheap bucket check before any comparison runs. The limiter keys on the socket-observed peer IP (never <code>X-Forwarded-For</code>), holds state in 16 sharded <code>std::sync::Mutex</code> maps, and refills lazily with no timer. Auth returns 401 with a <code>WWW-Authenticate</code> challenge; authz returns 403 (not 401); both compare secrets in constant time. A rejected request drains its body up to 64&nbsp;KB before the connection is reused or closed, because unread bytes at <code>close()</code> make the kernel send a TCP RST that can nuke the very rejection we wrote. Ferrum here is a teaching build — a <code>Vec&lt;Box&lt;dyn Middleware&gt;&gt;</code>, not Tower's static composition; a per-process counter for IDs, not UUIDs — and every gap is documented rather than hidden.</p>
+</section>
+
+<section id="big-picture">
+  <h2>The Big Picture</h2>
+  <p class="lead">The chain is one stage of the pipeline, but a stage that wraps two others: it runs on the way in and again on the way out.</p>
+  <p>Two placement facts make the whole level cohere. First, the chain runs <strong>after routing</strong> — you cannot pick a per-route chain before you know which route matched. Second, it runs <strong>before the balancer lease and connect loop</strong> — a rejected request must consume no lease, open no backend socket, and never feed the circuit breaker. Short-circuiting is the entire value: a 429 flood costs the backend fleet nothing.</p>
+  <figure>
+<pre class="mermaid">
+flowchart TD
+  C["client request"] --> P["parse + framing (L1)"]
+  P --> R["route match (L2/L3/L4)"]
+  R --> CTX["ReqCtx::new (peer, started, ORIGINAL method/target/host)"]
+  CTX --> MW["MIDDLEWARE on_request — forward:<br/>log, request-id, ratelimit, auth, authz"]
+  MW -->|reject| DR["drain body (&le;64 KB) &rarr; on_response REVERSE<br/>for entered layers &rarr; write 401/403/429 &rarr; END"]
+  MW -->|continue| B["pool pick + connect + retry (L3/L4)"]
+  B --> HB["strip_hop_by_hop &rarr; L5 apply_request &rarr; framing"]
+  HB --> U["backend"]
+  U --> RH["read response head (L1)"]
+  RH --> MW2["MIDDLEWARE on_response — REVERSE:<br/>authz, auth, ratelimit, request-id, log"]
+  MW2 --> HB2["strip_hop_by_hop &rarr; L5 apply_response &rarr; framing"]
+  HB2 --> CL["client"]
+  style MW fill:#1a8ae5,color:#fff,stroke:#0b1626
+  style MW2 fill:#1a8ae5,color:#fff,stroke:#0b1626
+  style DR fill:#d98a8a,color:#15203a,stroke:#0b1626
+</pre>
+<figcaption>Where the chain plugs into <code>serve_one</code>. The two highlighted blue boxes are the new stages: a forward request pass and a reverse response pass, both sitting <em>above</em> the lease/connect loop and <em>outside</em> Level 5's transforms.</figcaption>
+  </figure>
+  <div class="callout analogy"><strong>Analogy — airport security lanes.</strong> On the way in you pass through stations in order: the desk that logs your name, the officer who tags your boarding pass with a tracking number, the turnstile that limits how fast people enter, the ID check, the watchlist check. If the turnstile turns you away, the stations <em>behind</em> it (the ID and watchlist officers) never see you at all — but the desk and the tag officer you already passed still watch you leave and note it in their log. A station that itself rejected you doesn't re-screen you on the way out. That asymmetry is exactly how <code>on_response</code> unwinds.</div>
+  <p>On both legs the chain wraps <em>outside</em> Level 5: on the request leg it runs before <code>strip_hop_by_hop</code> and <code>apply_request</code>; on the response leg <code>on_response</code> runs before <code>apply_response</code>. Two consequences, both wanted: an operator's explicit <code>set-resp-header</code> rule stays the final word over a middleware-injected header, and both stages remain before the framing re-declaration, so nothing a middleware does can displace <code>Content-Length</code> / <code>Transfer-Encoding</code> / <code>Connection</code>. Level 1's anti-smuggling guarantees are untouched.</p>
+</section>
+
+<section id="the-trait">
+  <h2>The Synchronous Trait</h2>
+  <p class="lead">One trait, two phases, both synchronous. That single fact is the design decision every other choice in this level hangs off.</p>
+  <p>A middleware is anything that implements this trait, defined in <code>middleware/mod.rs</code>:</p>
+  <pre><code>pub trait Middleware: Send + Sync {
+    /// Stable name for log lines and rejection attribution.
+    fn name(&amp;self) -&gt; &amp;'static str;
+
+    /// Inbound half. May mutate the request head or shared context,
+    /// and may short-circuit the exchange by returning Reject.
+    fn on_request(&amp;self, req: &amp;mut RequestHead, ctx: &amp;mut ReqCtx) -&gt; Decision;
+
+    /// Outbound half. Default no-op so request-only middleware stay terse.
+    fn on_response(&amp;self, _ctx: &amp;ReqCtx, _resp: &amp;mut ResponseHead) {}
+}
+
+pub enum Decision { Continue, Reject(Rejection) }</code></pre>
+  <p>Three things are load-bearing here and worth naming.</p>
+
+  <h4>Send + Sync — because the chain is shared</h4>
+  <p>The trait requires <code>Send + Sync</code> because the assembled <code>Chain</code> lives inside the <code>Arc&lt;RouteTable&gt;</code> that every connection task shares. A middleware is read concurrently from many tasks and never mutated after startup, so it must be safe to share across threads. This is the same shared-immutable-state discipline the router and balancer already follow.</p>
+
+  <h4>&amp;self, not &amp;mut self — a deliberate seam</h4>
+  <p>Both phases take <code>&amp;self</code>. The trait can't take <code>&amp;mut self</code> because the chain is shared behind an <code>Arc</code> and read from many tasks at once. Any middleware that needs shared mutable state carries its own interior mutability — the rate limiter is the only one that does, holding an <code>Arc&lt;Limiter&gt;</code> whose buckets sit behind mutexes. The <code>&amp;self</code> signature is also what lets a future async middleware (one that awaits an external OIDC endpoint, say) be added later without churning every signature in the crate.</p>
+
+  <h4>Reject carries headers — because a bare status is not a valid response</h4>
+  <p>A <code>Rejection</code> is not just a status code:</p>
+  <pre><code>pub struct Rejection {
+    pub status: u16,
+    pub reason: &amp;'static str,
+    pub headers: Vec&lt;(String, String)&gt;,
+    pub body: String,
+}</code></pre>
+  <p>It carries headers because for two of the three rejection statuses, the status alone is <em>incomplete</em>. A <code>401</code> REQUIRES a <code>WWW-Authenticate</code> header (RFC&nbsp;9110 &sect;11.6.1) — without it the client has no idea what challenge to answer. A <code>429</code> without a <code>Retry-After</code> tells the client nothing actionable. So <code>Rejection</code> carries the headers the status demands, and <code>RequestId</code>'s response phase later stamps <code>X-Request-Id</code> onto even a rejection.</p>
+  <div class="callout"><strong>Pattern name — trait object / dynamic dispatch.</strong> A <code>Box&lt;dyn Middleware&gt;</code> is Rust's trait object: a fat pointer (data pointer + vtable pointer) that lets the chain hold a heterogeneous list of middleware and call <code>on_request</code> on each without knowing its concrete type at compile time. This is the level's Rust lesson: dynamic dispatch as an <em>explicit engineering choice</em>, chosen over static composition because a runtime-configurable <code>Vec</code> is exactly what a per-route chain wants.</div>
+</section>
+
+<section id="why-not-async">
+  <h2>Why NOT the Async Onion</h2>
+  <p class="lead">The knowledge base's textbook middleware is <code>async fn handle(req, next) -&gt; Response</code>. We deliberately did not build that. Understanding why is the point of the level.</p>
+  <p>In the textbook onion, each layer calls <code>next</code> to invoke the rest of the chain and gets back a <code>Response</code> <em>value</em> it can post-process before returning. It is elegant and it is what Tower does. It also has two costs this proxy refuses to pay.</p>
+
+  <div class="grid2">
+    <div class="card">
+      <span class="tag adv">Cost 1</span>
+      <h4>It needs an owned Response</h4>
+      <p><code>serve_one</code> never has a response <em>value</em>. It reads the backend's response <em>head</em>, writes it to the client, and then <strong>streams</strong> the body through a 16&nbsp;KB window (<code>Conn::copy_body_to</code>, backed by <code>BUF_SIZE = 16 * 1024</code> in <code>proxy.rs</code>). A 2&nbsp;GB download costs 16&nbsp;KB of memory today. An owned-response contract would force us to buffer every body — throwing away Level 1's flat-memory guarantee and pre-breaking Level 7's performance work.</p>
+    </div>
+    <div class="card">
+      <span class="tag adv">Cost 2</span>
+      <h4>async fn in a trait object needs boxing</h4>
+      <p>An <code>async fn</code> desugars to "return a <code>Future</code>". A <code>dyn</code> trait needs a known size, but every async fn returns a differently-sized anonymous future — so each call has to allocate a <code>Pin&lt;Box&lt;dyn Future&gt;&gt;</code> on the heap. That is exactly what the <code>async-trait</code> crate does for you, invisibly, per call. Real allocation, real dependency, and avoidable here.</p>
+    </div>
+  </div>
+
+  <p>The two-phase split keeps the onion's semantics without owning the body:</p>
+  <ol class="flow">
+    <li><strong><code>on_request</code> runs forward</strong> through the chain, before a backend even exists.</li>
+    <li><strong>The exchange streams</strong>, untouched, exactly as in Level 5 — the 16&nbsp;KB window, no buffering.</li>
+    <li><strong><code>on_response</code> runs in reverse</strong> — the onion's "way out" — mutating the response <em>head</em> only, never owning the body.</li>
+  </ol>
+  <p>Because neither method awaits, there is no <code>async fn</code> in a trait object, no boxed future, and no <code>async-trait</code> dependency. The crate stays at tokio + regex. The module docs still explain <em>why</em> that boxing exists in Tower-shaped designs — the teaching point survives even though we don't pay its cost.</p>
+  <div class="callout warn"><strong>The one thing we give up.</strong> A middleware that itself <code>await</code>s — an auth layer calling an external OIDC endpoint, for instance — cannot exist under this trait, because neither phase can await. That is a documented boundary of the design, not an accident. When Ferrum needs it, the <code>&amp;self</code> receiver means the trait can grow an async variant without rewriting the five middleware that don't need one.</div>
+  <figure>
+<pre class="mermaid">
+flowchart LR
+  subgraph ASYNC["textbook async onion (NOT built)"]
+    direction TB
+    A1["handle(req, next)"] --> A2["await next(req)"]
+    A2 --> A3["owned Response value"]
+    A3 --> A4["post-process, return"]
+    A3 -.->|forces| A5["buffer WHOLE body<br/>+ Box&lt;dyn Future&gt; per call"]
+  end
+  subgraph SYNC["Ferrum's synchronous two-phase (built)"]
+    direction TB
+    S1["on_request forward"] --> S2["body STREAMS<br/>16 KB window, untouched"]
+    S2 --> S3["on_response reverse<br/>head only, no body ownership"]
+  end
+  style A5 fill:#d98a8a,color:#15203a,stroke:#0b1626
+  style S2 fill:#41a7f5,color:#15203a,stroke:#0b1626
+</pre>
+<figcaption>The two contracts side by side. The async onion's owned <code>Response</code> forces whole-body buffering and a per-call heap allocation; the two-phase split touches only the head and lets the body stream.</figcaption>
+  </figure>
+</section>
+
+<section id="reqctx">
+  <h2>ReqCtx &amp; the Chain</h2>
+  <p class="lead">Two structs carry the whole pipeline: <code>ReqCtx</code> is the state that crosses middleware, and <code>Chain</code> is the ordered stack that runs them.</p>
+
+  <h3>ReqCtx — what crosses the chain</h3>
+  <p><code>ReqCtx</code> is per-request state that middleware read and write, and that survives from the request phase into the response phase. Its existence answers a subtle problem: by the time the response comes back, the request head has been <em>rewritten</em> by Level 5, so a middleware that needs the <em>original</em> method / target / host cannot read them from the (mutated) head — it reads them from the context, captured before the rewrite.</p>
+  <pre><code>pub struct ReqCtx {
+    pub peer: SocketAddr,       // socket-observed client address
+    pub started: Instant,       // stamped in new(), before the chain runs
+    pub method: String,         // original, pre-rewrite
+    pub target: String,         // original, pre-rewrite
+    pub host: Option&lt;String&gt;,   // original Host (documented seam)
+    pub request_id: String,     // set by RequestId, read by log
+    pub identity: Option&lt;String&gt;,// set by Auth, read by Authz
+    pub backend: Option&lt;String&gt;, // written by proxy.rs after the pool pick
+    pub upstream: Option&lt;String&gt;,
+    pub rejected_by: Option&lt;&amp;'static str&gt;, // log attribution
+    // ... plus Level 10 timing stamps (t_route, t_connect, t_first_byte),
+    //     pooled, cache, waf_score — later levels write these.
+}</code></pre>
+  <p>The field that matters most is <code>identity</code>: it is the one piece of state that genuinely flows <em>between</em> middleware. <code>Auth</code> sets it on success; <code>Authz</code> reads it. Everything else is either set-and-read-by-one-layer (<code>request_id</code>) or written by <code>proxy.rs</code> for the log to consume (<code>backend</code>, <code>upstream</code>). Note that <code>started</code> is stamped inside <code>ReqCtx::new</code>, <em>before</em> the chain runs, so the access log's duration covers every layer including the one that stamps the log line.</p>
+  <div class="callout"><strong>Fields for later levels.</strong> <code>ReqCtx</code> carries timing stamps (<code>t_route</code>, <code>t_connect</code>, <code>t_first_byte</code>), a <code>pooled</code> flag, a <code>cache</code> outcome, and a <code>waf_score</code>. None of those are Level 6 features — they are documented seams that Levels 7, 10, 11, and 13 fill in. The <code>host</code> field is the same kind of seam: no middleware reads it yet, but it is the natural place a future host-aware layer would look, so it is part of the documented contract (marked <code>#[allow(dead_code)]</code> for exactly that reason).</div>
+
+  <h3>Chain — the ordered stack</h3>
+  <p>A <code>Chain</code> wraps <code>Vec&lt;Box&lt;dyn Middleware&gt;&gt;</code> plus a human-readable summary for the startup banner. It is built once per route at startup and run per request. It is <strong>not <code>Clone</code></strong> — a <code>Box&lt;dyn Middleware&gt;</code> isn't — and it doesn't need to be: <code>Route</code> owns one and is shared through <code>Arc&lt;RouteTable&gt;</code>, never cloned. The chain exposes three run methods:</p>
+  <pre><code>// Forward on_request. On rejection, returns the rejecting layer's INDEX
+// plus the response — the index says how many layers were entered.
+pub fn run_request(&amp;self, req, ctx) -&gt; Result&lt;(), (usize, Rejection)&gt;
+
+// Reverse on_response for indices [0, up_to) — the rejection path.
+pub fn run_response(&amp;self, ctx, resp, up_to: usize)
+
+// Reverse on_response over EVERY layer — the non-rejected path.
+pub fn run_response_all(&amp;self, ctx, resp)</code></pre>
+  <p>The rejecting index returned by <code>run_request</code> is the linchpin of the reverse-unwind asymmetry, covered next.</p>
+</section>
+
+<section id="order">
+  <h2>Fixed Order &amp; the Reverse Unwind</h2>
+  <p class="lead">The chain order is fixed in code, never in config. Which middleware are <em>enabled</em> is config; their <em>sequence</em> is not.</p>
+  <p>The order is <strong>log &rarr; request-id &rarr; ratelimit &rarr; auth &rarr; authz</strong>, assembled by <code>MiddlewareConfig::build</code>, skipping any layer that is disabled or unconfigured. Each position is justified:</p>
+  <table>
+    <thead><tr><th>#</th><th>Middleware</th><th>Default</th><th>Rejects</th><th>Why at this position</th></tr></thead>
+    <tbody>
+      <tr><td>0</td><td><code>log</code></td><td>on</td><td>&mdash;</td><td>Outermost, so its <code>on_response</code> runs <strong>last</strong> and observes the final status and the full duration, every inner layer included.</td></tr>
+      <tr><td>1</td><td><code>request-id</code></td><td>on</td><td>&mdash;</td><td>Before anything that can log or reject, so every response — including a 401 — carries the ID.</td></tr>
+      <tr><td>2</td><td><code>ratelimit</code></td><td>off</td><td>429</td><td><strong>Before</strong> auth: throttles a credential-guessing flood without paying for a single credential check.</td></tr>
+      <tr><td>3</td><td><code>auth</code></td><td>off</td><td>401</td><td>Establishes <code>ctx.identity</code>.</td></tr>
+      <tr><td>4</td><td><code>authz</code></td><td>off</td><td>403</td><td>Consumes <code>ctx.identity</code>, so it must follow auth.</td></tr>
+    </tbody>
+  </table>
+
+  <h4>Rate-limit before auth — the one contestable choice</h4>
+  <p>Placing rate-limit <em>outside</em> auth is the genuinely debatable decision, and the knowledge base names the trade-off exactly: rate-limit before auth if you want to throttle password-guessing; after, if your limits are per-user. Ferrum takes the security side. The <strong>observable proof</strong> the order is real: an unauthenticated flood against a route with <em>both</em> <code>auth=</code> and <code>rate=</code> returns <strong>429, not 401</strong> — the flood is refused before a single credential comparison runs. Per-user limits would require the opposite order and a header-keyed bucket; both are documented extensions, not built here.</p>
+  <div class="callout story"><strong>The ordering proof, verified end-to-end (2026-08-09).</strong> An unauthenticated flood against <code>/admin</code> (configured with <code>auth=basic</code> + <code>rate=5/s</code>) returned <code>401 401 401 401 401 429 429 429 429 429</code>. The first five requests each hit auth and get a challenge (draining the bucket by one token each), then the sixth onward is short-circuited by rate-limit <em>before auth runs at all</em>. Five 401s, then 429s. That sequence is only possible if rate-limit sits outside auth.</div>
+
+  <h4>The reverse-order asymmetry</h4>
+  <p>When middleware <em>k</em> rejects, <code>on_response</code> runs for middlewares <em>k&minus;1 … 0</em> only — the layers actually entered on the way in. Middleware <em>k</em> produced the response, so it does not post-process its own output; layers after <em>k</em> never ran at all. Concretely: a 401 from <code>Auth</code> (#3) still gets stamped with <code>X-Request-Id</code> (#1) and still gets logged (#0), while <code>Authz</code> (#4) is never consulted.</p>
+  <p>This is why <code>run_request</code> returns the rejecting <em>index</em>: the caller in <code>proxy.rs</code> passes it to <code>run_response(&amp;ctx, &amp;mut resp, entered)</code>, which iterates <code>self.mws[..up_to].iter().rev()</code> — exactly the entered layers, in reverse. The naive implementation (run <code>on_response</code> for every middleware unconditionally) looks identical until a middleware's <code>on_response</code> depends on its own <code>on_request</code> having run, which is why this gets a dedicated test.</p>
+  <figure>
+<pre class="mermaid">
+flowchart TD
+  I0["#0 log — on_request"] --> I1["#1 request-id — on_request"]
+  I1 --> I2["#2 ratelimit — on_request"]
+  I2 --> I3["#3 auth — on_request → REJECT 401"]
+  I3 -.->|Authz #4 never runs| X["#4 authz — SKIPPED"]
+  I3 --> O3["#3 auth — no on_response (it made the response)"]
+  O3 --> O1["#1 request-id — on_response: stamp X-Request-Id"]
+  O1 --> O0["#0 log — on_response: emit access line, status=401"]
+  style I3 fill:#d98a8a,color:#15203a,stroke:#0b1626
+  style X fill:#264064,color:#e6edf7,stroke:#0b1626
+  style O1 fill:#41a7f5,color:#15203a,stroke:#0b1626
+  style O0 fill:#41a7f5,color:#15203a,stroke:#0b1626
+</pre>
+<figcaption>A 401 from auth (#3). The unwind runs <code>on_response</code> for #1 and #0 only. Auth doesn't re-screen its own output; authz (#4) was never entered. Four correct choices in one picture.</figcaption>
+  </figure>
+</section>
+
+<section id="five">
+  <h2>The Five Middleware</h2>
+  <p class="lead">Four of the five live in two files: <code>observe.rs</code> (request-id, access-log) and <code>auth.rs</code> (auth, authz). The fifth, the rate limiter, gets its own section.</p>
+
+  <article class="concept">
+    <span class="tag beg">observe.rs</span>
+    <h3>Request ID</h3>
+    <p><strong>What it does:</strong> generates a per-request identifier, injects it as <code>X-Request-Id</code> on the request leg (so the backend logs the same ID we do), and echoes it onto the response in <code>on_response</code> so a client can quote it in a bug report.</p>
+    <p><strong>Honor valid inbound, replace hostile.</strong> An inbound <code>X-Request-Id</code> is honored — that is how a trace stitches across proxy hops — but only after validation: at most 64 characters, and only alphanumerics, <code>-</code>, and <code>_</code>. It is a client-controlled string that lands in log lines, so an unvalidated value is a <strong>log-injection vector</strong> (a CR/LF in a header value forges a whole log entry). An invalid inbound value is <em>replaced</em>, not rejected — the request is fine, its label isn't.</p>
+    <p><strong>Not a UUID, and honest about it.</strong> Generation is a startup-seeded <code>AtomicU64</code> counter rendered as <code>{seed:x}-{n}</code> — the seed is the wall-clock nanos at process boot so two proxy processes don't collide in a shared log. It is explicitly <em>not</em> a UUID: globally-unique IDs need randomness or coordination, and a monotonic counter is honest about being per-process and costs exactly one atomic increment.</p>
+    <div class="callout warn"><strong>The log-injection guard is tested directly.</strong> An inbound ID of <code>"evil\r\nSet-Cookie: x"</code> is <em>replaced</em>, not echoed. Without <code>valid_request_id</code>, that CR/LF would let an attacker inject a forged line — or a forged header — into the log or the response.</div>
+  </article>
+
+  <article class="concept">
+    <span class="tag beg">observe.rs</span>
+    <h3>Access Log</h3>
+    <p><strong>What it does:</strong> emits one line per completed request from <code>on_response</code>. Because <code>log</code> is the outermost layer (#0), its <code>on_response</code> runs <em>last</em>, so it sees the final status and the full duration including every inner layer.</p>
+    <p>The Level 6 line was a single <code>key=value</code> record:</p>
+    <pre class="art">id=1a2b-17 peer=127.0.0.1:54321 method=GET target=/api/users status=200 dur=3.1ms upstream=api backend=127.0.0.1:9002 user=admin</pre>
+    <p>A rejection is logged the same way, with <code>rejected_by</code> filled in (<code>status=429 rejected_by=ratelimit</code>) — a refused request is as visible as a served one. <code>proxy.rs</code> writes <code>upstream</code> and <code>backend</code> into <code>ctx</code> after the pool pick, so the log needs nothing from the request head. The old per-request <code>-&gt; {status}</code> <code>println</code> became redundant and was removed; the balancer's pick line stayed, because it fires once per <em>attempt</em> and carries retry attribution the access log does not.</p>
+    <div class="callout"><strong>As of now, in the live code:</strong> Level 10 later upgraded this line to one JSON object per line (with a <code>--log-plain</code> flag preserving the old prose form) and added <code>json_escape</code> so an attacker-controlled target can't forge JSON fields. That is a later level's work — Level 6 deliberately shipped the single <code>key=value</code> line and left structured export to Level 10.</div>
+  </article>
+
+  <article class="concept">
+    <span class="tag tech">auth.rs</span>
+    <h3>Authentication — Basic &amp; Bearer</h3>
+    <p><strong>What it does:</strong> checks the <code>Authorization</code> header against a per-route set of accepted credentials. Two schemes, both compared in <strong>constant time</strong>:</p>
+    <ul>
+      <li><strong>Basic</strong> — decode the base64 payload of <code>Authorization: Basic ...</code>, split on the <em>first</em> colon (so a password may contain colons), and match <code>user:pass</code> against the set.</li>
+      <li><strong>Bearer</strong> — match the token in <code>Authorization: Bearer ...</code>. On success <code>ctx.identity</code> gets the credential's configured label, not the raw token.</li>
+    </ul>
+    <p><strong>Hand-rolled base64.</strong> Rather than add a dependency, <code>auth.rs</code> ships a ~40-line <code>base64_decode</code> that is deliberately <em>strict</em>: input length must be a multiple of 4, padding (<code>=</code>) is legal only in the final chunk and only trailing, and any byte outside the alphabet returns <code>None</code>. Leniency in a decoder that guards auth is exactly how bypasses happen — <code>"AA==AAAA"</code> is rejected, not silently decoded.</p>
+    <p><strong>Constant-time compare — <code>ct_eq</code>.</strong> A plain <code>==</code> on byte slices short-circuits at the first differing byte, so response timing leaks the length and the matching prefix of the secret, one byte at a time. <code>ct_eq</code> bails on a length mismatch (length is not secret — credentials differ in length by design) but within equal lengths ORs every byte difference together, so the running time does not depend on <em>where</em> the mismatch is. It is cheap to do right and embarrassing to do wrong.</p>
+    <div class="callout warn"><strong>The <code>&amp;</code> that must not be <code>&amp;&amp;</code>.</strong> Basic auth compares user and password with <code>ct_eq(u, user) &amp; ct_eq(p, pass)</code> — bitwise <code>&amp;</code>, not logical <code>&amp;&amp;</code>. Logical <code>&amp;&amp;</code> would short-circuit: if the username didn't match, the password comparison would be skipped, reintroducing a timing signal on the password. Both comparisons always run.</div>
+    <p><strong>One 401 for every failure.</strong> Missing header, malformed base64, no colon in the payload, wrong scheme, unknown user, wrong password — <em>all</em> return the identical 401 with the identical body and a <code>WWW-Authenticate: Basic realm="..."</code> challenge. Distinguishing "no such user" from "wrong password" would be a username oracle. RFC 9110 requires the challenge header, which is precisely why <code>Rejection</code> carries headers.</p>
+  </article>
+
+  <article class="concept">
+    <span class="tag tech">auth.rs</span>
+    <h3>Authorization — require-user</h3>
+    <p><strong>What it does:</strong> reads <code>ctx.identity</code> (set by Auth) and checks it against the route's <code>require-user</code> allowlist. Failure returns <strong>403, not 401</strong>.</p>
+    <p>The 401-vs-403 distinction is the entire reason authz is a separate middleware. <strong>401</strong> means "I don't know who you are, try again with credentials." <strong>403</strong> means "I know exactly who you are, and you may not do this." Returning 401 here would prompt the client to retry credentials that were <em>already accepted</em> — an infinite loop by design.</p>
+    <p>A route with <code>require-user</code> and no <code>auth=</code> is rejected at startup (nothing could ever populate <code>ctx.identity</code>), so reaching authz with <code>identity == None</code> is unreachable in a valid config. The code still handles it defensively with a 403 and a comment explaining why the branch exists — refusing is safe, and a 401 would loop a client that sent no credentials.</p>
+    <div class="callout story"><strong>Three statuses, one per stage, verified live.</strong> On a route with two valid creds but <code>require-user=admin</code>: <code>intern</code> authenticates but gets <strong>403</strong>; <code>admin</code> gets <strong>200</strong>; no creds gets <strong>401</strong>. Three distinct statuses prove the three stages are genuinely independent.</div>
+  </article>
+
+  <h3>Config surface — the option partition</h3>
+  <p>Level 6 options extend Level 5's <code>;option</code> grammar on a route spec. There is a real parsing hazard here: Level 5's <code>RewriteRules::from_options</code> <em>hard-errors</em> on any key it doesn't recognize, so Level 6 keys passed through it would fail startup. The fix is an <strong>option partition</strong> in <code>router.rs::resolve_route</code>: it splits the severed <code>;options</code> by key into the Level 5 set (<code>rewrite::L5_KEYS</code>) and the Level 6 set (<code>middleware::L6_KEYS</code>), hands each half to its own parser, and is itself the <em>single arbiter</em> of "unknown option". Neither sub-parser has to know the other's keys, and a typo still fails startup with exactly one clear message.</p>
+  <table>
+    <thead><tr><th>Option</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>auth=basic:USER:PASS</code></td><td>Accept this Basic credential. Splits on the first two colons only, so the password may contain <code>:</code> (but not <code>;</code>). Repeatable.</td></tr>
+      <tr><td><code>auth=bearer:TOKEN</code></td><td>Accept this bearer token. Repeatable.</td></tr>
+      <tr><td><code>realm=NAME</code></td><td>Realm in the <code>WWW-Authenticate</code> challenge (default <code>ferrum</code>).</td></tr>
+      <tr><td><code>require-user=USER</code></td><td>Authorization allowlist. Repeatable.</td></tr>
+      <tr><td><code>rate=N/s</code> or <code>rate=N/m</code></td><td>Token-bucket sustained rate.</td></tr>
+      <tr><td><code>burst=N</code></td><td>Bucket capacity (default: one second of <code>rate</code>, min 1).</td></tr>
+    </tbody>
+  </table>
+  <p>Global flags <code>--no-request-id</code> and <code>--no-access-log</code> turn off the two default-on layers — applied even to the catch-all default routes, so the flags are never silent no-ops (the bug class <code>--no-forwarded</code> had to avoid in Level 5). <strong>Default posture:</strong> request-id and access-log are ON for every route; auth, authz, and rate-limit are OFF unless configured. A proxy that starts refusing traffic because you upgraded it is a bad proxy.</p>
+  <h4>Startup guardrails — all exit 1 before binding</h4>
+  <p>These are the Level 6 sibling of Level 5's protected-header guardrail: an incoherent config fails at boot, not at 3am.</p>
+  <ul>
+    <li><code>require-user</code> with no <code>auth=</code> — nothing could ever set <code>ctx.identity</code>, so the route would 403 every request forever.</li>
+    <li><code>rate=0/s</code> — would reject everything; "unlimited" is expressed by omitting the option, so a literal 0 is almost certainly a typo.</li>
+    <li><code>burst=</code> without <code>rate=</code> — a limiter with no refill drains once and rejects forever.</li>
+    <li><code>auth=</code> with an unknown scheme, or a <code>basic:</code> value with no <code>user:pass</code> colon.</li>
+  </ul>
+</section>
+
+<section id="ratelimit">
+  <h2>The Rate Limiter</h2>
+  <p class="lead">One algorithm (token bucket), one concurrency shape (16 sharded synchronous mutexes), one refill strategy (lazy), one key (the socket IP). Each choice is deliberate.</p>
+
+  <h3>Algorithm: token bucket</h3>
+  <p>A bucket holds up to <code>burst</code> tokens and refills at <code>rate</code> tokens/second; each request spends one token or gets a 429. This allows short bursts while capping the sustained rate — unlike a <strong>fixed window</strong>, which permits <code>2N</code> requests back-to-back across a window boundary (N at the end of one window, N at the start of the next). That classic fixed-window flaw is exactly what the token bucket avoids.</p>
+  <div class="formula">tokens = min(burst, tokens + elapsed_secs &times; rate)&nbsp;&nbsp;// on each access, then spend 1</div>
+
+  <h3>State: sharded, synchronous</h3>
+  <pre><code>pub struct Limiter {
+    rate: f64,   // tokens per second
+    burst: f64,  // bucket capacity
+    shards: Vec&lt;Mutex&lt;HashMap&lt;IpAddr, Bucket&gt;&gt;&gt;,  // std::sync::Mutex, N = 16
+}
+struct Bucket { tokens: f64, last_refill: Instant }</code></pre>
+  <p><strong>Sharded locking (pattern name).</strong> The bucket store is split into 16 shards, chosen by <code>hash(ip) % 16</code>. Concurrent clients usually hash to different shards and touch different locks. A single global map would serialize every request in the proxy on one mutex — the exact bottleneck the KB warns about — for the sake of ~10 lines of savings. Sharding buys near-linear concurrency for a tiny code cost.</p>
+  <p><strong><code>std::sync::Mutex</code>, not <code>tokio::sync::Mutex</code> — and this is correct, not lazy.</strong> The critical section is a few floating-point operations with <em>no <code>.await</code> anywhere inside it</em>. An async mutex would buy a scheduler interaction for nothing. This is the KB's "never hold a lock across <code>.await</code>" rule seen from the constructive side: the reason we <em>can</em> use the cheap synchronous lock is that the whole check is synchronous — which is itself a consequence of the synchronous trait design. The pieces interlock.</p>
+
+  <h3>Lazy refill — no timer, no sweeper</h3>
+  <p>On access, tokens are recomputed from elapsed time: <code>tokens = min(burst, tokens + elapsed &times; rate)</code>. There is no background refill task and no sweeper. A bucket nobody touches costs nothing and needs no upkeep. Critically, <code>allow(ip, now)</code> takes <code>now: Instant</code> as an <strong>explicit parameter</strong> rather than calling <code>Instant::now()</code> internally — which is what makes refill behavior testable by advancing a synthetic clock instead of sleeping in tests.</p>
+
+  <h3>Bounded memory — fail open</h3>
+  <p>An attacker cycling source IPs would otherwise grow the map without limit. Each shard has an entry cap (<code>SHARD_CAP = 4096</code>). On insert into a full shard, the limiter evicts entries that are both <em>full</em> (<code>tokens &gt;= burst</code>) and <em>idle</em> past a TTL (<code>IDLE_EVICT_SECS = 60</code>) — a full bucket carries no rate-limiting information, so dropping it is free. If nothing is evictable, the request is <strong>allowed</strong> rather than rejected: failing open on an internal capacity limit is correct, because the alternative is that memory pressure becomes a client-visible outage.</p>
+
+  <h3>Key: the socket IP, never X-Forwarded-For</h3>
+  <p>The limiter keys on <code>ctx.peer.ip()</code> — the address observed on the socket — <strong>never</strong> <code>X-Forwarded-For</code>. This is the one identity in the request that cannot be forged: we watched it on the socket. Level 5 established the same stance for <code>X-Real-IP</code> (overwrite, never trust); this is that principle applied to policy.</p>
+  <div class="callout danger"><strong>The two-part exploit if you keyed on XFF.</strong> (1) An attacker sends a <em>random</em> <code>X-Forwarded-For</code> per request, so every request lands in a fresh bucket — <strong>unlimited throughput</strong>, the limiter defeated entirely. (2) An attacker sends a <em>chosen</em> victim's IP in <code>X-Forwarded-For</code>, exhausting <em>that</em> IP's bucket — <strong>poisoning</strong> a real client into being rate-limited. Keying on the unforgeable socket IP kills both.</div>
+  <div class="callout warn"><strong>Documented limitation.</strong> When Ferrum runs behind another proxy, every request arrives from that proxy's IP, so all clients share one bucket. The fix is a trusted-proxy allowlist that derives the client from XFF <em>only</em> when the peer is trusted — deferred to Level 13 by the Level 5 spec.</div>
+  <p><strong>Retry-After.</strong> A 429 carries <code>Retry-After</code> computed from the token deficit: <code>ceil((1 - tokens) / rate)</code> seconds, minimum 1 (so a client never gets <code>Retry-After: 0</code>).</p>
+  <figure>
+<pre class="mermaid">
+flowchart TD
+  A["allow(ip, now)"] --> B["shard = hash(ip) % 16<br/>lock that shard"]
+  B --> C{"new key AND<br/>shard at cap?"}
+  C -->|yes| D["evict full+idle buckets"]
+  D --> E{"still at cap?"}
+  E -->|yes| F["FAIL OPEN — allow"]
+  E -->|no| G["get/create bucket"]
+  C -->|no| G
+  G --> H["refill: tokens = min(burst,<br/>tokens + elapsed × rate)"]
+  H --> I{"tokens &ge; 1?"}
+  I -->|yes| J["spend 1 → ALLOW"]
+  I -->|no| K["429 + Retry-After<br/>= ceil((1-tokens)/rate), min 1"]
+  style F fill:#d6a96a,color:#15203a,stroke:#0b1626
+  style J fill:#41a7f5,color:#15203a,stroke:#0b1626
+  style K fill:#d98a8a,color:#15203a,stroke:#0b1626
+</pre>
+<figcaption>One <code>allow()</code> call. Sharded lock, capacity eviction (fail open if stuck), lazy refill, spend-or-reject.</figcaption>
+  </figure>
+</section>
+
+<section id="rejection">
+  <h2>The Rejection Drain</h2>
+  <p class="lead">Short-circuiting a request is not just "write a response" — there is a real connection-safety trap, and closing it is the subtle half of the level.</p>
+  <p>Consider a 429 on a <code>POST</code> carrying a 10&nbsp;MB body. We reject <em>before</em> reading that body. If we then write the 429 and keep the connection alive, those 10&nbsp;MB are still queued in the socket, and the next <code>read_head()</code> parses request-<em>body</em> bytes as a request line. That is connection desync — the same class of bug Level 1 spent two commits closing.</p>
+  <p>So on the rejection path, <code>serve_one</code> calls <code>client.drain_body(req_framing, REJECT_DRAIN_CAP)</code> with <code>REJECT_DRAIN_CAP = 64 * 1024</code>. The framing cases are decidable up front, which keeps the drain simple — a request can only use <code>None</code>, <code>Length(n)</code>, or <code>Chunked</code> framing (never until-close; <code>http.rs</code> enforces this):</p>
+  <table>
+    <thead><tr><th>Framing</th><th>Drain behavior</th><th>Keep-alive?</th></tr></thead>
+    <tbody>
+      <tr><td><code>None</code></td><td>Nothing to drain.</td><td>Always keep alive.</td></tr>
+      <tr><td><code>Length(n)</code>, n &le; 64 KB</td><td>Read and discard exactly n bytes into a sink.</td><td>Keep alive — decision known before reading a byte.</td></tr>
+      <tr><td><code>Length(n)</code>, n &gt; 64 KB</td><td>Leave unread; don't read megabytes we'll discard.</td><td>Close (<code>Connection: close</code>).</td></tr>
+      <tr><td><code>Chunked</code></td><td>Drain up to the cap; length unknown up front.</td><td>Keep alive if under cap, else close.</td></tr>
+    </tbody>
+  </table>
+
+  <h4>Why keep-alive matters — the 401 case</h4>
+  <p>Keep-alive within the cap matters specifically for <strong>401</strong>: that status is a <em>challenge</em>, and the client is expected to immediately retry with credentials on the <em>same</em> connection. Closing on every 401 would force a fresh TCP handshake for every authenticated request.</p>
+
+  <h4>Why close still needs a drain — the TCP RST</h4>
+  <p>The drain is not only about keep-alive. Even on the <em>close</em> path, unread bytes sitting in the receive buffer when we <code>close()</code> cause the kernel to send a TCP <strong>RST</strong> rather than a clean FIN — and an RST can discard data already in flight, <em>including the 429/401 we just wrote</em>. The client then sees a connection reset instead of the status explaining why it was refused. That is the real reason nginx drains before closing (it calls this <em>lingering close</em>), and it is why the drain runs in <em>both</em> branches: bounded drain, then either keep-alive or a deliberate close.</p>
+  <div class="callout warn"><strong>The distinction the quiz asks for.</strong> Keep-alive needs the drain so the <em>next</em> request parses correctly (avoiding desync). The <em>close</em> path needs the drain because of the <strong>TCP RST</strong> — a close with unread bytes in the receive buffer triggers a reset that can destroy the response already in flight. Two different mechanisms, both requiring the same drain.</div>
+  <p>To carry the extra headers a rejection needs (<code>WWW-Authenticate</code>, <code>Retry-After</code>, <code>X-Request-Id</code>), the response is built from the <code>Rejection</code>'s status/reason/headers, run through the reverse unwind (<code>run_response(&amp;ctx, &amp;mut resp, entered)</code>), and sent via <code>send_rejection</code> with a reusable flag that is <code>reusable &amp;&amp; client_keep_alive</code>.</p>
+</section>
+
+<section id="code-map">
+  <h2>Code Map</h2>
+  <p class="lead">A new module <em>directory</em>, not a single file — <code>rewrite.rs</code> was already 1022 lines and <code>balancer.rs</code> 1516, and five middleware plus a sharded limiter in one file would have been the biggest file in the crate on arrival.</p>
+  <table>
+    <thead><tr><th>File / function</th><th>Responsibility</th></tr></thead>
+    <tbody>
+      <tr><td><code>middleware/mod.rs</code></td><td>The <code>Middleware</code> trait, <code>Decision</code>, <code>Rejection</code>, <code>ReqCtx</code>, and <code>Chain</code>; the L6 config parser and startup validation.</td></tr>
+      <tr><td><code>Middleware</code> (trait)</td><td><code>name</code>, <code>on_request</code>, and a default-no-op <code>on_response</code>. <code>Send + Sync</code>, <code>&amp;self</code>.</td></tr>
+      <tr><td><code>Chain::run_request</code></td><td>Runs <code>on_request</code> forward; on reject returns <code>(index, Rejection)</code> so the caller unwinds exactly the entered layers.</td></tr>
+      <tr><td><code>Chain::run_response</code> / <code>run_response_all</code></td><td>Reverse <code>on_response</code> for <code>[0, up_to)</code> (reject path) or every layer (success path).</td></tr>
+      <tr><td><code>MiddlewareConfig::from_options</code> / <code>build</code></td><td>Parse the L6 option subset (+ two global bools); assemble the chain in fixed order, skipping disabled layers.</td></tr>
+      <tr><td><code>L6_KEYS</code></td><td>Static list of the option keys Level 6 owns; used by the router's partition.</td></tr>
+      <tr><td><code>parse_credential</code> / <code>parse_rate</code></td><td>Parse <code>basic:u:p</code> / <code>bearer:tok</code> (first-two-colon split) and <code>N/s</code> / <code>N/m</code> (rejects rate &le; 0).</td></tr>
+      <tr><td><code>middleware/observe.rs</code></td><td><code>RequestId</code> (generate / validate inbound / echo) and <code>AccessLog</code> (one line from <code>on_response</code>).</td></tr>
+      <tr><td><code>valid_request_id</code></td><td>&le;64 chars, alnum/<code>-</code>/<code>_</code> only — the log-injection guard.</td></tr>
+      <tr><td><code>middleware/auth.rs</code></td><td><code>Auth</code> (Basic + Bearer, 401 + challenge), <code>Authz</code> (require-user, 403), plus the primitives below.</td></tr>
+      <tr><td><code>base64_decode</code></td><td>Strict hand-rolled base64 (no dependency); rejects non-canonical padding and bad alphabet.</td></tr>
+      <tr><td><code>ct_eq</code></td><td>Constant-time byte-slice compare; ORs all byte diffs so timing doesn't leak the mismatch position.</td></tr>
+      <tr><td><code>middleware/ratelimit.rs</code></td><td><code>Limiter</code> (16 sharded <code>Mutex&lt;HashMap&gt;</code>, lazy refill, eviction, fail-open) and <code>RateLimit</code> (keys on <code>peer.ip()</code>).</td></tr>
+      <tr><td><code>Limiter::allow(ip, now)</code></td><td>Spend one token or return <code>Retry-After</code> seconds; <code>now</code> is a parameter for testability.</td></tr>
+      <tr><td><code>proxy.rs::serve_one</code></td><td>Runs the chain at the documented positions; on reject calls <code>drain_body</code>, builds + unwinds the response, <code>send_rejection</code>.</td></tr>
+      <tr><td><code>proxy.rs::Conn::drain_body</code></td><td>Bounded body drain (64 KB) per framing; returns whether the connection is reusable.</td></tr>
+      <tr><td><code>router.rs::resolve_route</code> / <code>partition_options</code></td><td>Partitions <code>;options</code> into L5/L6 (and L11) sets; the single arbiter of "unknown option".</td></tr>
+    </tbody>
+  </table>
+  <div class="callout"><strong>Verified against the source.</strong> Every constant above is real: <code>SHARDS = 16</code>, <code>SHARD_CAP = 4096</code>, <code>IDLE_EVICT_SECS = 60.0</code>, <code>REJECT_DRAIN_CAP = 64 * 1024</code>, <code>BUF_SIZE = 16 * 1024</code>, request-id cap 64 chars. The realm default is <code>ferrum</code>.</div>
+</section>
+
+<section id="industry">
+  <h2>How the Giants Do It</h2>
+  <p class="lead">Every production proxy has a middleware/filter model. The interesting differences are in <em>where</em> policy runs, whether the pipeline is async, and how it is composed.</p>
+  <div class="grid2">
+    <div class="card">
+      <span class="tag tech">nginx</span>
+      <h4>Phased request processing</h4>
+      <p>nginx runs each request through fixed <em>phases</em> (post-read, rewrite, access, content, log) with modules registering handlers per phase. Auth and rate-limiting (<code>limit_req</code>) live in the <code>access</code> phase, which runs <strong>per-<code>location</code></strong> — the same per-route placement Ferrum's chain uses. <code>limit_req</code> is a leaky-bucket variant with a configurable <code>burst</code>; its zones are shared memory keyed by a variable you choose (typically <code>$binary_remote_addr</code>). Event-loop, C, no per-request heap onion.</p>
+    </div>
+    <div class="card">
+      <span class="tag tech">Apache httpd</span>
+      <h4>Hooks &amp; the module chain</h4>
+      <p>httpd exposes an ordered set of <em>hooks</em> (post_read_request, translate_name, check_access, check_authn, check_authz, log_transaction) that modules attach to — <code>mod_auth_basic</code>, <code>mod_authz_*</code>, <code>mod_ratelimit</code>. The authn/authz split mirrors Ferrum's Auth-vs-Authz 401/403 distinction exactly, because httpd formalized it first. Classically process/thread-per-request (prefork/worker MPMs), so its "middleware" is synchronous C callbacks, not an async onion.</p>
+    </div>
+    <div class="card">
+      <span class="tag tech">HAProxy</span>
+      <h4>Rules engine, not a code pipeline</h4>
+      <p>HAProxy's "middleware" is its config-driven rules: <code>http-request</code> / <code>http-response</code> directives with ACLs, plus <code>stick-tables</code> for rate-limiting (track a key like <code>src</code>, test a rate against a threshold, <code>deny</code> with a status). It is a highly-tuned C event loop; policy is expressed declaratively rather than as pluggable code objects. Its stick-table rate-limiting is the closest industrial analogue to our token bucket, and it too defaults to keying on the source connection IP.</p>
+    </div>
+    <div class="card">
+      <span class="tag tech">Envoy</span>
+      <h4>The HTTP filter chain</h4>
+      <p>Envoy is the one that <em>is</em> the async onion at scale: an ordered chain of HTTP filters (each with decode/encode headers+data+trailers callbacks) that map almost one-to-one onto Ferrum's two-phase <code>on_request</code>/<code>on_response</code> — decode is the forward pass, encode the reverse. Envoy's filters can pause and resume asynchronously (the thing our sync trait gives up), and its rate-limiting can call an external gRPC service. Filters are configured via xDS; ext_authz is a dedicated authz filter.</p>
+    </div>
+  </div>
+  <table>
+    <thead><tr><th>Concern</th><th>Ferrum (teaching)</th><th>Production proxies</th></tr></thead>
+    <tbody>
+      <tr><td>Pipeline model</td><td><code>Vec&lt;Box&lt;dyn Middleware&gt;&gt;</code>, dynamic dispatch, sync two-phase</td><td>nginx phases (C), httpd hooks (C), HAProxy rules (declarative), Envoy async filter chain (C++)</td></tr>
+      <tr><td>Where it runs</td><td>Per-route, after routing, before the lease</td><td>nginx per-<code>location</code>, httpd per-request hooks, Envoy per-route filter config — all effectively per-route</td></tr>
+      <tr><td>Async middleware</td><td>None — deliberately given up to keep the body streaming</td><td>Envoy filters pause/resume; nginx/httpd use event/thread models, not an owned-response onion</td></tr>
+      <tr><td>Rate-limit key</td><td>Socket peer IP only; XFF deferred to L13</td><td>Configurable (nginx <code>$binary_remote_addr</code>, HAProxy <code>src</code>, Envoy descriptors); trusted-proxy XFF handling is a real feature there</td></tr>
+      <tr><td>Composition</td><td>Runtime <code>Vec</code>, not static generics (Tower's <code>ServiceBuilder</code>)</td><td>Tower/Envoy support richer static+dynamic composition; ours is the simplest thing that works</td></tr>
+    </tbody>
+  </table>
+  <div class="callout"><strong>Honest positioning.</strong> Ferrum's chain is a teaching build. It is a runtime <code>Vec</code> of trait objects, not Tower's zero-cost static composition; it has five middleware, not a plugin ecosystem; the limiter is a single token bucket keyed on one identity, where HAProxy stick-tables and Envoy descriptors offer multi-dimensional keys and distributed limits. What it gets <em>right</em> — and shares with the giants — is the per-route placement, the authn/authz status split, the source-IP rate-limit key, and the drain-before-close discipline. As of the current codebase these comparisons reflect the well-known architectures of each proxy; specific defaults may drift across versions.</div>
+</section>
+
+<section id="quiz">
+  <h2>Quiz</h2>
+  <p class="lead">The Level 6 questions, copied verbatim from <code>PROGRESS.md</code>. Vessey answers these before Level 7.</p>
+  <div class="qa"><p class="q">1. The trait is synchronous with a reverse <code>on_response</code> pass, not the textbook async <code>handle(req, next) -&gt; Response</code>. What does the async version cost in <em>this</em> proxy specifically, and which Level 1 guarantee would it break?</p></div>
+  <div class="qa"><p class="q">2. The chain runs AFTER routing, contradicting the knowledge base's lifecycle diagram. Why is that forced here, and what config feature makes it necessary?</p></div>
+  <div class="qa"><p class="q">3. Rate-limit sits before auth. Give the concrete attack this ordering defeats, and the use case that would justify the opposite order.</p></div>
+  <div class="qa"><p class="q">4. Why key the limiter on the socket IP and never on <code>X-Forwarded-For</code>? Describe the two-part exploit if you keyed on XFF.</p></div>
+  <div class="qa"><p class="q">5. A rejected request never takes a balancer lease. Why does that matter for the circuit breaker during a 429 flood?</p></div>
+  <div class="qa"><p class="q">6. Auth returns 401, authz returns 403. What goes wrong if authz returned 401 instead?</p></div>
+  <div class="qa"><p class="q">7. A rejected request with a body must be drained before the connection is reused <em>or</em> closed. Name the TCP mechanism that makes the "or closed" half necessary, not just the keep-alive half.</p></div>
+  <div class="qa"><p class="q">8. <code>require-user</code> with no <code>auth=</code> fails at startup. What would that route do on every request if it were allowed to start?</p></div>
+  <div class="qa"><p class="q">9. The rate limiter uses <code>std::sync::Mutex</code>, not <code>tokio::sync::Mutex</code>. What property of the critical section makes that correct, and what would the async mutex cost?</p></div>
+  <div class="qa"><p class="q">10. When middleware #3 rejects, <code>on_response</code> runs for #1 and #0 but not #3 or #4. Explain why each of those four choices is correct.</p></div>
+</section>
+
+<section id="cheatsheet">
+  <h2>Cheat Sheet &amp; Glossary</h2>
+  <h3>Numbers, constants &amp; defaults</h3>
+  <table>
+    <thead><tr><th>Constant / default</th><th>Value</th><th>Where / why</th></tr></thead>
+    <tbody>
+      <tr><td>Chain order (fixed, in code)</td><td>log &rarr; request-id &rarr; ratelimit &rarr; auth &rarr; authz</td><td><code>MiddlewareConfig::build</code></td></tr>
+      <tr><td>Default-on layers</td><td>log, request-id</td><td>Neither can reject; off via <code>--no-access-log</code> / <code>--no-request-id</code></td></tr>
+      <tr><td>Default-off layers</td><td>ratelimit, auth, authz</td><td>Only when configured</td></tr>
+      <tr><td>Rate-limit shards</td><td><code>SHARDS = 16</code></td><td><code>hash(ip) % 16</code>, sharded locking</td></tr>
+      <tr><td>Per-shard entry cap</td><td><code>SHARD_CAP = 4096</code></td><td>Bounded memory; evict then fail open</td></tr>
+      <tr><td>Idle-evict TTL</td><td><code>IDLE_EVICT_SECS = 60.0</code></td><td>Only full+idle buckets are evictable</td></tr>
+      <tr><td>Rejection drain cap</td><td><code>REJECT_DRAIN_CAP = 64 * 1024</code></td><td>Drain &le; 64 KB, else close</td></tr>
+      <tr><td>Body stream window</td><td><code>BUF_SIZE = 16 * 1024</code></td><td>Why the trait can't own a Response</td></tr>
+      <tr><td>Request-id length cap</td><td>64 chars, alnum/<code>-</code>/<code>_</code></td><td><code>valid_request_id</code>, log-injection guard</td></tr>
+      <tr><td>Realm default</td><td><code>ferrum</code></td><td><code>WWW-Authenticate: Basic realm="ferrum"</code></td></tr>
+      <tr><td>Default burst</td><td>one second of rate, min 1</td><td><code>rate.ceil().max(1.0)</code></td></tr>
+      <tr><td><code>Retry-After</code></td><td><code>ceil((1 - tokens) / rate)</code>, min 1</td><td>On every 429</td></tr>
+      <tr><td>Rejection statuses</td><td>429 (ratelimit), 401 (auth), 403 (authz)</td><td>401 carries a challenge; 429 carries Retry-After</td></tr>
+    </tbody>
+  </table>
+  <h3>Option grammar</h3>
+  <pre class="art">auth=basic:USER:PASS   auth=bearer:TOKEN   realm=NAME
+require-user=USER       rate=N/s | N/m       burst=N
+--no-request-id         --no-access-log
+
+Example:
+rproxy 127.0.0.1:8080 \
+  '/admin/**=127.0.0.1:9001;auth=basic:admin:s3cret;require-user=admin;rate=5/s' \
+  '/api/**=127.0.0.1:9002;strip=/api;rate=100/s;burst=200' \
+  '/health=127.0.0.1:9002' \
+  '/=127.0.0.1:9000'</pre>
+  <h3>Glossary</h3>
+  <table>
+    <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td>Trait object</td><td><code>Box&lt;dyn Middleware&gt;</code> — a fat pointer (data + vtable) enabling dynamic dispatch over a heterogeneous list.</td></tr>
+      <tr><td>Two-phase middleware</td><td>Synchronous <code>on_request</code> (forward) + <code>on_response</code> (reverse); the onion without owning the body.</td></tr>
+      <tr><td>Onion model</td><td>Each layer wraps the next; you pass through layers inbound and unwind them outbound.</td></tr>
+      <tr><td>Reverse-unwind asymmetry</td><td>On reject at layer k, <code>on_response</code> runs only for entered layers k&minus;1…0 — not k, not the layers after it.</td></tr>
+      <tr><td>Token bucket</td><td>Rate-limit algorithm: a bucket of up to <code>burst</code> tokens refilling at <code>rate</code>/s; each request spends one.</td></tr>
+      <tr><td>Sharded locking</td><td>Splitting one lock into N (here 16) chosen by hash, so concurrent access usually hits different locks.</td></tr>
+      <tr><td>Lazy refill</td><td>Recompute tokens from elapsed time on access — no background timer or sweeper.</td></tr>
+      <tr><td>Fail open</td><td>On an internal capacity limit, allow rather than reject — memory pressure must not become an outage.</td></tr>
+      <tr><td>Constant-time compare</td><td><code>ct_eq</code> — ORs every byte difference so timing doesn't leak the secret's matching prefix; no early exit on first mismatch.</td></tr>
+      <tr><td>Lingering close</td><td>nginx's term for draining unread request bytes before closing, so <code>close()</code> sends FIN not RST.</td></tr>
+      <tr><td>Connection desync</td><td>Undrained body bytes get parsed as the next request line — the Level 1 smuggling class.</td></tr>
+      <tr><td>Option partition</td><td>Router-level split of <code>;options</code> into L5/L6 (L11) sets; the single arbiter of "unknown option".</td></tr>
+    </tbody>
+  </table>
+</section>
+</main>
+</div>
+
+<footer>
+  <p>Ferrum KB &mdash; Level 6: Middleware &bull; Built 2026-09-02</p>
+  <p class="muted">A teaching reverse proxy in Rust. Grounded in <code>rproxy/src/middleware/</code>, the Level 6 design spec, and PROGRESS.md; industry comparisons reflect well-known nginx / Apache httpd / HAProxy / Envoy architectures and may drift across versions.</p>
+</footer>
+</body>
+</html>

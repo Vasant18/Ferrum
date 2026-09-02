@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ferrum KB — Level 10: Observability</title>
+<meta name="description" content="A complete, plain-English map of the Barracuda Networks product portfolio: every product family (Email, Application, Network, Data Protection, Managed XDR, MSP) and the BarracudaONE platform — what each product is, what it does, and what problem it solves." />
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    flowchart: { htmlLabels: true, useMaxWidth: true, padding: 12, nodeSpacing: 55, rankSpacing: 55 },
+    startOnLoad: true, theme: 'base', securityLevel: 'loose',
+    themeVariables: {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '15px',
+      primaryColor: '#e7e8ea', primaryTextColor: '#15203a', primaryBorderColor: '#7e848c',
+      lineColor: '#6a6f77', secondaryColor: '#dddfe2', tertiaryColor: '#f3f4f6',
+      noteBkgColor: '#fff3d6', noteTextColor: '#3a2f12', noteBorderColor: '#caa84a',
+      actorBkg: '#e7e8ea', actorTextColor: '#15203a', actorBorder: '#7e848c',
+      clusterBkg: '#eef0f2', clusterBorder: '#a0a4aa'
+    }
+  });
+</script>
+<style>
+  :root{--bg:#0f1320;--panel:#161c2e;--panel-2:#1d2540;--ink:#e8ecf5;--muted:#9aa6c4;--accent:#7c5cff;--accent-2:#22d3a6;--warn:#ffb454;--danger:#ff6b81;--line:#2a3354;--code-bg:#0b0f1a;--max:1100px;}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:linear-gradient(180deg,#0c1020,#0f1320 40%);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  a{color:var(--accent-2);text-decoration:none}a:hover{text-decoration:underline}
+  header.hero{padding:56px 24px 40px;text-align:center;background:radial-gradient(1200px 400px at 50% -10%,rgba(255,107,129,.18),transparent 60%);border-bottom:1px solid var(--line);}
+  header.hero .eyebrow{letter-spacing:.25em;text-transform:uppercase;color:var(--accent-2);font-size:.75rem;font-weight:700}
+  header.hero h1{font-size:clamp(1.9rem,4vw,3rem);margin:.3em 0 .2em;line-height:1.1}
+  header.hero p.sub{color:var(--muted);max-width:790px;margin:0 auto;font-size:1.05rem}
+  .badges{margin-top:18px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .badge{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);padding:4px 12px;border-radius:999px;font-size:.8rem}
+  .layout{display:grid;grid-template-columns:260px 1fr;gap:32px;align-items:start;max-width:1320px;margin:0 auto;padding:0 22px}
+  nav.toc{position:sticky;top:0;max-height:100vh;overflow:auto;padding:28px 10px 60px;border-right:1px solid var(--line);font-size:.9rem;}
+  nav.toc h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.18em;color:var(--muted);margin:18px 8px 6px}
+  nav.toc a{display:block;color:var(--muted);padding:5px 10px;border-radius:8px;border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--panel);color:var(--ink);text-decoration:none;border-left-color:var(--accent)}
+  main{padding:34px 0 80px;min-width:0}
+  section{margin:0 0 46px;scroll-margin-top:18px}
+  section>h2{font-size:1.7rem;margin:0 0 .5em;padding-bottom:.3em;border-bottom:2px solid var(--line);display:flex;align-items:center;gap:.5em;}
+  h3{font-size:1.25rem;margin:1.6em 0 .4em;color:#fff}
+  h4{font-size:1.02rem;margin:1.2em 0 .3em;color:var(--accent-2);text-transform:uppercase;letter-spacing:.04em}
+  p,li{color:var(--ink)}.muted{color:var(--muted)}
+  article.concept{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin:22px 0}
+  article.concept>h3:first-child{margin-top:0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr} .layout{grid-template-columns:1fr} nav.toc{position:static;max-height:none;border-right:none;border-bottom:1px solid var(--line)}}
+  .card{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card h4{margin-top:.2em}
+  .callout{border-left:4px solid var(--accent);background:var(--panel-2);padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  .callout.analogy{border-left-color:var(--accent-2)}.callout.warn{border-left-color:var(--warn)}.callout.danger{border-left-color:var(--danger)}.callout.story{border-left-color:#5ec2ff}
+  .tag{display:inline-block;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:2px 8px;border-radius:6px;margin-bottom:6px}
+  .tag.beg{background:rgba(34,211,166,.15);color:var(--accent-2)}.tag.tech{background:rgba(124,92,255,.18);color:#b9a6ff}.tag.adv{background:rgba(255,107,129,.15);color:var(--danger)}
+  code{background:var(--code-bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.86em;color:#ffd9a0}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.85rem;line-height:1.55}
+  pre code{background:none;border:none;padding:0;color:#d7e0f5}
+  pre.art{color:#ffd9a0;font-size:.95rem;line-height:1.4;letter-spacing:.04em}
+  pre.mermaid{background:#f7f8fc;color:#111;text-align:center}
+  .mermaid svg text,.mermaid text{fill:#15203a !important}
+  .mermaid .nodeLabel,.mermaid .edgeLabel,.mermaid .label,.mermaid span,.mermaid p,.mermaid div,.mermaid foreignObject *{color:#15203a !important;fill:#15203a !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p{background:#f3f5fc !important}
+  .mermaid .cluster-label .nodeLabel,.mermaid .cluster-label p,.mermaid .cluster span,.mermaid .cluster p{color:#3c4046 !important}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.92rem;overflow:hidden;border-radius:10px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel-2);color:#fff}
+  tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  details{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:12px 0}
+  details summary{cursor:pointer;font-weight:600;color:var(--accent-2);padding:6px 0}
+  details[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px}
+  figure{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  figcaption{color:var(--muted);font-size:.85rem;text-align:center;margin-top:8px;font-style:italic}
+  .qa{margin:10px 0}.qa .q{font-weight:600}.qa .a{color:var(--muted);margin:2px 0 0}
+  ol.flow{counter-reset:step;list-style:none;padding-left:0}
+  ol.flow>li{counter-increment:step;position:relative;padding:10px 0 10px 52px;border-bottom:1px dashed var(--line)}
+  ol.flow>li::before{content:counter(step);position:absolute;left:0;top:8px;width:34px;height:34px;background:var(--accent);color:#fff;border-radius:50%;display:grid;place-items:center;font-weight:700}
+  .rank{font-weight:800;color:var(--accent);margin-right:6px}
+  footer{border-top:1px solid var(--line);padding:30px 22px;text-align:center;color:var(--muted);font-size:.88rem}
+  .lead{font-size:1.08rem}
+  .formula{background:var(--code-bg);border:1px dashed var(--accent);border-radius:10px;padding:12px 16px;font-family:monospace;color:#ffd9a0;text-align:center;margin:14px 0}
+
+  /* KB-THEME START */
+  /* Azure (blue palette) */
+  :root{--bg:#0e1c30;--panel:#152740;--panel-2:#1d3458;--ink:#e6edf7;--muted:#93a6c4;--accent:#1a8ae5;--accent-2:#41a7f5;--warn:#d6a96a;--danger:#d98a8a;--line:#264064;--code-bg:#0b1626;}
+  body{background:linear-gradient(180deg,var(--bg),var(--bg))}
+  header.hero{background:radial-gradient(1100px 400px at 50% -10%,rgba(20,119,210,.26),transparent 60%)}
+  h3,.parthead{color:var(--ink)}
+  th{color:var(--ink)}
+  .tag.tech{background:rgba(65,167,245,.16);color:var(--accent-2)}
+  ol.flow>li::before{color:#0b1626}
+  /* KB-THEME END */
+  /* prevent node/edge label clipping */
+  .mermaid foreignObject{overflow:visible !important}
+  .mermaid .nodeLabel,.mermaid .label,.mermaid foreignObject>div,.mermaid foreignObject span,.mermaid foreignObject p{white-space:nowrap !important;overflow:visible !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p,.mermaid .edgeLabel span{white-space:nowrap !important;overflow:visible !important;padding:1px 4px}
+  .mermaid svg{max-width:100%;height:auto}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyebrow">Ferrum KB &middot; Level 10 of 14 &middot; Observability</div>
+  <h1>Observability<br/><span style="font-size:.6em;color:var(--muted)">the 3 a.m. question, answered in 30 seconds</span></h1>
+  <p class="sub">"The site is slow" must resolve to <em>which backend, which route, which percentile</em> before you finish your coffee. Level 10 gives Ferrum the three pillars — a JSON access log, a from-scratch metrics registry, and per-stage timings — built with zero new dependencies, because the internals (the Prometheus text format, why histograms are pre-allocated buckets, why counters must be lock-free atomics) <em>are</em> the lesson.</p>
+  <div class="badges">
+    <span class="badge">Audience: Vessey (built it) + the curious</span>
+    <span class="badge">Scope: logs + metrics + traces, from scratch</span>
+    <span class="badge">New files: metrics.rs, logging.rs, admin.rs</span>
+    <span class="badge">Reading time: ~24 min</span>
+  </div>
+  <p class="muted" style="margin-top:18px">
+    <a href="index.html">&larr; Course index</a> &nbsp;&middot;&nbsp;
+    <a href="Level-09-OS-Internals.html">&larr; Level 9: OS Internals</a> &nbsp;&middot;&nbsp;
+    <a href="Level-11-Caching.html">Level 11: Caching &rarr;</a>
+  </p>
+</header>
+
+<div class="layout">
+<nav class="toc">
+  <h2>Orientation</h2>
+  <a href="#exec-summary">Executive Summary</a>
+  <a href="#big-picture">The Big Picture</a>
+  <h2>Core</h2>
+  <a href="#metrics">Metrics: atomics &amp; fixed buckets</a>
+  <a href="#cardinality">The Cardinality Bomb</a>
+  <a href="#histogram">Histograms: bucket at record, sum at scrape</a>
+  <a href="#logging">Leveled Logging: check before you format</a>
+  <a href="#access-log">JSON Access Log &amp; Stage Timings</a>
+  <a href="#admin">The Admin Plane: a different socket</a>
+  <a href="#code-map">Code Map</a>
+  <h2>Compare</h2>
+  <a href="#industry">How Industry Does It</a>
+  <h2>Reference</h2>
+  <a href="#quiz">Quiz</a>
+  <a href="#cheatsheet">Cheat Sheet &amp; Glossary</a>
+</nav>
+
+<main>
+  <section id="exec-summary">
+    <h2>Executive Summary</h2>
+    <p class="lead">Level 10 makes Ferrum <strong>observable</strong>: it can now tell you not just what happened to one request, but what is happening to <em>all</em> of them, right now, versus an hour ago — the difference between an event stream and an aggregate.</p>
+    <p>Three pillars, proxy edition. <strong>Logs</strong> — one structured JSON line per request on stdout (<code>observe.rs</code>), plus a leveled human-readable error log on stderr (<code>logging.rs</code>); two streams because they have two audiences and must be redirectable independently. <strong>Metrics</strong> — a hand-rolled registry (<code>metrics.rs</code>) of <code>AtomicU64</code> counters, <code>AtomicI64</code> gauges, and fixed-bucket histograms, exposed in Prometheus text format. <strong>Traces</strong> — per-stage timings (route, connect, TTFB) stamped into <code>ReqCtx</code> and carried by the request ID Level 6 already propagates. Ferrum is a single hop, so W3C <code>traceparent</code> propagation was deliberately left out: the stage deltas answer the 3 a.m. question without a second instrumented service to trace into.</p>
+    <p>The design's first decision was <strong>zero new dependencies</strong>. The <code>metrics</code> and <code>tracing</code> crates would turn every lesson of this level into invisible config, and unlike Level 8's crypto nothing here is dangerous to hand-roll — a wrong histogram bucket is a wrong number on a graph, not a security hole. The registry follows the Level 7 hot-path rule applied to our own instrumentation: <strong>no mutex, no allocation at record time</strong>. Counters are labeled by status <em>class</em> (<code>code="2xx"</code>) and pre-resolved <code>UpstreamId</code>, never by path — a path label is an attacker-controlled cardinality bomb. Histograms store each observation in exactly one of nine buckets and defer the cumulative <code>le</code> arithmetic to scrape time, because scrapes are rare and requests are not. The duration clock starts <em>after</em> <code>read_head</code> returns so keep-alive idle time never pollutes the metric, and <code>requests_total</code> is recorded on every exit path. <code>/metrics</code> and <code>/health</code> live on a separate admin listener that is off by default — <code>/metrics</code> leaks reconnaissance gold, so exposing it must be a deliberate act. 230 unit tests (214 from Level 8 kept green, +16) and a full live verification back it.</p>
+  </section>
+
+  <section id="big-picture">
+    <h2>The Big Picture</h2>
+    <p class="lead">Observability is not a stage in the pipeline — it is a <em>cross-cutting</em> concern that taps every stage. Timings are stamped along the request path; the access log fires at the very end; metrics are recorded at every exit; and a wholly separate socket serves the aggregates.</p>
+    <p>The clock for a request starts <strong>after</strong> the head is read (so a keep-alive client's think-time is excluded) and stamps land at route-matched, backend-in-hand, and response-head-parsed. When the exchange completes — after the last body byte flushes — <code>serve_one</code> records the counter and histogram, and the outermost middleware writes the JSON line. Meanwhile a second Tokio task owns the admin listener, reading the same shared <code>Arc&lt;Metrics&gt;</code> to render <code>/metrics</code> on demand.</p>
+    <figure>
+<pre class="mermaid">
+flowchart TD
+  C["Client request"] --> RH["read_head (keep-alive idle lives HERE, excluded)"]
+  RH --> CLK["⏱ clock starts: t_start"]
+  CLK --> PARSE["Parse head (L1)"]
+  PARSE --> ROUTE["Route match (L2)"]
+  ROUTE --> TR["⏱ stamp t_route"]
+  TR --> MW["Middleware chain (L6): auth, rate-limit, id"]
+  MW --> LEASE["Balancer lease + connect / pool hit (L3/L4)"]
+  LEASE --> TC["⏱ stamp t_connect (0.0 on a pool hit)"]
+  TC --> BR["Read backend response head"]
+  BR --> TF["⏱ stamp t_first_byte (TTFB)"]
+  TF --> BODY["Stream body to client"]
+  BODY --> FLUSH["client.flush()"]
+  FLUSH --> REC["record_request(id, status, dur) → counter + histogram"]
+  REC --> LOG["AccessLog.on_response → one JSON line to stdout"]
+  ADMIN["Admin task (separate socket)"] -.->|"reads Arc&lt;Metrics&gt;"| MET["/metrics + /health"]
+  REC -.->|"same Arc&lt;Metrics&gt;"| MET
+</pre>
+    <figcaption>Observability taps the whole path. Solid arrows are one request's journey with timing stamps; the clock deliberately excludes keep-alive idle. Dotted arrows show the admin task reading the shared registry out-of-band — a scrape never touches the request path.</figcaption>
+    </figure>
+    <div class="callout analogy"><strong>Analogy:</strong> the access log is a security camera — one frame per person who walks through the door, timestamped, forever queryable ("who came in at 3:04?"). Metrics are the turnstile counter on the wall — it can't tell you <em>who</em>, but it tells you "we're at 900/min, up from 200 an hour ago" without replaying the tape. You need both: you can't reconstruct a percentile from footage fast enough at 3 a.m., and you can't identify a suspect from a turnstile.</div>
+    <div class="callout"><strong>Why "the three pillars".</strong> Logs, metrics, and traces are the industry's standard decomposition of observability. Logs are discrete events (high detail, expensive to keep). Metrics are numeric aggregates over time (cheap, low detail). Traces follow one request across its stages (or across services). Ferrum implements all three, but scoped to a single hop — the trace is per-stage timing on one machine, not a distributed span tree.</div>
+  </section>
+
+  <section id="metrics">
+    <h2>Metrics: atomics &amp; fixed buckets</h2>
+    <span class="tag tech">metrics.rs</span>
+    <p class="lead">Instrumentation runs on <em>every</em> request, on the hot path, concurrently on all worker threads. So the same discipline as the Level 7 connection pool: <strong>no mutex, no allocation at record time</strong>. Every instrument is an atomic, and every label set is resolved to a pre-built slot at startup.</p>
+
+    <p>The registry is a single <code>Metrics</code> struct built once in <code>main</code> and shared as <code>Arc&lt;Metrics&gt;</code> — the exact same lifetime and sharing story as <code>Arc&lt;RouteTable&gt;</code>. Like the route table, it is <em>read-shaped</em> after startup: the structure never mutates, only the atomic values inside it move.</p>
+
+    <h3>Three instrument types, and why there is no fourth</h3>
+    <div class="grid3">
+      <div class="card">
+        <span class="tag tech">Counter</span>
+        <h4>AtomicU64, only goes up</h4>
+        <p><strong>What it is:</strong> a monotonically increasing count. <code>requests_total</code> is the canonical one. Resets to zero on restart, which Prometheus detects by seeing the value drop.</p>
+        <p><strong>Why:</strong> rates are <em>derived</em> at query time (<code>rate(requests_total[5m])</code>), never recorded — baking a window size into the recorded value would fix it forever.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Gauge</span>
+        <h4>AtomicI64, moves both ways</h4>
+        <p><strong>What it is:</strong> a value that can rise and fall. <code>active_connections</code> is ours. The only instrument allowed to decrease.</p>
+        <p><strong>Why:</strong> some quantities are levels, not totals — how many connections are open <em>right now</em>, not how many were ever opened.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Histogram</span>
+        <h4>9 atomics, pre-declared buckets</h4>
+        <p><strong>What it is:</strong> counts of observations falling into fixed latency buckets. Percentiles are computed at query time from bucket counts.</p>
+        <p><strong>Why:</strong> the alternative — storing raw samples — costs memory <em>per request</em>; buckets cost a fixed 9 atomics per series total. That trade is the whole reason Prometheus histograms look the way they do.</p>
+      </div>
+    </div>
+
+    <h3>What we count</h3>
+    <table>
+      <thead><tr><th>Series</th><th>Type</th><th>Labels</th><th>Recorded where</th></tr></thead>
+      <tbody>
+        <tr><td><code>ferrum_requests_total</code></td><td>counter</td><td><code>upstream</code>, <code>code</code> (class 1xx–5xx)</td><td>every completed exchange in <code>serve_one</code></td></tr>
+        <tr><td><code>ferrum_connect_errors_total</code></td><td>counter</td><td><code>upstream</code></td><td>backend connect failure</td></tr>
+        <tr><td><code>ferrum_rejected_total</code></td><td>counter</td><td><code>by</code> (rejecting middleware)</td><td>middleware rejection</td></tr>
+        <tr><td><code>ferrum_active_connections</code></td><td>gauge</td><td>—</td><td><code>ConnGauge</code> RAII (inc on accept, dec on Drop)</td></tr>
+        <tr><td><code>ferrum_request_duration_seconds</code></td><td>histogram</td><td><code>upstream</code> (+ an <code>all</code> series)</td><td>every completed exchange</td></tr>
+      </tbody>
+    </table>
+
+    <h3 id="relaxed">Relaxed ordering, and why an increment is never lost</h3>
+    <p>Every increment uses <code>Ordering::Relaxed</code>. That decision is worth defending, because the instinct under concurrency is to reach for <code>SeqCst</code>. Relaxed is correct here for two separate reasons:</p>
+    <ul>
+      <li><strong>No lost increments.</strong> <code>fetch_add</code> is a read-modify-write atomic. The hardware guarantees the read, the add, and the write happen as one indivisible operation — two threads bumping the same counter cannot interleave and clobber each other, regardless of memory ordering. Ordering governs how <em>other</em> memory operations are seen relative to this one; it does not govern the atomicity of the RMW itself. This is <em>the</em> load-bearing claim for every counter in the file, so it is tested the same way Level 6 tested the sharded rate limiter: 8 threads × 10,000 increments, assert the total is exactly 80,000.</li>
+      <li><strong>Nothing to order.</strong> A metric increment has no happens-before relationship to protect. Nobody's read of one counter is supposed to establish anything about another. The stronger orderings buy synchronization guarantees that would only cost cache-line traffic for a benefit no reader here wants.</li>
+    </ul>
+    <div class="callout warn"><strong>What Relaxed does NOT give you, and why that's fine.</strong> A scrape can observe counter A's increment from a request before counter B's increment from the <em>same</em> request — the two writes are not ordered relative to each other. Prometheus tolerates that skew by design: every scrape is already a torn snapshot of a moving system. You are never promised that two counters are consistent at an instant; you are promised each one is individually correct. For metrics, that is exactly enough.</div>
+
+    <h3>Pre-resolved <code>UpstreamId</code>: the string compare happens once</h3>
+    <p>A naive registry would take an upstream <em>name</em> at every record call and look it up. Ferrum instead resolves the name to an index once per request, right after routing picks the upstream, and records through that index from then on:</p>
+    <pre><code>// A resolved upstream label: an index, not a string.
+#[derive(Clone, Copy)]
+pub struct UpstreamId(Option&lt;usize&gt;);
+
+// Called ONCE per request in serve_one, after routing.
+pub fn upstream_id(&amp;self, name: &amp;str) -&gt; UpstreamId {
+    UpstreamId(self.upstreams.iter().position(|s| s.name == name))
+}</code></pre>
+    <p>The lookup is a linear scan, not a <code>HashMap</code>, on purpose: a deployment has a handful of upstreams, so a hash buys nothing but a hash computation per lookup, and the lookup already happens only once. <code>None</code> is the <code>upstream="-"</code> slot for requests that never routed (431/413/400 pre-route, 404s, rejections). Kept separate from the upstream <code>Vec</code> so a config with an upstream literally named <code>"-"</code> can't collide — the type doesn't depend on the router's manners.</p>
+    <div class="callout analogy"><strong>Analogy:</strong> <code>UpstreamId</code> is a coat-check ticket. You hand over your name once at the door (the string compare), get a numbered stub, and every later interaction quotes the number. The cloakroom never re-reads your name; it just goes to slot 4.</div>
+  </section>
+
+  <section id="cardinality">
+    <h2>The Cardinality Bomb</h2>
+    <span class="tag adv">the load-bearing rule</span>
+    <p class="lead">The single most important rule in the metrics file: <strong>labels come from our config, never from the request.</strong> Break it and you have handed an attacker a memory-exhaustion primitive dressed up as a dashboard.</p>
+
+    <p>Every distinct label combination is its own <em>series</em> — its own atomics in our registry, its own time series in Prometheus, its own row in the collector's index. Labels multiply. This is why <code>requests_total</code> is labeled by status <strong>class</strong> (<code>code="2xx"</code>, five possible values) times upstream (declared on the CLI, few) — bounded and useful. The cardinality is 5 per upstream, honest to Prometheus practice.</p>
+
+    <h4>What goes wrong if you label by path</h4>
+    <p>Suppose you labeled by raw path instead. The path is <em>attacker-controlled</em>. A trivial loop —</p>
+    <pre><code>while true; do curl http://ferrum/$(uuidgen); done</code></pre>
+    <p>— makes every request a brand-new label value, so every request allocates a brand-new series that <strong>never goes away</strong>. Mechanically:</p>
+    <ul>
+      <li><strong>In our memory:</strong> the registry would have to allocate a new set of atomics per unique path, so a `Vec`/map growing without bound — a slow-motion OOM that the attacker controls the rate of.</li>
+      <li><strong>In Prometheus:</strong> the collector ingests every series and keeps it in its head index and on disk. Cardinality explosion is the number-one way people take down their own Prometheus; a proxy that feeds it unbounded path labels is a loaded gun pointed at the monitoring system.</li>
+    </ul>
+    <div class="callout danger"><strong>Danger:</strong> raw status <em>code</em> (dozens of values) is already a mild version of this; raw <em>path</em> (unbounded) is the full bomb. The fix is not "sanitize the path" — it is a category rule: <strong>a label's value set must be fixed at config time.</strong> Status class has 5 values. Upstream names are declared. Rejector names are a compile-time array. Nothing in a label ever comes from bytes the client sent. Paths belong in the <em>log</em>, where each is one line that ages out, not one series that lives forever.</div>
+
+    <p>The same reasoning fixes the rejector labels. <code>rejected_total{by="..."}</code> uses a static five-element array — <code>["ratelimit", "auth", "authz", "request-id", "other"]</code> — and a future middleware whose author forgets to extend the list lands in <code>other</code> rather than inventing a new series. Visible in the metrics, not silently dropped, and still bounded.</p>
+  </section>
+
+  <section id="histogram">
+    <h2>Histograms: bucket at record, cumulate at scrape</h2>
+    <span class="tag tech">metrics.rs · Histogram</span>
+    <p class="lead">A histogram here is 9 <code>AtomicU64</code>s per series. Each observation increments <strong>exactly one</strong> of them. The cumulative buckets Prometheus requires are computed later, at scrape time — because scrapes happen every ~15 s and observations happen thousands of times a second, so you do the O(buckets) work on the rare path.</p>
+
+    <h3>The buckets are the schema</h3>
+    <div class="formula">BUCKET_BOUNDS = [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0] seconds &nbsp;(+ implicit +Inf)</div>
+    <p>Eight finite upper bounds plus an implicit <code>+Inf</code>, chosen to bracket what a local reverse proxy actually sees: sub-millisecond pool hits up through multi-second backend hangs. Level 7's backend response timeout is 10 s, so anything past 5 s lands in <code>+Inf</code> and is de facto "timed out or nearly." The bounds are a <code>const</code> array fixed at compile time — they are part of the <em>schema</em>, and changing them mid-flight would make cumulative counts incomparable across scrapes.</p>
+
+    <h3>Record: one bucket, a linear scan</h3>
+    <pre><code>pub fn observe(&amp;self, d: Duration) {
+    let secs = d.as_secs_f64();
+    match BUCKET_BOUNDS.iter().position(|&amp;b| secs &lt;= b) {
+        Some(i) =&gt; self.buckets[i].fetch_add(1, Ordering::Relaxed),
+        None    =&gt; self.inf.fetch_add(1, Ordering::Relaxed),
+    };
+    self.sum_micros.fetch_add(d.as_micros() as u64, Ordering::Relaxed);
+    self.count.fetch_add(1, Ordering::Relaxed);
+}</code></pre>
+    <p>A linear scan over 8 comparisons and 3 atomic adds. A binary search over 8 elements would be <em>slower</em> than the scan it replaces (branch misprediction and setup cost dwarf 8 compares). Note <code>secs &lt;= b</code>: the buckets use the <code>le</code> ("less than or equal") convention, so a value <em>exactly</em> on a boundary lands in that bucket. There is a test for it (a 1 ms observation lands in the <code>0.001</code> bucket, a 1001 µs observation in the next).</p>
+
+    <div class="callout"><strong>Why <code>sum</code> is integer micros.</strong> The running sum is stored as an <code>AtomicU64</code> of microseconds, not a float of seconds, because <em>there is no atomic f64 add</em> on the platforms Ferrum targets — you would need a compare-and-swap loop. Integer micros sidestep that entirely, and a proxy that needs sub-microsecond precision in its <em>metrics</em> has mistaken itself for a benchmark. At scrape time the micros are divided by 1e6 back into the seconds the format wants.</div>
+
+    <h3>Scrape: the cumulative walk</h3>
+    <p>Prometheus histogram buckets are <em>cumulative</em>: the <code>le="0.05"</code> bucket must report everything ≤ 0.05, i.e. the sum of all lower buckets too. But storing them cumulatively would mean every observation increments <em>several</em> atomics (all buckets ≥ the one it fell in) — turning a 1-atomic write into an N-atomic write on the hot path. So storage is non-cumulative (one bucket per observation) and the cumulation happens in <code>snapshot()</code>, called only by the renderer:</p>
+    <pre><code>fn snapshot(&amp;self) -&gt; ([u64; 9], f64, u64) {
+    let mut cumulative = [0u64; 9];
+    let mut running = 0u64;
+    for (i, b) in self.buckets.iter().enumerate() {
+        running += b.load(Ordering::Relaxed);   // add THIS bucket's count
+        cumulative[i] = running;                // record the running total
+    }
+    cumulative[8] = running + self.inf.load(Ordering::Relaxed);
+    // ... sum / 1e6, count
+}</code></pre>
+    <p>The rendered <code>le="+Inf"</code> line equals <code>_count</code> by construction — both come from the same bucket walk — which is exactly the invariant Prometheus requires. Never-touched series are elided from <code>render()</code> rather than emitted as rows of zeros: a scrape full of zeros for 5 classes × N upstreams is noise, and Prometheus treats an absent series and a zero series identically for <code>rate()</code>.</p>
+
+    <div class="callout warn"><strong>Watch out — why an average lies.</strong> Suppose 99 requests take 1 ms and one takes 4 seconds. The <em>average</em> is ~40 ms, a number that describes not a single real request. The histogram tells the truth: 99 observations in the <code>0.001</code> bucket, one in <code>+Inf</code> (past the <code>5.0</code> bound). A p99 latency query reads that immediately — "your slow tail is multi-second," the thing the average smeared into a comfortable-looking middle. Percentiles need the distribution; a counter and a sum can only give you the mean.</div>
+  </section>
+
+  <section id="logging">
+    <h2>Leveled Logging: check before you format</h2>
+    <span class="tag tech">logging.rs</span>
+    <p class="lead">Two output streams, two audiences. The JSON access log (stdout) is for machines; the error log (stderr) is for humans mid-incident. They must be redirectable independently — <code>2&gt;errors.log</code> — which is the entire reason the split exists.</p>
+
+    <p>Before this level, Ferrum's request path printed unconditionally: every request cost several <code>println!</code>s of routing, rewrite, and pick diagnostics. Those lines were priceless while <em>building</em> Levels 2–8 and are pure noise in operation — the classic reason log levels exist. They are now <code>debug!</code>, silent by default, and one <code>--log-level debug</code> brings them all back.</p>
+
+    <h3>The macro checks the level BEFORE evaluating its arguments</h3>
+    <p>This is the whole performance story of a log level, and it is easy to get wrong. A suppressed <code>debug!</code> must cost <em>one atomic load and a compare</em> — not a <code>format!</code> allocation that is immediately thrown away. The macro achieves this by gating on <code>enabled()</code> before touching <code>format_args!</code>:</p>
+    <pre><code>macro_rules! debug {
+    ($($arg:tt)*) =&gt; {
+        if $crate::logging::enabled($crate::logging::Level::Debug) {
+            $crate::logging::emit(
+                $crate::logging::Level::Debug,
+                format_args!($($arg)*),   // only evaluated if enabled() passed
+            );
+        }
+    };
+}</code></pre>
+    <p>Because the <code>format_args!</code> expansion sits <em>inside</em> the <code>if</code>, the compiler never evaluates the arguments when the level is off. Move the check inside <code>emit</code> instead and it is too late: the caller has already formatted its arguments to pass them in. The gate must be textual, at the call site — which is exactly why it is a macro and not a function. <code>enabled()</code> itself is one relaxed atomic load:</p>
+    <pre><code>pub fn enabled(l: Level) -&gt; bool {
+    (l as u8) &lt;= LEVEL.load(Ordering::Relaxed)
+}</code></pre>
+    <p>The level lives in a global <code>AtomicU8</code>, set once in <code>main</code> before any traffic. A global — not a threaded <code>&amp;Logger</code> — because a log call's entire value is that it can appear <em>anywhere</em>: inside a <code>Drop</code> impl, in the balancer's breaker transitions, three layers deep in a parser. Threading a logger through every one of those signatures would tax every function in the program for the benefit of none. <code>Relaxed</code> is safe because the level is write-once-at-boot; no reader orders anything against it. This "do the work only on the rare path" principle is the same one the histogram uses for cumulation.</p>
+
+    <h3>Hand-rolled RFC 3339 timestamps</h3>
+    <p>Both logs stamp wall-clock time as RFC 3339 UTC with millisecond precision (<code>2026-08-25T09:14:02.417Z</code>). Rather than pull in <code>chrono</code>, Ferrum hand-rolls the calendar math — about 15 lines — using Howard Hinnant's <code>civil_from_days</code>, the same days-to-civil-date algorithm inside every date library:</p>
+    <pre><code>fn civil_from_days(z: i64) -&gt; (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);                 // day of 400-year era
+    let yoe = (doe - doe/1460 + doe/36_524 - doe/146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365*yoe + yoe/4 - yoe/100);
+    let mp = (5*doy + 2) / 153;                       // shifted-era month ramp
+    let d = (doy - (153*mp + 2)/5 + 1) as u32;
+    let m = if mp &lt; 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m &lt;= 2 { y + 1 } else { y }, m, d)
+}</code></pre>
+    <p>The trick is the "shifted era": move the year's start to March so the leap day lands at the <em>end</em> of the counting year, which makes the month-length pattern a clean linear ramp <code>(153m + 2) / 5</code> instead of a lookup table with a February special case. It is UTC-only — no timezone table, no DST — which is precisely why logs are written in UTC in the first place. Verified against Python at four fixed points including the epoch, a leap-year day (2024-02-29), and a century non-leap boundary (2100-03-01) that only the era arithmetic gets right.</p>
+  </section>
+
+  <section id="access-log">
+    <h2>JSON Access Log &amp; Stage Timings</h2>
+    <span class="tag tech">observe.rs · proxy.rs</span>
+    <p class="lead">One JSON object per line, emitted by the same outermost-middleware <code>on_response</code> that used to write a <code>key=value</code> line. The format change buys machine queryability — and opens a new attack surface that a hand-rolled escaper closes.</p>
+
+    <h3>The line</h3>
+    <pre><code>{"ts":"2026-08-24T10:15:42.123Z","id":"a1b2-42","peer":"127.0.0.1:55123",
+ "method":"GET","target":"/api/users","status":200,"dur_ms":12.4,
+ "route_ms":0.0,"connect_ms":1.2,"ttfb_ms":10.8,"upstream":"api",
+ "backend":"127.0.0.1:9001","user":"-","pooled":true,"cache":"HIT",
+ "waf_score":null,"rejected_by":null}</code></pre>
+    <p><strong>What structure buys you:</strong> <code>jq 'select(.status&gt;=500)'</code> replaces regex archaeology; <code>select(.status==401)</code>, group-by-upstream, percentile-of-<code>dur_ms</code> — all trivial. The prose version made every one of those a fragile field-position hack. <code>--log-plain</code> keeps the old human-readable line for eyeball debugging.</p>
+
+    <h3>Log injection, upgraded: now it forges FIELDS</h3>
+    <p>The request target is attacker-controlled, and Level 6 already taught that an unescaped CR/LF forges a whole log <em>line</em>. The format change raises the stakes: in a JSON log an unescaped <code>"</code> doesn't just forge a line — it breaks out of the string and forges <em>fields</em>. Picture a target of:</p>
+    <pre><code>/x","status":200,"forged":"y</code></pre>
+    <p>A naive logger that string-interpolates that into <code>"target":"..."</code> produces a JSON object with an attacker-chosen <code>status:200</code> and a <code>forged</code> field — poisoning every downstream query that trusts the log. Worse, a raw control byte makes the whole line <em>unparseable</em>, which silently drops it from every <code>jq</code> query — an attacker's favorite outcome, because the evidence of the attack disappears. The RFC 8259 escaper runs on every dynamic value (keys are static, so only values pass through it):</p>
+    <pre><code>pub fn json_escape(s: &amp;str) -&gt; String {
+    // " → \"   \ → \\   \n \r \t → escapes   c &lt; 0x20 → \u00XX
+    // UTF-8 passes through untouched (JSON strings are Unicode).
+}</code></pre>
+    <p>The hostile target above escapes to <code>/x\",\"status\":200,\"forged\":\"y</code> — one harmless string value, fields intact. There is a direct test for exactly this field-forging payload.</p>
+
+    <h3>Stage timings: route / connect / TTFB, and null-vs-0.0</h3>
+    <p>Deltas from the exchange clock tell you <em>where</em> slowness lives. <code>proxy.rs</code> stamps <code>Instant</code>s into <code>ReqCtx</code> at the points it already logs: <code>t_route</code> (parse + route cost), <code>t_connect</code> (backend dialed or pool hit), <code>t_first_byte</code> (backend response head in hand — the honest, observable TTFB from where we sit, since the read returns whole heads not bytes). The access log renders each as milliseconds via <code>opt_ms</code>:</p>
+    <pre><code>fn opt_ms(d: Option&lt;Duration&gt;) -&gt; String {
+    match d {
+        Some(d) =&gt; format!("{:.1}", d.as_secs_f64() * 1000.0),
+        None    =&gt; "null".to_string(),   // never reached this stage
+    }
+}</code></pre>
+    <div class="callout warn"><strong>Watch out — <code>null</code> is not <code>0.0</code>, and neither is <code>-1</code>.</strong> A request rejected by auth never routes, so its <code>ttfb_ms</code> is <code>null</code> — "this stage did not happen." But <code>0.0</code> is a <em>legitimate</em> measurement: a pooled connection really can connect in ~0 ms. Collapsing "didn't happen" into <code>0</code> would tell your dashboard that auth-rejected requests have a blazing-fast backend connect. And a sentinel like <code>-1</code> is worse — it is a <em>number</em>, so it silently poisons any average, sum, or percentile that forgot to filter it. <code>null</code> is the only value that aggregations correctly ignore. This is the load-bearing distinction, not pedantry.</div>
+
+    <h3>The clock starts after <code>read_head</code> — keep-alive idle must not pollute</h3>
+    <p>The exchange clock (<code>t_start</code>) is stamped <em>after</em> <code>read_head</code> returns, not at the top of <code>serve_one</code>:</p>
+    <pre><code>// read_head above spends most of its life idle on a keep-alive
+// connection, waiting for the client to DECIDE to send another request.
+let t_start = std::time::Instant::now();
+let mut req = http::parse_request_head(&amp;head_bytes)?;</code></pre>
+    <p>On a keep-alive connection, <code>read_head</code> blocks waiting for the client to decide to send its next request — that think-time can be seconds and is not Ferrum's latency. Folding it into <code>dur_ms</code> would make every keep-alive connection look pathologically slow and mask real regressions. The gap the placement deliberately excludes (the time for one head's bytes to trickle in once the client <em>has</em> started sending) is bounded by <code>HEAD_READ_TIMEOUT</code> and belongs to the client. Durations are monotonic (<code>Instant</code>); <code>ts</code> is wall-clock (<code>SystemTime</code>). Never mix the two clocks' jobs — wall time for cross-system correlation, monotonic for arithmetic.</p>
+
+    <h3>The recording discipline: count every exit</h3>
+    <p><code>record_request</code> is called at <strong>every</strong> exit path, so <code>requests_total</code> means "the client got an answer": 431/413/400 pre-route (as <code>upstream="-"</code>), 404, middleware rejections, 502/504 connect failures, and the one success-path record placed <em>after</em> <code>client.flush()</code> — the last body byte on the wire.</p>
+    <div class="callout"><strong>Why after the flush?</strong> A duration that stopped at the response head would hide the transfer time of a slow client or a huge body — the request would look fast while the client waited seconds for bytes. Recording after the final flush captures the honest end-to-end latency. And rejections are <em>double-counted</em> deliberately — into both <code>requests_total</code> and <code>rejected_total{by=...}</code> — because "how many 429s did clients see?" and "which layer is rejecting?" are two different questions; folding them into one series would answer neither cleanly. Requests that die mid-exchange via <code>?</code> (a broken socket) are NOT in <code>requests_total</code> — that series means "the client got an answer," and the error log plus the breaker carry the deaths.</div>
+  </section>
+
+  <section id="admin">
+    <h2>The Admin Plane: a different socket</h2>
+    <span class="tag tech">admin.rs</span>
+    <p class="lead"><code>/metrics</code> and <code>/health</code> live on their own listener (<code>--admin ADDR</code>, no default; the docs recommend <code>127.0.0.1:9100</code>). Enabling it is an explicit operator choice — because <code>/metrics</code> is reconnaissance gold.</p>
+
+    <h3>Three reasons it's a separate socket, not reserved paths on :8080</h3>
+    <ol class="flow">
+      <li><strong>It leaks recon.</strong> <code>/metrics</code> exposes route names, backend addresses, and error rates. The main listener faces the internet; binding the admin plane to its own address (localhost by default) makes exposure a deliberate act, not an accident of routing.</li>
+      <li><strong>No shadowing.</strong> A backend that legitimately serves its own <code>/metrics</code> is never intercepted or hidden by the proxy — the main listener's routing is completely untouched.</li>
+      <li><strong>It's what production does.</strong> This is Envoy's admin port and HAProxy's stats socket. "The admin plane is a different socket" <em>is</em> the production lesson, not an implementation detail.</li>
+    </ol>
+
+    <h3>Deliberately tiny</h3>
+    <p>The admin server reuses the battle-tested Level 1 parser (<code>read_head</code> / <code>parse_request_head</code>) — a second hand-written parser is just a second bug surface — and <strong>nothing else</strong> from the proxy machinery. No routing, no middleware, no keep-alive, no pooling. One request per connection, <code>Connection: close</code>, done. A scraper hits it every ~15 s, so everything keep-alive would buy is rounding error, and everything it costs (drain-before-reuse discipline, poolability analysis) is complexity this endpoint exists to <em>observe</em>, not participate in.</p>
+    <p>It is not exempt from slowloris thinking, though: a <strong>5-second whole-exchange deadline</strong> (<code>ADMIN_TIMEOUT</code>) covers read plus write. A full <code>ConnLimiter</code> would be overkill for a localhost-default socket, but an unbounded read deadline would be the same mistake Level 8 spent a whole level killing. Unknown path → 404 with a fixed body (no path echo, no reflection surface); non-GET → 405. The bind happens in <code>main</code> <em>before</em> the banner, so a bad or taken <code>--admin</code> address fails startup with exit 1 — the same guardrail posture as Level 8's TLS config checks.</p>
+
+    <figure>
+<pre class="mermaid">
+flowchart TD
+  A["Admin connection accepted"] --> D{"5s deadline wraps the whole exchange"}
+  D --> RH["read_head (reuse L1 parser)"]
+  RH --> M{"method == GET?"}
+  M -->|no| R405["405 Method Not Allowed"]
+  M -->|yes| P{"path?"}
+  P -->|"/metrics"| MET["200 · render() + cache + WAF blocks<br/>text/plain; version=0.0.4"]
+  P -->|"/health"| HLT["health_json: walk upstreams"]
+  P -->|"other"| R404["404 · fixed body, no echo"]
+  HLT --> HS{"any upstream 0 healthy?"}
+  HS -->|yes| DEG["200 · status:degraded"]
+  HS -->|no| OK["200 · status:ok"]
+  MET --> CL["Connection: close"]
+  DEG --> CL
+  OK --> CL
+  R404 --> CL
+  R405 --> CL
+</pre>
+    <figcaption>The admin responder: one read, parse the request line, match on method then path, write, close. Note that <code>/health</code> stays HTTP 200 even when degraded.</figcaption>
+    </figure>
+
+    <h3><code>/health</code>: degraded but 200</h3>
+    <p><code>/health</code> reports the <em>proxy's</em> own liveness with an upstream summary:</p>
+    <pre><code>{"status":"ok","upstreams":{"api":{"healthy":2,"total":3}},"active_connections":7}</code></pre>
+    <p>It degrades to <code>"status":"degraded"</code> when any upstream has zero healthy backends — but <strong>stays HTTP 200</strong>.</p>
+    <div class="callout warn"><strong>Why 200 and not 503?</strong> This endpoint answers "is the proxy alive?" — and it is; it just answered. Backend health is a <em>different</em> question, and Level 4's breaker already owns it. If <code>/health</code> returned 503 on a dead backend, a supervisor (systemd, Kubernetes) would restart Ferrum — throwing away every <em>healthy</em> upstream's connections and warm pools to punish the proxy for a failure it neither caused nor can fix. That makes the outage strictly worse. The 200-with-degraded-payload is the correct signal: the proxy is up, and here is the diagnostic detail for a human or a smarter alert to act on.</div>
+    <div class="callout"><strong>Level 12 note baked in.</strong> The admin task resolves the upstream list <em>per request</em> through the shared route handle, not by capturing a <code>Vec</code> at boot. Capturing at boot would make <code>/health</code> report a retired config forever after a hot reload — and worse, keep the old pools alive by holding a strong reference. The seam for Level 12's reload is recorded here rather than discovered later.</div>
+  </section>
+
+  <section id="code-map">
+    <h2>Code Map</h2>
+    <p class="lead">What Level 10 added and changed, verified against <code>rproxy/src/</code>.</p>
+    <table>
+      <thead><tr><th>File</th><th>Status</th><th>Responsibility</th></tr></thead>
+      <tbody>
+        <tr><td><code>metrics.rs</code></td><td>new</td><td>The registry: <code>AtomicU64</code>/<code>AtomicI64</code> counters &amp; gauges, fixed-bucket <code>Histogram</code>, <code>UpstreamId</code> resolution, <code>ConnGauge</code> RAII guard, Prometheus <code>render()</code>. std-only.</td></tr>
+        <tr><td><code>logging.rs</code></td><td>new</td><td>Leveled error log: <code>error!</code>/<code>warn!</code>/<code>info!</code>/<code>debug!</code> macros over a global <code>AtomicU8</code> level; hand-rolled RFC 3339 (<code>civil_from_days</code>). std-only.</td></tr>
+        <tr><td><code>admin.rs</code></td><td>new</td><td>The admin listener: tiny <code>serve</code>/<code>serve_one</code> responder for <code>/metrics</code> and <code>/health</code>, 5 s deadline, <code>health_json</code> with degraded-but-200 logic.</td></tr>
+        <tr><td><code>middleware/observe.rs</code></td><td>edit</td><td><code>AccessLog</code> switched from <code>key=value</code> to one JSON line; <code>json_escape</code> (RFC 8259), <code>opt_ms</code> null-vs-0.0, <code>--log-plain</code> toggle.</td></tr>
+        <tr><td><code>proxy.rs</code></td><td>edit</td><td>Timing capture: <code>t_start</code> after <code>read_head</code>, stamps for <code>t_route</code>/<code>t_connect</code>/<code>t_first_byte</code> into <code>ReqCtx</code>; <code>record_request</code>/<code>record_connect_error</code>/<code>record_rejection</code> at every exit path.</td></tr>
+        <tr><td><code>main.rs</code></td><td>edit</td><td>Wiring: build <code>Arc&lt;Metrics&gt;</code> from declared upstream names; bind admin listener before the banner; <code>ConnGauge::open</code> per connection task; flags <code>--log-level</code>, <code>--log-plain</code>, <code>--admin</code>.</td></tr>
+        <tr><td><code>balancer.rs</code>, <code>security.rs</code></td><td>edit</td><td>Gauge feeds / <code>eprintln!</code> → leveled-macro migration (per the design; recording sites for connect errors and healthy-backend state).</td></tr>
+      </tbody>
+    </table>
+    <div class="callout"><strong>Function-level cross-check.</strong> <code>Metrics::new(&amp;[String])</code>, <code>upstream_id</code>, <code>record_request(id, status, dur)</code>, <code>Histogram::observe(Duration)</code> / <code>snapshot()</code>, <code>render()</code>, <code>ConnGauge::open</code>; <code>logging::enabled</code> / <code>emit</code> / <code>rfc3339_now</code> / <code>civil_from_days</code>; <code>observe::json_escape</code> / <code>opt_ms</code> / <code>AccessLog::on_response</code>; <code>admin::serve</code> / <code>serve_one</code> / <code>health_json</code> — all present and named as cited.</div>
+  </section>
+
+  <section id="industry">
+    <h2>How Industry Does It</h2>
+    <p class="lead">Every production proxy solved observability; the interesting part is <em>how</em>, and where Ferrum's teaching build lands honestly against them.</p>
+
+    <div class="grid2">
+      <div class="card">
+        <span class="tag tech">nginx</span>
+        <h4>Log templates + stub_status</h4>
+        <p><strong>Mechanism:</strong> a configurable <code>log_format</code> with a rich set of built-in variables (<code>$request_time</code>, <code>$upstream_response_time</code>, <code>$status</code>). Native metrics are minimal — <code>stub_status</code> gives a handful of connection counters; real Prometheus metrics need a third-party module (nginx-vts) or the commercial nginx Plus.</p>
+        <p><strong>vs ours:</strong> our JSON line is nginx's <code>log_format</code> idea with the escaping done for you and the format fixed; our first-class histogram is something open-source nginx lacks natively.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">HAProxy</span>
+        <h4>Stats socket + timers</h4>
+        <p><strong>Mechanism:</strong> famously detailed timing breakdown per request (<code>Tq/Tw/Tc/Tr/Tt</code> — queue, wait, connect, response, total) in its log, and a runtime <em>stats socket</em> plus a built-in Prometheus exporter serving hundreds of counters/gauges.</p>
+        <p><strong>vs ours:</strong> HAProxy's separate stats socket is exactly the pattern we copied for the admin plane. Its timer decomposition is richer than our four stamps; ours teaches the <em>idea</em> of stage timing at a fraction of the surface.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Envoy</span>
+        <h4>Admin port + stats sinks</h4>
+        <p><strong>Mechanism:</strong> a dedicated <em>admin listener</em> (<code>/stats</code>, <code>/stats/prometheus</code>, <code>/clusters</code>, <code>/config_dump</code>) plus pluggable stats sinks and native distributed tracing (Zipkin, Jaeger, OTLP) with full <code>traceparent</code> propagation. Thousands of metrics out of the box.</p>
+        <p><strong>vs ours:</strong> Envoy's admin listener <em>is</em> the model for <code>admin.rs</code>, down to it being a separate socket. The gulf is tracing: Envoy does distributed spans across services; Ferrum does per-stage timing on one hop, by design — we are a single hop with no downstream to trace into.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Apache httpd</span>
+        <h4>mod_log_config + mod_status</h4>
+        <p><strong>Mechanism:</strong> <code>LogFormat</code> directives with <code>%</code>-variables (the origin of nginx's model), and <code>mod_status</code> for a human HTML scoreboard of worker state. Prometheus needs a third-party exporter.</p>
+        <p><strong>vs ours:</strong> similar shape to nginx — flexible text logs, weak native metrics. Our structured-by-default JSON and built-in histogram are closer to the modern (Envoy-era) expectation.</p>
+      </div>
+    </div>
+
+    <div class="callout warn"><strong>Honest scope.</strong> Ferrum is a teaching build. The registry has a handful of series; Envoy has thousands and a config-driven stat prefix system. We have no distributed tracing, no stats sinks beyond the text endpoint, no log rotation (stdout/stderr is the supervisor's job — the twelve-factor position), and no dynamic label registration (labels are fixed at startup, the seam Level 12's hot reload will have to revisit). What Ferrum <em>does</em> have is the mechanism visible: you can read all of <code>metrics.rs</code> in one sitting and understand why every production proxy's histogram works the way it does. That legibility is the entire point.</div>
+
+    <table>
+      <thead><tr><th>Concern</th><th>Ferrum</th><th>nginx</th><th>HAProxy</th><th>Envoy</th></tr></thead>
+      <tbody>
+        <tr><td>Access log</td><td>JSON, one line, escaped (or plain)</td><td>templated text</td><td>templated text w/ timers</td><td>templated text, JSON option</td></tr>
+        <tr><td>Native Prometheus</td><td>yes, hand-rolled</td><td>module / Plus only</td><td>built-in exporter</td><td>built-in <code>/stats/prometheus</code></td></tr>
+        <tr><td>Histograms</td><td>fixed 8+Inf buckets</td><td>none native</td><td>yes</td><td>yes, configurable</td></tr>
+        <tr><td>Admin surface</td><td>separate socket, off by default</td><td>stub_status path</td><td>stats socket</td><td>admin listener</td></tr>
+        <tr><td>Distributed tracing</td><td>none (single hop, by design)</td><td>module</td><td>limited</td><td>first-class (OTLP/Zipkin)</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="quiz">
+    <h2>Quiz</h2>
+    <p class="lead">The Level 10 questions, copied verbatim from <code>PROGRESS.md</code>. No answers here — Vessey answers them before Level 11.</p>
+    <div class="qa">
+      <ol>
+        <li><p class="q">The access log went from <code>key=value</code> prose to JSON. What concrete operation does the structured version enable that the prose version made painful, and what NEW attack surface did the format change open that <code>json_escape</code> closes? Describe what an attacker's request target would look like and what it would accomplish against a naive logger.</p></li>
+        <li><p class="q"><code>requests_total</code> is labeled <code>code="2xx"</code> (status class) and <code>upstream</code>, but never by path or raw status code. What goes wrong — mechanically, in memory and in Prometheus — if you label by path? Why is the rule "labels come from config, never from the request"?</p></li>
+        <li><p class="q">A histogram here is 9 atomics per series, and each observation increments exactly ONE bucket. Prometheus requires cumulative <code>le</code> buckets. Where does the cumulative sum happen, and why there? What would be wrong with storing cumulative counts at record time?</p></li>
+        <li><p class="q">Why does an average hide what a histogram shows? Give the concrete example from the knowledge base (the 40 ms average) and name which bucket boundary in <code>BUCKET_BOUNDS</code> would expose it.</p></li>
+        <li><p class="q">The duration clock starts after <code>read_head</code> returns, not when <code>serve_one</code> is entered. What specific keep-alive behavior would corrupt the metric the other way, and which timeout bounds the gap the current placement excludes?</p></li>
+        <li><p class="q">The success-path <code>record_request</code> sits after <code>client.flush()</code>, not after the response head is parsed. What real slowness does that ordering capture that the earlier placement would hide? And why are mid-exchange <code>?</code> deaths deliberately NOT in <code>requests_total</code>?</p></li>
+        <li><p class="q"><code>ttfb_ms</code> is <code>null</code> for a request rejected by auth, but <code>0.0</code> is a possible value for a pooled connect. Why is <code>null</code>-vs-<code>0</code> a load-bearing distinction and not pedantry? What breaks if you use <code>-1</code> as "didn't happen"?</p></li>
+        <li><p class="q">Rejections increment BOTH <code>requests_total</code> and <code>rejected_total{by=...}</code>. Defend the double-count: what two different questions do the two series answer, and what would you lose folding them into one?</p></li>
+        <li><p class="q">Why do <code>/metrics</code> and <code>/health</code> live on a separate listener instead of reserved paths on :8080? Give all three reasons from the design, and name which production proxies made the same choice.</p></li>
+        <li><p class="q"><code>/health</code> returns HTTP 200 even when <code>"status":"degraded"</code>. Why is 503 the wrong status for "an upstream has zero healthy backends"? What component already owns backend health, and what would a supervisor restarting Ferrum on backend death actually accomplish?</p></li>
+        <li><p class="q">The <code>active_connections</code> gauge is maintained by a <code>Drop</code> guard rather than paired <code>conn_opened()</code>/<code>conn_closed()</code> calls. Name the failure mode this makes unrepresentable, the two prior levels that used the same pattern, and what a leaked gauge looks like on a dashboard a week later.</p></li>
+        <li><p class="q">A suppressed <code>debug!</code> costs one atomic load and a compare. Walk through what the macro does BEFORE calling <code>emit</code>, and explain why putting the level check inside <code>emit</code> instead would still allocate. Where else in this level does the same "do the work on the rare path" principle appear?</p></li>
+        <li><p class="q"><code>metrics.rs</code> says the fix for two threads bumping a counter losing an increment is NOT <code>Ordering::SeqCst</code>. What actually guarantees no lost increments under <code>Relaxed</code>, and what DOESN'T Relaxed guarantee here that a scrape can observe? Why is that acceptable for metrics?</p></li>
+        <li><p class="q">The registry's label slots are fixed at startup from declared upstreams. Which future level breaks that assumption, and where is the seam recorded? What would have to change in <code>Metrics</code> to survive it?</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="cheatsheet">
+    <h2>Cheat Sheet &amp; Glossary</h2>
+    <p class="lead">The numbers, flags, and constants — plus the vocabulary.</p>
+
+    <h3>Flags &amp; constants</h3>
+    <table>
+      <thead><tr><th>Name</th><th>Value / default</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>--admin ADDR</code></td><td>no default (docs: <code>127.0.0.1:9100</code>)</td><td>Enable the admin listener for <code>/metrics</code> &amp; <code>/health</code>. Off unless set.</td></tr>
+        <tr><td><code>--log-level LEVEL</code></td><td><code>info</code></td><td>Error-log level: <code>error</code> &lt; <code>warn</code> &lt; <code>info</code> &lt; <code>debug</code>.</td></tr>
+        <tr><td><code>--log-plain</code></td><td>off (JSON)</td><td>Emit the old <code>key=value</code> access line instead of JSON.</td></tr>
+        <tr><td><code>--no-access-log</code></td><td>on (log emitted)</td><td>Suppress the access log entirely.</td></tr>
+        <tr><td><code>BUCKET_BOUNDS</code></td><td><code>[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0]</code> s</td><td>Histogram upper bounds (+ implicit <code>+Inf</code>). Compile-time schema.</td></tr>
+        <tr><td><code>ADMIN_TIMEOUT</code></td><td>5 s</td><td>Whole-exchange deadline on an admin connection.</td></tr>
+        <tr><td>histogram atomics</td><td>9 per series</td><td>8 buckets + <code>+Inf</code>; plus <code>sum_micros</code> and <code>count</code>.</td></tr>
+        <tr><td>status classes</td><td>5 (1xx–5xx)</td><td>Label cardinality of <code>requests_total</code> per upstream.</td></tr>
+        <tr><td>rejector labels</td><td><code>ratelimit, auth, authz, request-id, other</code></td><td>Static array; unknown rejector → <code>other</code>.</td></tr>
+        <tr><td>content type</td><td><code>text/plain; version=0.0.4</code></td><td>Prometheus exposition format served on <code>/metrics</code>.</td></tr>
+        <tr><td>tests</td><td>230 (214 + 16)</td><td>All green; incl. the 8×10k concurrency hammer.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Metrics series at a glance</h3>
+    <table>
+      <thead><tr><th>Series</th><th>Type</th><th>Labels</th></tr></thead>
+      <tbody>
+        <tr><td><code>ferrum_requests_total</code></td><td>counter</td><td><code>upstream</code>, <code>code="Nxx"</code></td></tr>
+        <tr><td><code>ferrum_connect_errors_total</code></td><td>counter</td><td><code>upstream</code></td></tr>
+        <tr><td><code>ferrum_rejected_total</code></td><td>counter</td><td><code>by</code></td></tr>
+        <tr><td><code>ferrum_active_connections</code></td><td>gauge</td><td>—</td></tr>
+        <tr><td><code>ferrum_request_duration_seconds</code></td><td>histogram</td><td><code>upstream</code> (incl. <code>all</code>), <code>le</code></td></tr>
+      </tbody>
+    </table>
+
+    <h3>Glossary</h3>
+    <div class="grid2">
+      <div class="card">
+        <h4>Cardinality</h4>
+        <p>The number of distinct label combinations — hence distinct time series. High cardinality (unbounded label values) exhausts memory. The reason labels come from config, never from requests.</p>
+      </div>
+      <div class="card">
+        <h4>Histogram bucket (<code>le</code>)</h4>
+        <p>A count of observations "less than or equal to" a fixed upper bound. Prometheus buckets are cumulative; ours store one-per-observation and cumulate at scrape time.</p>
+      </div>
+      <div class="card">
+        <h4>Counter vs gauge</h4>
+        <p>A counter only rises (rates derived at query time); a gauge moves both ways (a level, like open connections). Different math, different instruments.</p>
+      </div>
+      <div class="card">
+        <h4>RAII / <code>ConnGauge</code></h4>
+        <p>Resource Acquisition Is Initialization: the gauge increments on construction and decrements in <code>Drop</code>, so no exit path — clean, error, panic — can leak it. Same pattern as L8's limiter and L3's lease.</p>
+      </div>
+      <div class="card">
+        <h4>TTFB</h4>
+        <p>Time To First Byte. Here, honestly, "time until the backend's response head is fully read" — the observable version from where the proxy sits, since reads return whole heads.</p>
+      </div>
+      <div class="card">
+        <h4>Relaxed ordering</h4>
+        <p>The weakest atomic memory order. Guarantees the RMW's own atomicity (no lost increment) but no ordering against other memory. Correct for metrics because there is nothing to order.</p>
+      </div>
+      <div class="card">
+        <h4>RFC 3339 / <code>civil_from_days</code></h4>
+        <p>The timestamp format (<code>...T...Z</code>, UTC, millis) and the ~15-line days-to-date algorithm that produces it without a <code>chrono</code> dependency.</p>
+      </div>
+      <div class="card">
+        <h4>Exposition format</h4>
+        <p>Prometheus's text protocol: <code># HELP</code>/<code># TYPE</code> headers, one <code>name{labels} value</code> line per series. Ferrum builds it into a <code>String</code> at scrape time.</p>
+      </div>
+    </div>
+  </section>
+</main>
+</div>
+
+<footer>
+  <p>Ferrum KB &mdash; Level 10: Observability &bull; Built 2026-09-02</p>
+  <p class="muted">A teaching reverse proxy in Rust. Claims verified against <code>rproxy/src/metrics.rs</code>, <code>logging.rs</code>, <code>admin.rs</code>, <code>middleware/observe.rs</code>, <code>proxy.rs</code>, <code>main.rs</code> and PROGRESS.md. Where ours is crude next to production stacks, the page says so.</p>
+</footer>
+</body>
+</html>

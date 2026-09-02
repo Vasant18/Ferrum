@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ferrum KB — Level 1: Core Networking</title>
+<meta name="description" content="A complete, plain-English map of the Barracuda Networks product portfolio: every product family (Email, Application, Network, Data Protection, Managed XDR, MSP) and the BarracudaONE platform — what each product is, what it does, and what problem it solves." />
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    flowchart: { htmlLabels: true, useMaxWidth: true, padding: 12, nodeSpacing: 55, rankSpacing: 55 },
+    startOnLoad: true, theme: 'base', securityLevel: 'loose',
+    themeVariables: {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '15px',
+      primaryColor: '#e7e8ea', primaryTextColor: '#15203a', primaryBorderColor: '#7e848c',
+      lineColor: '#6a6f77', secondaryColor: '#dddfe2', tertiaryColor: '#f3f4f6',
+      noteBkgColor: '#fff3d6', noteTextColor: '#3a2f12', noteBorderColor: '#caa84a',
+      actorBkg: '#e7e8ea', actorTextColor: '#15203a', actorBorder: '#7e848c',
+      clusterBkg: '#eef0f2', clusterBorder: '#a0a4aa'
+    }
+  });
+</script>
+<style>
+  :root{--bg:#0f1320;--panel:#161c2e;--panel-2:#1d2540;--ink:#e8ecf5;--muted:#9aa6c4;--accent:#7c5cff;--accent-2:#22d3a6;--warn:#ffb454;--danger:#ff6b81;--line:#2a3354;--code-bg:#0b0f1a;--max:1100px;}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:linear-gradient(180deg,#0c1020,#0f1320 40%);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  a{color:var(--accent-2);text-decoration:none}a:hover{text-decoration:underline}
+  header.hero{padding:56px 24px 40px;text-align:center;background:radial-gradient(1200px 400px at 50% -10%,rgba(255,107,129,.18),transparent 60%);border-bottom:1px solid var(--line);}
+  header.hero .eyebrow{letter-spacing:.25em;text-transform:uppercase;color:var(--accent-2);font-size:.75rem;font-weight:700}
+  header.hero h1{font-size:clamp(1.9rem,4vw,3rem);margin:.3em 0 .2em;line-height:1.1}
+  header.hero p.sub{color:var(--muted);max-width:790px;margin:0 auto;font-size:1.05rem}
+  .badges{margin-top:18px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .badge{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);padding:4px 12px;border-radius:999px;font-size:.8rem}
+  .layout{display:grid;grid-template-columns:260px 1fr;gap:32px;align-items:start;max-width:1320px;margin:0 auto;padding:0 22px}
+  nav.toc{position:sticky;top:0;max-height:100vh;overflow:auto;padding:28px 10px 60px;border-right:1px solid var(--line);font-size:.9rem;}
+  nav.toc h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.18em;color:var(--muted);margin:18px 8px 6px}
+  nav.toc a{display:block;color:var(--muted);padding:5px 10px;border-radius:8px;border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--panel);color:var(--ink);text-decoration:none;border-left-color:var(--accent)}
+  main{padding:34px 0 80px;min-width:0}
+  section{margin:0 0 46px;scroll-margin-top:18px}
+  section>h2{font-size:1.7rem;margin:0 0 .5em;padding-bottom:.3em;border-bottom:2px solid var(--line);display:flex;align-items:center;gap:.5em;}
+  h3{font-size:1.25rem;margin:1.6em 0 .4em;color:#fff}
+  h4{font-size:1.02rem;margin:1.2em 0 .3em;color:var(--accent-2);text-transform:uppercase;letter-spacing:.04em}
+  p,li{color:var(--ink)}.muted{color:var(--muted)}
+  article.concept{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin:22px 0}
+  article.concept>h3:first-child{margin-top:0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr} .layout{grid-template-columns:1fr} nav.toc{position:static;max-height:none;border-right:none;border-bottom:1px solid var(--line)}}
+  .card{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card h4{margin-top:.2em}
+  .callout{border-left:4px solid var(--accent);background:var(--panel-2);padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  .callout.analogy{border-left-color:var(--accent-2)}.callout.warn{border-left-color:var(--warn)}.callout.danger{border-left-color:var(--danger)}.callout.story{border-left-color:#5ec2ff}
+  .tag{display:inline-block;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:2px 8px;border-radius:6px;margin-bottom:6px}
+  .tag.beg{background:rgba(34,211,166,.15);color:var(--accent-2)}.tag.tech{background:rgba(124,92,255,.18);color:#b9a6ff}.tag.adv{background:rgba(255,107,129,.15);color:var(--danger)}
+  code{background:var(--code-bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.86em;color:#ffd9a0}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.85rem;line-height:1.55}
+  pre code{background:none;border:none;padding:0;color:#d7e0f5}
+  pre.art{color:#ffd9a0;font-size:.95rem;line-height:1.4;letter-spacing:.04em}
+  pre.mermaid{background:#f7f8fc;color:#111;text-align:center}
+  .mermaid svg text,.mermaid text{fill:#15203a !important}
+  .mermaid .nodeLabel,.mermaid .edgeLabel,.mermaid .label,.mermaid span,.mermaid p,.mermaid div,.mermaid foreignObject *{color:#15203a !important;fill:#15203a !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p{background:#f3f5fc !important}
+  .mermaid .cluster-label .nodeLabel,.mermaid .cluster-label p,.mermaid .cluster span,.mermaid .cluster p{color:#3c4046 !important}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.92rem;overflow:hidden;border-radius:10px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel-2);color:#fff}
+  tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  details{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:12px 0}
+  details summary{cursor:pointer;font-weight:600;color:var(--accent-2);padding:6px 0}
+  details[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px}
+  figure{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  figcaption{color:var(--muted);font-size:.85rem;text-align:center;margin-top:8px;font-style:italic}
+  .qa{margin:10px 0}.qa .q{font-weight:600}.qa .a{color:var(--muted);margin:2px 0 0}
+  ol.flow{counter-reset:step;list-style:none;padding-left:0}
+  ol.flow>li{counter-increment:step;position:relative;padding:10px 0 10px 52px;border-bottom:1px dashed var(--line)}
+  ol.flow>li::before{content:counter(step);position:absolute;left:0;top:8px;width:34px;height:34px;background:var(--accent);color:#fff;border-radius:50%;display:grid;place-items:center;font-weight:700}
+  .rank{font-weight:800;color:var(--accent);margin-right:6px}
+  footer{border-top:1px solid var(--line);padding:30px 22px;text-align:center;color:var(--muted);font-size:.88rem}
+  .lead{font-size:1.08rem}
+  .formula{background:var(--code-bg);border:1px dashed var(--accent);border-radius:10px;padding:12px 16px;font-family:monospace;color:#ffd9a0;text-align:center;margin:14px 0}
+
+  /* KB-THEME START */
+  /* Azure (blue palette) */
+  :root{--bg:#0e1c30;--panel:#152740;--panel-2:#1d3458;--ink:#e6edf7;--muted:#93a6c4;--accent:#1a8ae5;--accent-2:#41a7f5;--warn:#d6a96a;--danger:#d98a8a;--line:#264064;--code-bg:#0b1626;}
+  body{background:linear-gradient(180deg,var(--bg),var(--bg))}
+  header.hero{background:radial-gradient(1100px 400px at 50% -10%,rgba(20,119,210,.26),transparent 60%)}
+  h3,.parthead{color:var(--ink)}
+  th{color:var(--ink)}
+  .tag.tech{background:rgba(65,167,245,.16);color:var(--accent-2)}
+  ol.flow>li::before{color:#0b1626}
+  /* KB-THEME END */
+  /* prevent node/edge label clipping */
+  .mermaid foreignObject{overflow:visible !important}
+  .mermaid .nodeLabel,.mermaid .label,.mermaid foreignObject>div,.mermaid foreignObject span,.mermaid foreignObject p{white-space:nowrap !important;overflow:visible !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p,.mermaid .edgeLabel span{white-space:nowrap !important;overflow:visible !important;padding:1px 4px}
+  .mermaid svg{max-width:100%;height:auto}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyebrow">Ferrum KB &middot; Level 1 of 14 &middot; Core Networking</div>
+  <h1>Core Networking<br/><span style="font-size:.6em;color:var(--muted)">The accept loop, HTTP/1.1 parsing, body framing &amp; the <code>Conn&lt;S&gt;</code> streaming engine</span></h1>
+  <p class="sub">The foundation everything else stands on. Before Ferrum can route, balance, cache, or defend, it has to turn a raw TCP byte stream into HTTP/1.1 messages it understands — and hand those messages to a backend without becoming a request-smuggling relay. This level builds the task-per-connection accept loop, the from-scratch parser, the four body-framing modes, the 16&nbsp;KB windowed streaming engine, and the smuggling defenses that make forwarding safe.</p>
+  <nav style="margin-top:18px;font-size:.9rem">
+    <a href="index.html">&larr; Course index</a> &nbsp;&middot;&nbsp;
+    <span class="muted">Prev: (index)</span> &nbsp;&middot;&nbsp;
+    <a href="Level-02-Routing.html">Next: Level 2 — Routing &rarr;</a>
+  </nav>
+  <div class="badges">
+    <span class="badge">Audience: Vessey (built it) + revisers</span>
+    <span class="badge">Scope: http.rs, proxy.rs, main.rs</span>
+    <span class="badge">Reading time: ~26 min</span>
+  </div>
+</header>
+
+<div class="layout">
+<nav class="toc">
+  <h2>Orientation</h2>
+  <a href="#exec-summary">Executive Summary</a>
+  <a href="#big-picture">The Big Picture</a>
+  <h2>Core</h2>
+  <a href="#accept-loop">1 &middot; The Accept Loop</a>
+  <a href="#parsing">2 &middot; Parsing the Head</a>
+  <a href="#framing">3 &middot; Body Framing &amp; the BodyFraming Enum</a>
+  <a href="#streaming">4 &middot; 16&nbsp;KB Windowed Streaming</a>
+  <a href="#forwarding">5 &middot; Forwarding &amp; Keep-Alive</a>
+  <a href="#smuggling">6 &middot; Request-Smuggling Defenses</a>
+  <a href="#conn-generic">7 &middot; The Conn&lt;S&gt; Design</a>
+  <a href="#code-map">Code Map</a>
+  <h2>Compare</h2>
+  <a href="#industry">Industry: nginx / httpd / HAProxy / Envoy</a>
+  <h2>Reference</h2>
+  <a href="#quiz">Self-Check Questions</a>
+  <a href="#cheatsheet">Cheat Sheet &amp; Glossary</a>
+</nav>
+
+<main>
+  <section id="exec-summary">
+    <h2>Executive Summary</h2>
+    <p class="lead">Level 1 is the part of Ferrum that talks to sockets and speaks HTTP/1.1 from first principles — no framework, no <code>hyper</code>, just <code>tokio</code> and the raw protocol.</p>
+    <p>The accept loop in <code>main.rs</code> pulls completed connections off the kernel backlog and hands each to its own Tokio task via <code>tokio::spawn</code>, so one slow client never blocks another. Inside a task, <code>proxy.rs</code> runs a per-connection loop (<code>handle_client</code> → <code>serve_one</code>) that serves requests sequentially with HTTP/1.1 keep-alive, opening one backend connection per request. <code>http.rs</code> is the pure-logic core: it finds where a message head ends (<code>find_head_end</code>), parses the request/status line and headers into owned structs, and — the security-critical decision — computes how the body is framed via the <code>BodyFraming</code> enum: <code>None</code>, a fixed <code>Length(n)</code>, <code>Chunked</code>, or <code>UntilClose</code>.</p>
+    <p>Bodies never sit in memory whole. <code>Conn&lt;S&gt;</code> streams them through a 16&nbsp;KB window (<code>BUF_SIZE</code>), so a 2&nbsp;GB upload costs 16&nbsp;KB of RAM. The head is capped at 16&nbsp;KB (<code>MAX_HEAD_BYTES</code>) and must arrive within 30&nbsp;seconds (<code>HEAD_READ_TIMEOUT</code>), closing two classic denial-of-service holes. And because a proxy that disagrees with its backend about where a body ends becomes a request-smuggling weapon, the parser is deliberately strict: it rejects bare CR/LF in the head, duplicate <code>Content-Length</code> or <code>Transfer-Encoding</code> headers, the <code>Content-Length</code>&nbsp;+&nbsp;<code>Transfer-Encoding</code> combination, and non-numeric lengths.</p>
+    <p>The whole thing is built on <code>Conn&lt;S&gt;</code>, a buffered reader generic over any stream type <code>S</code> — a design seam that looks like over-engineering at Level 1 and pays off enormously at Level 8, when the exact same code path serves a TLS stream with zero changes. Everything later levels do — routing, load balancing, TLS, caching, the WAF — is layered on top of these primitives. This is a teaching build, not production; where it is cruder than nginx (one backend connection per request, owned-String parsing instead of zero-copy), the comparison section says so plainly.</p>
+  </section>
+
+  <section id="big-picture">
+    <h2>The Big Picture</h2>
+    <p>Level 1 <em>is</em> the pipeline — every other level inserts a stage into the path this level draws. Here is one request/response exchange, with the Level 1 stages highlighted. Notice the symmetry: the request leg and the response leg run the same <em>read-head &rarr; parse &rarr; frame &rarr; stream</em> shape.</p>
+    <figure>
+<pre class="mermaid">
+flowchart TD
+  C(["Client"]) -->|"TCP connect"| A["Accept loop (main.rs)<br/>tokio::spawn per connection"]:::l1
+  A --> RH["read_head: buffer until CRLFCRLF<br/>(Conn&lt;S&gt;, proxy.rs)"]:::l1
+  RH --> P["parse_request_head (http.rs)<br/>method / target / version / headers"]:::l1
+  P --> F["request_body_framing<br/>None / Length / Chunked"]:::l1
+  F --> R["route + forward<br/>(Level 2+)"]:::l2
+  R --> B(["Backend"])
+  B --> RR["parse_response_head +<br/>response_body_framing"]:::l1
+  RR --> S["copy_body_to: 16 KB windowed stream"]:::l1
+  S --> C
+  classDef l1 fill:#cfe6ff,stroke:#1a8ae5,stroke-width:2px;
+  classDef l2 fill:#e7e8ea,stroke:#7e848c,stroke-dasharray:4 3;
+</pre>
+<figcaption>One exchange. Blue = built in Level 1; dashed grey = the routing/forwarding stage Level 2 onward fills in. In Level 1 that grey box is a single hard-wired backend; from Level 2 it becomes a router.</figcaption>
+    </figure>
+    <div class="callout analogy"><strong>Analogy:</strong> TCP is a mail slot that delivers a shredded letter one handful of confetti at a time, in no guaranteed handful size. Level 1 is the clerk who catches the confetti in a tray (<code>Conn</code>'s buffer), waits until a blank line proves the letter's header is complete, reads the header to learn how long the letter is, and only then starts copying the body onward — a page at a time, never holding the whole letter. The clerk also refuses letters with forged page-count markers (the smuggling defenses), because passing one along would let a forger sneak a second letter past the mailroom.</div>
+  </section>
+
+  <section id="accept-loop">
+    <h2>1 &middot; The Accept Loop</h2>
+    <p class="lead">The front door: pull one completed connection off the kernel backlog, hand it to its own task, repeat. The loop itself does almost nothing — and that is the point.</p>
+    <article class="concept">
+      <h3>Task-per-connection with <code>tokio::spawn</code></h3>
+      <p>In <code>main.rs</code>, after binding a <code>TcpListener</code>, the accept loop is deliberately tiny: <code>listener.accept()</code> yields a <code>(TcpStream, SocketAddr)</code>, and the very next thing we do is <code>tokio::spawn</code> a task that owns that stream and runs <code>proxy::handle_client</code>. The loop then immediately goes back to <code>accept()</code>. Nothing that could block — no parsing, no backend dial, no TLS handshake — happens on the loop's own thread.</p>
+      <p><strong>The why:</strong> anything slow inside the accept loop delays <em>every</em> new client, because there is exactly one loop. A model where you parsed the request before spawning would mean one client trickling its header one byte a minute stalls the acceptance of all others — a one-attacker, whole-server denial of service that passes every functional test (a proxy serving one client at a time still "works"). Spawning first makes each connection's slowness that connection's own problem. Tokio multiplexes the thousands of resulting tasks across a small pool of OS threads, so "one task per connection" does not mean "one OS thread per connection."</p>
+      <pre><code>loop {
+    // (Level 12 wraps this in tokio::select! against signals; Level 1's
+    // core is just accept-then-spawn.)
+    let (stream, peer) = listener.accept().await?;
+    let _ = stream.set_nodelay(true);          // disable Nagle (see below)
+    let routes = Arc::clone(&amp;routes);
+    tokio::spawn(async move {
+        proxy::handle_client(stream, &amp;routes, peer, /* ... */).await;
+    });
+}</code></pre>
+      <div class="callout warn"><strong>What you're reading vs. what Level 1 wrote.</strong> Today's <code>main.rs</code> loop is wrapped in <code>tokio::select!</code> against SIGTERM/SIGINT/SIGHUP (Level 12), gated by CIDR and connection-limit checks (Level 8), and threads a metrics handle and cache through (Levels 10–11). Mentally strip all of that: Level 1's loop was <code>accept</code> &rarr; <code>set_nodelay</code> &rarr; <code>spawn(handle_client)</code>, nothing more. The <code>Err</code> arm — logging a transient <code>accept</code> error (e.g. <code>EMFILE</code> when out of file descriptors) and continuing rather than exiting — <em>is</em> Level 1, and it matters: a proxy that dies the first time it runs out of FDs is not a proxy.</div>
+    </article>
+    <article class="concept">
+      <h3><code>TCP_NODELAY</code>: turning off Nagle's algorithm</h3>
+      <p>Right after accept we call <code>set_nodelay(true)</code> on the socket. Nagle's algorithm coalesces small outbound writes, waiting a few milliseconds to see if more data arrives so it can send one larger packet. That is a win for chatty interactive protocols and a loss for a proxy: our serialized request/response heads are small, standalone writes that we want on the wire <em>now</em>. Proxies universally disable Nagle for this reason.</p>
+      <p><strong>The subtle relocation:</strong> in Level 1 this lived inside <code>handle_client</code>, which then held a concrete <code>TcpStream</code>. Level 8 made <code>handle_client</code> generic over the stream type (see §7), and <code>set_nodelay</code> is a <code>TcpStream</code>-inherent method the generic code no longer knows it has — so it moved up to the accept loop, applied to the raw socket <em>before</em> any TLS wrap. That is also the only place it can go, because once the TLS stream owns the <code>TcpStream</code>, the option (which lives on the file descriptor) is no longer reachable.</p>
+    </article>
+  </section>
+
+  <section id="parsing">
+    <h2>2 &middot; Parsing the Head</h2>
+    <p class="lead">Turn an undifferentiated byte stream into a <code>RequestHead</code> — and answer the two questions everything downstream depends on: where does the head end, and what does it say?</p>
+    <article class="concept">
+      <h3>Finding the head boundary: <code>find_head_end</code></h3>
+      <p>An HTTP/1.1 message head (the request/status line plus all header lines) ends at the first blank line — the byte sequence <code>\r\n\r\n</code>. <code>find_head_end</code> scans a 4-byte sliding window for that terminator and returns the index just past it, or <code>None</code> if it hasn't arrived yet:</p>
+      <pre><code>pub fn find_head_end(buf: &amp;[u8]) -&gt; Option&lt;usize&gt; {
+    buf.windows(4).position(|w| w == b"\r\n\r\n").map(|i| i + 4)
+}</code></pre>
+      <p><code>None</code> is not an error — it is the signal to <code>Conn::read_head</code> to read more bytes and try again. This is the crux of framing a stream protocol: <strong>TCP does not respect message boundaries.</strong> One <code>read()</code> may hand you half a head, a whole head, or a head plus the start of the body plus the start of a second pipelined request. The parser cannot assume any read is a message.</p>
+    </article>
+    <article class="concept">
+      <h3>The owned-String parse into <code>RequestHead</code> / <code>ResponseHead</code></h3>
+      <p><code>parse_request_head</code> takes exactly the head bytes located by <code>find_head_end</code> and produces a struct with owned fields:</p>
+      <pre><code>pub struct RequestHead {
+    pub method: String,
+    pub target: String,          // origin-form, e.g. "/api/users?page=2"
+    pub version: Version,        // Http10 | Http11
+    pub headers: Vec&lt;(String, String)&gt;,
+}</code></pre>
+      <p>The head must be valid UTF-8 (rejected otherwise rather than guessed at); the request line is split into exactly <code>METHOD SP target SP HTTP-version</code> — three parts, no more, no fewer; and each header line is split at the first <code>:</code> into a name and a trimmed value. The response side is symmetric: <code>parse_response_head</code> produces a <code>ResponseHead</code> with <code>version</code>, a <code>status</code> validated into the 100–599 range, a <code>reason</code>, and headers.</p>
+      <p><strong>Why owned Strings, not borrowed slices?</strong> Zero-copy parsing (headers that borrow from the read buffer) is faster and is exactly what Level 7 introduces. At Level 1 we deliberately pay the allocation cost to keep lifetimes out of the picture: the head struct outlives the buffer it came from, can be freely rewritten (Level 5 mutates headers in place), and the code stays legible. Naming that as a conscious trade — "correctness and clarity now, zero-copy later" — is the lesson, not an oversight.</p>
+      <div class="callout"><strong>Case-insensitive header lookup.</strong> Header names are case-insensitive per RFC 9110, and clients genuinely send <code>host</code>, <code>Host</code>, and <code>HOST</code>. The <code>header()</code> helper compares with <code>eq_ignore_ascii_case</code>, so every downstream lookup (framing, keep-alive, routing) is spelling-agnostic without callers thinking about it.</div>
+    </article>
+  </section>
+
+  <section id="framing">
+    <h2>3 &middot; Body Framing &amp; the <code>BodyFraming</code> Enum</h2>
+    <p class="lead">The single most security-sensitive decision a proxy parser makes: given the head, how do we know where the body ends? Get this wrong and you become a smuggling relay.</p>
+    <article class="concept">
+      <h3>The four framing modes</h3>
+      <p>HTTP/1.1 delimits a body in exactly a few ways, and Ferrum models them as a four-variant enum — making "how is this body framed?" a value the type system tracks, not a tangle of booleans:</p>
+      <pre><code>pub enum BodyFraming {
+    None,          // no body (GET without length; 204/304; HEAD response)
+    Length(u64),   // exactly N bytes follow the head
+    Chunked,       // hex-sized chunks until a "0\r\n\r\n" terminator
+    UntilClose,    // body runs until the peer closes (responses only)
+}</code></pre>
+      <p>Two functions compute it. <code>request_body_framing</code> and <code>response_body_framing</code> share the ordering rule of RFC 9112 §6: <strong>Transfer-Encoding wins over Content-Length.</strong> If a <code>Transfer-Encoding: chunked</code> is present it means <code>Chunked</code>; else a <code>Content-Length</code> means <code>Length(n)</code> (or <code>None</code> when <code>n == 0</code>); else — for a request — <code>None</code>, because a request can never legitimately use until-close framing.</p>
+    </article>
+    <article class="concept">
+      <h3>Why requests and responses differ</h3>
+      <p>The response function takes the request method and the status code as extra inputs, because some responses are bodiless <em>by definition regardless of their headers</em>: a <code>HEAD</code> response, any <code>1xx</code>, a <code>204 No Content</code>, and a <code>304 Not Modified</code> all carry no body even if they announce a <code>Content-Length</code>. Those are checked first and short-circuit to <code>None</code>.</p>
+      <p>The decisive asymmetry is the fallthrough. A <em>request</em> with no framing headers has <strong>no body</strong> — full stop. A <em>response</em> with no framing headers is legal HTTP/1.0-style <code>UntilClose</code>: "the body is everything until the server closes the connection." A request could never use that framing (a client cannot say "my body ends at EOF" and still expect to read a reply on the same connection), so <code>UntilClose</code> is a response-only outcome. Encoding that rule in <em>which function returns which variant</em> means the illegal combination is simply unrepresentable.</p>
+      <figure>
+<pre class="mermaid">
+flowchart TD
+  H["parsed head"] --> BODILESS{"HEAD / 1xx /<br/>204 / 304?<br/>(response only)"}
+  BODILESS -->|"yes"| N1["None"]:::f
+  BODILESS -->|"no"| CFH["check_framing_headers<br/>(reject dup / CL+TE)"]:::g
+  CFH --> TE{"Transfer-Encoding:<br/>chunked?"}
+  TE -->|"yes"| CH["Chunked"]:::f
+  TE -->|"no"| CL{"Content-Length<br/>present?"}
+  CL -->|"yes, n&gt;0"| LEN["Length(n)"]:::f
+  CL -->|"yes, n=0"| N2["None"]:::f
+  CL -->|"no + request"| N3["None"]:::f
+  CL -->|"no + response"| UC["UntilClose"]:::f
+  classDef f fill:#cfe6ff,stroke:#1a8ae5,stroke-width:2px;
+  classDef g fill:#ffe6cc,stroke:#d6a96a,stroke-width:2px;
+</pre>
+<figcaption>The framing decision. The orange gate — <code>check_framing_headers</code> — is where duplicate or contradictory framing headers are rejected before any variant is chosen. The one place the request and response paths diverge is the "Content-Length absent" leaf.</figcaption>
+      </figure>
+      <div class="callout warn"><strong>Strict Content-Length parsing.</strong> <code>parse_content_length</code> accepts ASCII digits only. It rejects a leading <code>+</code>, embedded commas (<code>5, 5</code>), internal whitespace (<code>5 5</code>), and hex (<code>0x5</code>) — every one of which is a framing-desync attempt, because different parsers tolerate different sloppiness. (Leading/trailing whitespace is legitimately trimmed by the header parser first, so a value that <em>arrives</em> as <code>"5 "</code> is fine; it is the internal junk that's rejected.)</div>
+    </article>
+  </section>
+
+  <section id="streaming">
+    <h2>4 &middot; 16&nbsp;KB Windowed Streaming</h2>
+    <p class="lead">The memory-safety property that makes Ferrum usable: a body never sits in RAM whole. A 2&nbsp;GB upload costs 16&nbsp;KB of memory, not 2&nbsp;GB.</p>
+    <article class="concept">
+      <h3>The window: <code>BUF_SIZE = 16 * 1024</code></h3>
+      <p>Every <code>Conn&lt;S&gt;</code> owns one <code>BUF_SIZE</code> (16&nbsp;KB) buffer. When copying a <code>Length(n)</code> body, <code>copy_exact</code> loops: read up to a window's worth of bytes, write exactly the portion that belongs to this body onward, drop those consumed bytes, repeat until <code>n</code> is exhausted. At no point does more than 16&nbsp;KB of body live in memory — the <code>len</code> counter shrinks toward zero while the buffer is reused in place.</p>
+      <pre><code>async fn copy_exact&lt;W&gt;(&amp;mut self, dst: &amp;mut W, mut len: u64) -&gt; io::Result&lt;()&gt; {
+    while len &gt; 0 {
+        if self.filled == 0 {
+            let n = self.stream.read(&amp;mut self.buf).await?;
+            if n == 0 { return Err(/* connection closed mid-body */); }
+            self.filled = n;
+        }
+        // Take only what belongs to THIS body; the rest may be the next
+        // pipelined request and must stay buffered.
+        let take = (self.filled as u64).min(len) as usize;
+        dst.write_all(&amp;self.buf[..take]).await?;
+        self.consume(take);
+        len -= take as u64;
+    }
+    Ok(())
+}</code></pre>
+      <p><strong>The why (and the security tie-in):</strong> unbounded buffering of unauthenticated input is how proxies get OOM-killed. A windowed copy makes per-connection memory flat regardless of payload size, and — the deeper payoff — it means there is <em>already a loop that sees every byte</em>. Level 8's body-size cap is therefore not new machinery: it is a running total and one comparison bolted onto this existing loop. Named mistake #1 at that level is "read the whole body, then check the size limit — by which point the damage is done." Level 1's window is what makes the correct, enforce-during-copy version cheap.</p>
+    </article>
+    <article class="concept">
+      <h3>Chunked relay: <code>copy_chunked</code></h3>
+      <p>A chunked body has no declared length; it is a sequence of <code>&lt;hex-size&gt;\r\n&lt;data&gt;\r\n</code> frames, terminated by a zero-size chunk, then optional trailers and a final blank line. <code>copy_chunked</code> relays this framing verbatim, reusing <code>copy_exact</code> for each chunk's data payload so the 16&nbsp;KB window still bounds memory. Two details are worth noting:</p>
+      <ul>
+        <li><strong>Chunk extensions are stripped.</strong> A size line like <code>5;ext=val</code> has everything after the <code>;</code> removed — we forward only what we understand, and re-emit a clean <code>5\r\n</code>.</li>
+        <li><strong>Trailers are forwarded.</strong> After the zero-chunk, trailer lines are relayed until the terminating blank line.</li>
+      </ul>
+      <p>The <code>UntilClose</code> case is the simplest: relay whatever is already buffered, then pump the stream to EOF with <code>tokio::io::copy</code>. By definition it consumes the connection — there is no "next request" on a socket whose end-of-body <em>is</em> its close.</p>
+    </article>
+  </section>
+
+  <section id="forwarding">
+    <h2>5 &middot; Forwarding &amp; Keep-Alive</h2>
+    <p class="lead">Relay the request to a backend, relay the response back, and — on HTTP/1.1 — keep the client socket open to serve the next request on it. With pipelining handled correctly.</p>
+    <article class="concept">
+      <h3>The per-connection loop</h3>
+      <p><code>handle_client</code> wraps the client stream in a <code>Conn</code> and loops, calling <code>serve_one</code> for each exchange. <code>serve_one</code> returns <code>Ok(true)</code> to keep the connection alive for another request, <code>Ok(false)</code> for a clean close, or an <code>Err</code> that logs and drops the connection. One connection's failure is that connection's problem — the accept loop and every other task are unaffected.</p>
+      <p>Within one exchange the shape is: read + parse the request head (under the slowloris deadline) &rarr; compute request framing &rarr; forward the head and stream the body to the backend &rarr; read + parse the response head &rarr; stream the response body back to the client &rarr; decide keep-alive. In Level 1 the backend was a single hard-wired address and a <em>new</em> TCP connection was opened per request; connection pooling to reuse backend sockets is Level 7.</p>
+    </article>
+    <article class="concept">
+      <h3>Keep-alive and pipelining</h3>
+      <p><code>wants_keep_alive</code> encodes the version defaults: HTTP/1.1 is persistent unless the client sends <code>Connection: close</code>; HTTP/1.0 closes unless it sends <code>Connection: keep-alive</code>. When the exchange keeps the connection, the loop goes back to <code>read_head</code> on the <em>same</em> <code>Conn</code>.</p>
+      <p><strong>Pipelining falls out of the buffer discipline.</strong> Because <code>Conn</code> preserves everything it over-read, a client that sends two requests back-to-back — <code>POST&nbsp;.../body...GET&nbsp;/next...</code> — is handled correctly without special code: <code>copy_exact</code> takes only the first body's bytes, <code>consume</code> shifts the leftover <code>GET /next...</code> to the front of the buffer, and the next <code>read_head</code> finds it already waiting. The "bytes read but not yet consumed" problem is solved once, in <code>Conn</code>, and every consumer benefits.</p>
+      <div class="callout warn"><strong>Hop-by-hop headers must be stripped.</strong> Headers like <code>Connection</code>, <code>Keep-Alive</code>, <code>Transfer-Encoding</code>, <code>TE</code>, and <code>Upgrade</code> describe <em>one</em> TCP hop, not the end-to-end message. Forwarding a client's <code>Connection: close</code> verbatim would close our backend leg; mishandling <code>Transfer-Encoding</code> here <em>is</em> the literal mechanism of request smuggling. Ferrum strips the whole hop-by-hop set (plus anything the <code>Connection</code> header itself names) and manages each leg's connection semantics itself — re-declaring canonical framing rather than passing the client's through.</div>
+    </article>
+    <article class="concept">
+      <h3>The deadlines that close DoS holes</h3>
+      <p>Three timeouts exist so a misbehaving or hung peer can't hold resources forever:</p>
+      <table>
+        <thead><tr><th>Constant</th><th>Value</th><th>Guards against</th></tr></thead>
+        <tbody>
+          <tr><td><code>HEAD_READ_TIMEOUT</code></td><td>30&nbsp;s</td><td><strong>Slowloris:</strong> a client trickling one header byte a minute gets a 408 and is cut off, instead of pinning a socket forever.</td></tr>
+          <tr><td><code>BACKEND_CONNECT_TIMEOUT</code></td><td>5&nbsp;s</td><td>A backend that never accepts the TCP connect — the kernel default (~2&nbsp;min) is an eternity to hold client resources.</td></tr>
+          <tr><td><code>MAX_HEAD_BYTES</code></td><td>16&nbsp;KB</td><td>An unbounded head: <code>read_head</code> errors once the buffer crosses this cap, so an attacker can't stream an infinite header set to exhaust memory.</td></tr>
+        </tbody>
+      </table>
+      <p>(The 30&nbsp;s backend <em>response</em> timeout in today's code is a Level 7 tunable; Level 1's own head-and-connect deadlines are the two above.)</p>
+    </article>
+  </section>
+
+  <section id="smuggling">
+    <h2>6 &middot; Request-Smuggling Defenses</h2>
+    <p class="lead">A proxy sits between a client and a backend. If the two disagree about where one request ends and the next begins, an attacker can smuggle a hidden request past one of them. Level 1's parser is strict precisely to make that disagreement impossible.</p>
+    <article class="concept">
+      <h3>What smuggling is, in one sentence</h3>
+      <p>HTTP request smuggling exploits a parsing discrepancy: the proxy thinks a request is <em>N</em> bytes long and the backend thinks it is <em>M</em>, so the leftover <em>M&minus;N</em> bytes the proxy forwards get interpreted by the backend as the <em>start of a new request</em> — one the attacker fully controls, injected in front of some other user's real request. The defenses below all close one avenue for that discrepancy.</p>
+    </article>
+    <article class="concept">
+      <h3>The four hardening rules</h3>
+      <ol class="flow">
+        <li><strong>Reject bare CR/LF in the head.</strong> We split header lines strictly on <code>\r\n</code> and reject any residual lone <code>\r</code> or <code>\n</code>. We do <em>not</em> use <code>str::lines()</code>, which treats a bare <code>\n</code> as a line break — that leniency lets an attacker write <code>Foo: bar\nEvil: x</code> that we'd read as two headers but a stricter downstream reads as one (or vice versa). RFC 9112 §2.2 forbids bare CR/LF in field lines; we enforce it. A space before the colon (<code>Host : x</code>, RFC 9112 §5.1) is rejected for the same "lenient parsers disagree" reason.</li>
+        <li><strong>Reject duplicate <code>Content-Length</code>.</strong> Two <code>Content-Length</code> headers let a proxy honor one value and a backend the other. <code>check_framing_headers</code> counts occurrences (case-insensitively) and errors on more than one.</li>
+        <li><strong>Reject duplicate <code>Transfer-Encoding</code>.</strong> Same reasoning; more than one is an error.</li>
+        <li><strong>Reject <code>Content-Length</code> + <code>Transfer-Encoding</code> together (CL+TE).</strong> This is the canonical smuggling combo — the classic attack is a proxy that frames by one header while the backend frames by the other. RFC 9112 §6.1 says treat it as an error at the edge, and we do: both present at once is rejected outright.</li>
+      </ol>
+      <p>Plus a fifth, on the forwarding side: because <code>strip_hop_by_hop</code> removes <code>TE</code> but not <code>Transfer-Encoding</code>, the forward path explicitly <em>removes</em> any inbound <code>Transfer-Encoding</code> before re-declaring its own canonical <code>chunked</code> — so the backend can never receive two <code>Transfer-Encoding</code> lines. The same discipline applies on the response leg toward the client.</p>
+      <div class="callout danger"><strong>Why strictness beats leniency here.</strong> Postel's Law ("be liberal in what you accept") is actively dangerous for a proxy's framing parser. Every byte of leniency is a byte where <em>we</em> might disagree with the backend, and a disagreement about framing is a smuggling primitive. So the parser is intentionally, unapologetically pedantic: malformed framing is a <code>400 Bad Request</code> at parse time, not a best-effort guess forwarded downstream. The request-time path never has to cope with a malformed head — by the time framing is decided, the message is known-valid or already rejected.</div>
+    </article>
+  </section>
+
+  <section id="conn-generic">
+    <h2>7 &middot; The <code>Conn&lt;S&gt;</code> Design</h2>
+    <p class="lead">The seam that looks like over-engineering at Level 1 and pays off at Level 8. One buffered-reader type, generic over any stream, so plaintext and TLS ride the exact same code path.</p>
+    <article class="concept">
+      <h3>What <code>Conn&lt;S&gt;</code> is</h3>
+      <p><code>Conn&lt;S&gt;</code> is a buffered reader that owns the "bytes read but not yet consumed" problem. It holds the stream, a 16&nbsp;KB buffer, and a <code>filled</code> count marking how many buffered bytes are still valid, unconsumed data. Its methods — <code>read_head</code>, <code>copy_exact</code>, <code>copy_chunked</code>, <code>read_line</code>, <code>consume</code> — are all that reads and writes go through. Crucially, its bound is <code>S: AsyncRead + AsyncWrite + Unpin</code>: it works with <em>anything</em> that can be read and written asynchronously, not specifically a <code>TcpStream</code>.</p>
+      <pre><code>pub struct Conn&lt;S&gt; {
+    stream: S,
+    buf: Vec&lt;u8&gt;,
+    filled: usize,     // bytes [0..filled) are valid, unconsumed
+}
+impl&lt;S: AsyncRead + AsyncWrite + Unpin&gt; Conn&lt;S&gt; { /* ... */ }</code></pre>
+    </article>
+    <article class="concept">
+      <h3>Why generic-over-stream is the whole point</h3>
+      <p>At Level 1 there is only one kind of stream — a plaintext <code>TcpStream</code> — so making <code>Conn</code> (and later <code>handle_client</code>/<code>serve_one</code>) generic over <code>S</code> buys nothing <em>yet</em>. It looks like premature abstraction. Then Level 8 terminates TLS, and the client stream becomes a <code>tokio_rustls::server::TlsStream&lt;TcpStream&gt;</code> — a completely different concrete type that nonetheless also implements <code>AsyncRead + AsyncWrite</code>. Because the entire proxy core was written against the trait bound and never against the concrete type, <strong>the same code serves both listeners with zero changes to the hot path.</strong> The plaintext branch passes a <code>TcpStream</code>; the TLS branch passes a <code>TlsStream</code>; the proxy engine cannot tell the difference and does not need to.</p>
+      <p><strong>Generics, not an enum.</strong> The alternative — <code>enum Stream { Plain(TcpStream), Tls(TlsStream) }</code> — would cost a <code>match</code> on every single read and write, in the hottest loop in the program. Monomorphizing over <code>S</code> compiles two specialized copies into the binary instead: a little more code size, no per-operation branch. For a proxy, that is the right trade, and it is a clean illustration of Rust's static dispatch versus dynamic dispatch decision.</p>
+      <div class="callout analogy"><strong>Analogy:</strong> <code>Conn&lt;S&gt;</code> is a universal power tool that accepts any standard drill bit. At Level 1 you only own one bit (plaintext TCP), so the interchangeable chuck seems pointless. At Level 8 you get a second bit (TLS) — and because you bought the tool with the standard chuck, it just clicks in. The foresight cost nothing at purchase and saved a whole second tool later.</div>
+    </article>
+  </section>
+
+  <section id="code-map">
+    <h2>Code Map</h2>
+    <p>Everything Level 1 built. Verified against <code>rproxy/src/</code>. Later-level additions to these same files are noted where they'd otherwise mislead.</p>
+    <table>
+      <thead><tr><th>File / item</th><th>Responsibility</th></tr></thead>
+      <tbody>
+        <tr><td><code>http.rs</code></td><td>The pure-logic parsing + framing core — no I/O. The file this level's protocol brain lives in.</td></tr>
+        <tr><td><code>find_head_end</code></td><td>Locate the byte just past the first <code>\r\n\r\n</code>; <code>None</code> = need more bytes.</td></tr>
+        <tr><td><code>parse_request_head</code> / <code>parse_response_head</code></td><td>Head bytes &rarr; owned <code>RequestHead</code> / <code>ResponseHead</code> structs (strict UTF-8, strict request/status line).</td></tr>
+        <tr><td><code>split_head_lines</code></td><td>Strict CRLF line splitting; rejects bare CR/LF (the anti-smuggling core).</td></tr>
+        <tr><td><code>parse_header_lines</code></td><td><code>Name: value</code> parsing; rejects missing colon and space-before-colon.</td></tr>
+        <tr><td><code>BodyFraming</code> enum</td><td>The four framing modes: <code>None</code> / <code>Length(u64)</code> / <code>Chunked</code> / <code>UntilClose</code>.</td></tr>
+        <tr><td><code>request_body_framing</code> / <code>response_body_framing</code></td><td>Compute framing per RFC 9112 §6; the response form takes method + status for bodiless cases.</td></tr>
+        <tr><td><code>check_framing_headers</code></td><td>Reject duplicate CL, duplicate TE, and CL+TE together.</td></tr>
+        <tr><td><code>parse_content_length</code></td><td>Strict all-ASCII-digit Content-Length parsing.</td></tr>
+        <tr><td><code>wants_keep_alive</code></td><td>Version-aware persistent-connection decision from the <code>Connection</code> header.</td></tr>
+        <tr><td><code>write_request_head</code> / <code>write_response_head</code></td><td>Serialize a head back to canonical bytes for the other leg.</td></tr>
+        <tr><td><code>header</code> / <code>count_header</code> / <code>remove_header</code></td><td>Case-insensitive header lookup, counting, and removal helpers.</td></tr>
+        <tr><td><code>proxy.rs</code></td><td>The engine: per-connection loop, forwarding, and body streaming.</td></tr>
+        <tr><td><code>Conn&lt;S&gt;</code> + <code>read_head</code> / <code>consume</code></td><td>Buffered reader generic over the stream type; owns the over-read remainder (pipelining).</td></tr>
+        <tr><td><code>copy_exact</code></td><td>Window-by-window copy of a <code>Length(n)</code> body — 16&nbsp;KB max in RAM.</td></tr>
+        <tr><td><code>copy_chunked</code> / <code>read_line</code></td><td>Verbatim chunked relay (extensions stripped, trailers forwarded).</td></tr>
+        <tr><td><code>copy_body_to</code></td><td>Dispatch a body copy by its framing; report whether the connection stays usable.</td></tr>
+        <tr><td><code>handle_client</code> / <code>serve_one</code></td><td>The keep-alive loop and the single-exchange forward path.</td></tr>
+        <tr><td><code>strip_hop_by_hop</code> + <code>HOP_BY_HOP</code></td><td>Remove connection-scoped headers before forwarding.</td></tr>
+        <tr><td><code>respond_error</code></td><td>Proxy-generated 400/408/502/504 responses with <code>Connection: close</code>.</td></tr>
+        <tr><td><code>main.rs</code></td><td>Bind the listener, the accept loop, <code>tokio::spawn</code> per connection, <code>set_nodelay</code>.</td></tr>
+        <tr><td><code>Cargo.toml</code></td><td>Level 1's only dependency: <code>tokio</code> (<code>regex</code> arrives at Level 2, <code>rustls</code> at Level 8).</td></tr>
+      </tbody>
+    </table>
+    <div class="callout warn"><strong>Verification note — what's grown since.</strong> Today's <code>proxy.rs</code> is much larger than Level 1's: the <code>copy_body_limited</code> / <code>BodyCopy::TooLarge</code> cap machinery is Level 8; <code>drain_body</code> and <code>is_poolable</code> are Levels 6–7; <code>TeeWriter</code>, <code>serve_cached</code>, and the cache plumbing are Level 11; the retry loop, leases, and <code>mark_failure</code>/<code>mark_success</code> are Levels 3–4; the middleware/rewrite/metrics calls are Levels 5–6/10. Level 1's <code>serve_one</code> was the straight-line read-parse-forward-relay path without any of those. Similarly <code>set_header</code>'s CRLF-injection <code>debug_assert</code> and the <code>MAX_RETRIES</code>/<code>REJECT_DRAIN_CAP</code> constants are later additions. This map lists what Level 1 authored; the wrapping is honestly attributed to its level.</div>
+  </section>
+
+  <section id="industry">
+    <h2>Industry: nginx / httpd / HAProxy / Envoy</h2>
+    <p class="lead">Every production proxy has to accept connections, parse HTTP/1.1, frame bodies, and defend against smuggling. Here is how the field does it and where Ferrum lands honestly. (Architecture as generally understood; qualify specifics with "as of" — behaviors drift across versions.)</p>
+    <div class="grid2">
+      <div class="card">
+        <span class="tag tech">nginx</span>
+        <h4>Event loop + arena parser</h4>
+        <p><strong>Mechanism:</strong> a fixed set of worker processes, each running an <code>epoll</code>/<code>kqueue</code> event loop over many connections — an explicit state machine, not one task per connection. Its HTTP parser is a hand-written, zero-copy state machine over per-connection buffers, and it is famously strict about framing.</p>
+        <p><strong>vs. ours:</strong> Ferrum's task-per-connection on Tokio is far simpler to <em>read</em> — the control flow is linear <code>async</code> code — but nginx's explicit event loop and buffer-arena parser are more memory-frugal and faster. Ours allocates owned Strings per head (Level 7 fixes that); nginx never does.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Apache httpd</span>
+        <h4>MPMs: prefork / worker / event</h4>
+        <p><strong>Mechanism:</strong> pluggable multi-processing modules. Classic <code>prefork</code> is one process per connection; <code>worker</code> is threads; the modern <code>event</code> MPM adds an event loop to hand off keep-alive connections so a thread isn't pinned while idle.</p>
+        <p><strong>vs. ours:</strong> httpd's <code>event</code> MPM exists to solve exactly the problem Tokio solves for us for free — don't pin an OS thread to an idle keep-alive connection. Ferrum gets that from the async runtime without choosing an MPM; httpd carries the historical baggage of the thread-per-connection models it grew out of.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">HAProxy</span>
+        <h4>Single-threaded event loops</h4>
+        <p><strong>Mechanism:</strong> a small number of threads, each a tight event loop, with a meticulous internal HTTP state machine (HTX) and a well-earned reputation for strict, security-conscious message parsing and anti-smuggling behavior.</p>
+        <p><strong>vs. ours:</strong> HAProxy is the gold standard for exactly the framing strictness Level 1 aspires to — dup-header and CL+TE rejection are table stakes there. Ours implements the same <em>rules</em> (bare-CRLF, dup CL/TE, CL+TE) but as a teaching-scale hand-rolled parser, not HAProxy's battle-tested HTX engine.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Envoy</span>
+        <h4>Threaded, codec-based</h4>
+        <p><strong>Mechanism:</strong> C++ worker threads over <code>libevent</code>, with pluggable HTTP codecs (its own HTTP/1 codec, nghttp2 for HTTP/2). Framing and header validation are handled by the codec layer, with configurable strictness.</p>
+        <p><strong>vs. ours:</strong> Envoy abstracts HTTP/1 vs HTTP/2 behind a codec interface; Ferrum is HTTP/1.1-only and hand-parses it. Envoy's codec is production-grade and multi-protocol; Level 1 is a single-protocol teaching parser — but the <em>concerns</em> (where does the head end, how is the body framed, is this smuggling) are identical.</p>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Proxy</th><th>Concurrency model</th><th>HTTP/1 parser</th><th>Body memory</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Ferrum (ours)</strong></td><td>task-per-connection on Tokio</td><td>hand-rolled, owned-String (zero-copy at L7)</td><td>16&nbsp;KB window, streamed</td></tr>
+        <tr><td>nginx</td><td>worker processes + event loop</td><td>hand-rolled zero-copy state machine</td><td>buffered/streamed, arena-managed</td></tr>
+        <tr><td>Apache httpd</td><td>MPM: prefork / worker / event</td><td>bucket-brigade filters</td><td>brigade-buffered</td></tr>
+        <tr><td>HAProxy</td><td>few threads, event loops</td><td>HTX state machine (very strict)</td><td>streamed via buffers</td></tr>
+        <tr><td>Envoy</td><td>worker threads + libevent</td><td>pluggable codec (HTTP/1, HTTP/2)</td><td>buffered/streamed, watermark-controlled</td></tr>
+      </tbody>
+    </table>
+    <div class="callout"><strong>The honest bottom line:</strong> Ferrum's concurrency model (spawn a task per connection, let the runtime multiplex) is the <em>most readable</em> of the bunch and genuinely scales fine for a teaching build — Tokio is doing the hard multiplexing nginx and httpd hand-code. Where Ferrum is deliberately crude is the parser (owned Strings, HTTP/1.1 only) and the backend leg (a fresh connection per request until Level 7). What it gets <em>right</em>, and what actually matters, is the framing strictness: the bare-CRLF, dup-header, and CL+TE defenses put it in the same anti-smuggling camp as HAProxy, which is the correct company to keep for the one decision a proxy cannot afford to get wrong.</div>
+  </section>
+
+  <section id="quiz">
+    <h2>Self-Check Questions</h2>
+    <div class="callout warn"><strong>Quiz pending — Levels 1–2 predate the per-level quiz convention.</strong> PROGRESS.md records a checkbox "<em>Level 1 quiz — Vessey to answer before Level 2</em>" but, unlike Levels 3–14, contains no written questions for this level (the note says "questions in session notes / ask Claude"). The eight questions below are <strong>KB-authored self-checks</strong>, not copied from PROGRESS.md — they exist so the page has a working revision section. Answers are intentionally omitted; work them out from the sections above (and from <code>http.rs</code> / <code>proxy.rs</code> / <code>main.rs</code>).</div>
+    <ol>
+      <li class="qa"><p class="q">The accept loop does almost nothing before <code>tokio::spawn</code>-ing each connection into its own task. Describe the specific denial-of-service that would be possible if, instead, the loop parsed the request head <em>before</em> spawning — and explain why that DoS would pass a naive functional test suite.</p></li>
+      <li class="qa"><p class="q"><code>find_head_end</code> returns <code>Option&lt;usize&gt;</code>, and <code>None</code> is explicitly <em>not</em> an error. Given that TCP doesn't respect message boundaries, walk through what <code>read_head</code> does on <code>None</code>, and what three different things a single <code>read()</code> might contain relative to one request.</p></li>
+      <li class="qa"><p class="q">Name the four <code>BodyFraming</code> variants. Which one is legal only for responses and never for requests, and what is the concrete reason a request can never use it?</p></li>
+      <li class="qa"><p class="q">A 2&nbsp;GB upload costs 16&nbsp;KB of memory. Using <code>copy_exact</code>'s loop, explain the mechanism — what does <code>take = (self.filled).min(len)</code> accomplish, and why must the <em>rest</em> of the buffer (beyond <code>take</code>) be preserved rather than discarded?</p></li>
+      <li class="qa"><p class="q">Ferrum rejects four things at parse time: bare CR/LF in the head, duplicate <code>Content-Length</code>, duplicate <code>Transfer-Encoding</code>, and CL+TE together. Pick <em>any two</em> and explain the exact proxy/backend disagreement each one would otherwise enable — i.e. how it becomes a smuggling primitive.</p></li>
+      <li class="qa"><p class="q">Why does the parser refuse to use <code>str::lines()</code> and instead split strictly on <code>\r\n</code> while rejecting any leftover lone <code>\r</code> or <code>\n</code>? Give the concrete header string that <code>str::lines()</code> would mis-handle.</p></li>
+      <li class="qa"><p class="q">Two pipelined requests arrive in one TCP segment: <code>POST&nbsp;/ ...\r\n\r\nhelloGET&nbsp;/next&nbsp;HTTP/1.1\r\n\r\n</code>. Trace how <code>copy_exact</code> (with <code>Length(5)</code>) and <code>consume</code> leave the buffer so that the next <code>read_head</code> cleanly parses the <code>GET /next</code> — no pipelining-specific code required.</p></li>
+      <li class="qa"><p class="q"><code>Conn&lt;S&gt;</code> is generic over <code>S: AsyncRead + AsyncWrite + Unpin</code> rather than concrete over <code>TcpStream</code>. This buys nothing at Level 1. What exactly does it enable at Level 8, and why is generics-with-monomorphization the right choice here over an <code>enum Stream { Plain, Tls }</code>?</p></li>
+    </ol>
+  </section>
+
+  <section id="cheatsheet">
+    <h2>Cheat Sheet &amp; Glossary</h2>
+    <h3>Constants &amp; defaults</h3>
+    <table>
+      <thead><tr><th>Name</th><th>Value</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>MAX_HEAD_BYTES</code></td><td>16&nbsp;KB (<code>16 * 1024</code>)</td><td>Hard cap on request line + all headers; exceeding it errors.</td></tr>
+        <tr><td><code>BUF_SIZE</code></td><td>16&nbsp;KB (<code>16 * 1024</code>)</td><td>Per-direction streaming window; the "2&nbsp;GB upload = 16&nbsp;KB RAM" number.</td></tr>
+        <tr><td><code>HEAD_READ_TIMEOUT</code></td><td>30&nbsp;s</td><td>Slowloris deadline for a complete request head &rarr; 408.</td></tr>
+        <tr><td><code>BACKEND_CONNECT_TIMEOUT</code></td><td>5&nbsp;s</td><td>Deadline to establish the backend TCP connection &rarr; 504.</td></tr>
+        <tr><td><code>set_nodelay(true)</code></td><td>on every socket</td><td>Disables Nagle; small heads go on the wire immediately.</td></tr>
+      </tbody>
+    </table>
+    <h3>Framing rules (RFC 9112 §6)</h3>
+    <table>
+      <thead><tr><th>Condition</th><th>Framing</th></tr></thead>
+      <tbody>
+        <tr><td><code>Transfer-Encoding: chunked</code></td><td><code>Chunked</code> (wins over Content-Length)</td></tr>
+        <tr><td><code>Content-Length: n</code>, n&gt;0</td><td><code>Length(n)</code></td></tr>
+        <tr><td><code>Content-Length: 0</code></td><td><code>None</code></td></tr>
+        <tr><td>No framing headers, <strong>request</strong></td><td><code>None</code></td></tr>
+        <tr><td>No framing headers, <strong>response</strong></td><td><code>UntilClose</code></td></tr>
+        <tr><td>HEAD resp / 1xx / 204 / 304</td><td><code>None</code> (regardless of headers)</td></tr>
+      </tbody>
+    </table>
+    <h3>Rejected at parse time (400 Bad Request)</h3>
+    <table>
+      <thead><tr><th>Input</th><th>Why rejected</th></tr></thead>
+      <tbody>
+        <tr><td>Bare <code>\r</code> or <code>\n</code> in head</td><td>Smuggling: lenient parsers disagree on line breaks (RFC 9112 §2.2).</td></tr>
+        <tr><td>Space before colon (<code>Host : x</code>)</td><td>RFC 9112 §5.1; parser-confusion vector.</td></tr>
+        <tr><td>Duplicate <code>Content-Length</code></td><td>Proxy/backend may honor different values.</td></tr>
+        <tr><td>Duplicate <code>Transfer-Encoding</code></td><td>Same framing-desync risk.</td></tr>
+        <tr><td>CL + TE together</td><td>Canonical smuggling combo (RFC 9112 §6.1).</td></tr>
+        <tr><td>Non-digit Content-Length (<code>+5</code>, <code>5, 5</code>, <code>0x5</code>, <code>5 5</code>)</td><td>Framing-desync via parser tolerance differences.</td></tr>
+        <tr><td>Non-UTF-8 head / malformed request line / unsupported version</td><td>Ambiguous input is refused, not guessed.</td></tr>
+      </tbody>
+    </table>
+    <h3>Glossary</h3>
+    <div class="qa"><p class="q"><code>Conn&lt;S&gt;</code></p><p class="a">Buffered reader generic over any <code>AsyncRead + AsyncWrite</code> stream; owns the 16&nbsp;KB window and the unconsumed-bytes remainder. The seam that lets plaintext and TLS share one code path.</p></div>
+    <div class="qa"><p class="q"><code>BodyFraming</code></p><p class="a">The four-variant enum (<code>None</code>/<code>Length</code>/<code>Chunked</code>/<code>UntilClose</code>) that records how a body is delimited on the wire.</p></div>
+    <div class="qa"><p class="q">Head</p><p class="a">The request/status line plus all header lines, terminated by a blank line (<code>\r\n\r\n</code>). Located by <code>find_head_end</code>.</p></div>
+    <div class="qa"><p class="q">Windowed streaming</p><p class="a">Copying a body one 16&nbsp;KB buffer at a time so per-connection memory is flat regardless of body size.</p></div>
+    <div class="qa"><p class="q">Request smuggling</p><p class="a">Exploiting a proxy/backend disagreement about where a request ends to inject a hidden request. Closed here by strict framing (bare-CRLF, dup-header, CL+TE rejection).</p></div>
+    <div class="qa"><p class="q">Slowloris</p><p class="a">A DoS that trickles a request head slowly to pin a connection forever. Defended by <code>HEAD_READ_TIMEOUT</code> (30&nbsp;s) and <code>MAX_HEAD_BYTES</code> (16&nbsp;KB).</p></div>
+    <div class="qa"><p class="q">Hop-by-hop header</p><p class="a">A header describing one TCP hop (<code>Connection</code>, <code>Keep-Alive</code>, <code>TE</code>, <code>Upgrade</code>, ...), stripped before forwarding rather than relayed end-to-end.</p></div>
+    <div class="qa"><p class="q">Keep-alive / pipelining</p><p class="a">Reusing one client socket for successive requests (HTTP/1.1 default); pipelining (back-to-back requests) is handled for free by <code>Conn</code>'s preserved over-read buffer.</p></div>
+    <div class="qa"><p class="q"><code>tokio::spawn</code></p><p class="a">Hands a connection to its own async task so one slow client never blocks the accept loop or other connections; the runtime multiplexes many tasks over few OS threads.</p></div>
+  </section>
+</main>
+</div>
+
+<footer>
+  <p>Ferrum Knowledge Base &mdash; Level 1: Core Networking &bull; Built 2026-09-02</p>
+  <p class="muted">A from-scratch Rust reverse-proxy course. Grounded in <code>rproxy/src/http.rs</code>, <code>proxy.rs</code>, <code>main.rs</code> and PROGRESS.md; industry comparisons are the author's own and qualified where uncertain.</p>
+</footer>
+</body>
+</html>

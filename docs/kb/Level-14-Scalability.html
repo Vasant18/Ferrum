@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ferrum KB — Level 14: Scalability & HA</title>
+<meta name="description" content="A complete, plain-English map of the Barracuda Networks product portfolio: every product family (Email, Application, Network, Data Protection, Managed XDR, MSP) and the BarracudaONE platform — what each product is, what it does, and what problem it solves." />
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    flowchart: { htmlLabels: true, useMaxWidth: true, padding: 12, nodeSpacing: 55, rankSpacing: 55 },
+    startOnLoad: true, theme: 'base', securityLevel: 'loose',
+    themeVariables: {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '15px',
+      primaryColor: '#e7e8ea', primaryTextColor: '#15203a', primaryBorderColor: '#7e848c',
+      lineColor: '#6a6f77', secondaryColor: '#dddfe2', tertiaryColor: '#f3f4f6',
+      noteBkgColor: '#fff3d6', noteTextColor: '#3a2f12', noteBorderColor: '#caa84a',
+      actorBkg: '#e7e8ea', actorTextColor: '#15203a', actorBorder: '#7e848c',
+      clusterBkg: '#eef0f2', clusterBorder: '#a0a4aa'
+    }
+  });
+</script>
+<style>
+  :root{--bg:#0f1320;--panel:#161c2e;--panel-2:#1d2540;--ink:#e8ecf5;--muted:#9aa6c4;--accent:#7c5cff;--accent-2:#22d3a6;--warn:#ffb454;--danger:#ff6b81;--line:#2a3354;--code-bg:#0b0f1a;--max:1100px;}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:linear-gradient(180deg,#0c1020,#0f1320 40%);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  a{color:var(--accent-2);text-decoration:none}a:hover{text-decoration:underline}
+  header.hero{padding:56px 24px 40px;text-align:center;background:radial-gradient(1200px 400px at 50% -10%,rgba(255,107,129,.18),transparent 60%);border-bottom:1px solid var(--line);}
+  header.hero .eyebrow{letter-spacing:.25em;text-transform:uppercase;color:var(--accent-2);font-size:.75rem;font-weight:700}
+  header.hero h1{font-size:clamp(1.9rem,4vw,3rem);margin:.3em 0 .2em;line-height:1.1}
+  header.hero p.sub{color:var(--muted);max-width:790px;margin:0 auto;font-size:1.05rem}
+  .badges{margin-top:18px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .badge{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);padding:4px 12px;border-radius:999px;font-size:.8rem}
+  .layout{display:grid;grid-template-columns:260px 1fr;gap:32px;align-items:start;max-width:1320px;margin:0 auto;padding:0 22px}
+  nav.toc{position:sticky;top:0;max-height:100vh;overflow:auto;padding:28px 10px 60px;border-right:1px solid var(--line);font-size:.9rem;}
+  nav.toc h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.18em;color:var(--muted);margin:18px 8px 6px}
+  nav.toc a{display:block;color:var(--muted);padding:5px 10px;border-radius:8px;border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--panel);color:var(--ink);text-decoration:none;border-left-color:var(--accent)}
+  main{padding:34px 0 80px;min-width:0}
+  section{margin:0 0 46px;scroll-margin-top:18px}
+  section>h2{font-size:1.7rem;margin:0 0 .5em;padding-bottom:.3em;border-bottom:2px solid var(--line);display:flex;align-items:center;gap:.5em;}
+  h3{font-size:1.25rem;margin:1.6em 0 .4em;color:#fff}
+  h4{font-size:1.02rem;margin:1.2em 0 .3em;color:var(--accent-2);text-transform:uppercase;letter-spacing:.04em}
+  p,li{color:var(--ink)}.muted{color:var(--muted)}
+  article.concept{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin:22px 0}
+  article.concept>h3:first-child{margin-top:0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr} .layout{grid-template-columns:1fr} nav.toc{position:static;max-height:none;border-right:none;border-bottom:1px solid var(--line)}}
+  .card{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card h4{margin-top:.2em}
+  .callout{border-left:4px solid var(--accent);background:var(--panel-2);padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  .callout.analogy{border-left-color:var(--accent-2)}.callout.warn{border-left-color:var(--warn)}.callout.danger{border-left-color:var(--danger)}.callout.story{border-left-color:#5ec2ff}
+  .tag{display:inline-block;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:2px 8px;border-radius:6px;margin-bottom:6px}
+  .tag.beg{background:rgba(34,211,166,.15);color:var(--accent-2)}.tag.tech{background:rgba(124,92,255,.18);color:#b9a6ff}.tag.adv{background:rgba(255,107,129,.15);color:var(--danger)}
+  code{background:var(--code-bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.86em;color:#ffd9a0}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.85rem;line-height:1.55}
+  pre code{background:none;border:none;padding:0;color:#d7e0f5}
+  pre.art{color:#ffd9a0;font-size:.95rem;line-height:1.4;letter-spacing:.04em}
+  pre.mermaid{background:#f7f8fc;color:#111;text-align:center}
+  .mermaid svg text,.mermaid text{fill:#15203a !important}
+  .mermaid .nodeLabel,.mermaid .edgeLabel,.mermaid .label,.mermaid span,.mermaid p,.mermaid div,.mermaid foreignObject *{color:#15203a !important;fill:#15203a !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p{background:#f3f5fc !important}
+  .mermaid .cluster-label .nodeLabel,.mermaid .cluster-label p,.mermaid .cluster span,.mermaid .cluster p{color:#3c4046 !important}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.92rem;overflow:hidden;border-radius:10px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel-2);color:#fff}
+  tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  details{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:12px 0}
+  details summary{cursor:pointer;font-weight:600;color:var(--accent-2);padding:6px 0}
+  details[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px}
+  figure{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  figcaption{color:var(--muted);font-size:.85rem;text-align:center;margin-top:8px;font-style:italic}
+  .qa{margin:10px 0}.qa .q{font-weight:600}.qa .a{color:var(--muted);margin:2px 0 0}
+  ol.flow{counter-reset:step;list-style:none;padding-left:0}
+  ol.flow>li{counter-increment:step;position:relative;padding:10px 0 10px 52px;border-bottom:1px dashed var(--line)}
+  ol.flow>li::before{content:counter(step);position:absolute;left:0;top:8px;width:34px;height:34px;background:var(--accent);color:#fff;border-radius:50%;display:grid;place-items:center;font-weight:700}
+  .rank{font-weight:800;color:var(--accent);margin-right:6px}
+  footer{border-top:1px solid var(--line);padding:30px 22px;text-align:center;color:var(--muted);font-size:.88rem}
+  .lead{font-size:1.08rem}
+  .formula{background:var(--code-bg);border:1px dashed var(--accent);border-radius:10px;padding:12px 16px;font-family:monospace;color:#ffd9a0;text-align:center;margin:14px 0}
+
+  /* KB-THEME START */
+  /* Azure (blue palette) */
+  :root{--bg:#0e1c30;--panel:#152740;--panel-2:#1d3458;--ink:#e6edf7;--muted:#93a6c4;--accent:#1a8ae5;--accent-2:#41a7f5;--warn:#d6a96a;--danger:#d98a8a;--line:#264064;--code-bg:#0b1626;}
+  body{background:linear-gradient(180deg,var(--bg),var(--bg))}
+  header.hero{background:radial-gradient(1100px 400px at 50% -10%,rgba(20,119,210,.26),transparent 60%)}
+  h3,.parthead{color:var(--ink)}
+  th{color:var(--ink)}
+  .tag.tech{background:rgba(65,167,245,.16);color:var(--accent-2)}
+  ol.flow>li::before{color:#0b1626}
+  /* KB-THEME END */
+  /* prevent node/edge label clipping */
+  .mermaid foreignObject{overflow:visible !important}
+  .mermaid .nodeLabel,.mermaid .label,.mermaid foreignObject>div,.mermaid foreignObject span,.mermaid foreignObject p{white-space:nowrap !important;overflow:visible !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p,.mermaid .edgeLabel span{white-space:nowrap !important;overflow:visible !important;padding:1px 4px}
+  .mermaid svg{max-width:100%;height:auto}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyebrow">Ferrum KB &middot; Level 14 of 14 &middot; Scalability &amp; High Availability</div>
+  <h1>Scalability &amp; HA<br/><span style="font-size:.6em;color:var(--muted)">who balances the load balancers?</span></h1>
+  <p class="sub">The course's final level, and a theory level like Level 9: no code changed. One proxy, however fast, is a single point of failure with a ceiling. This page asks what happens when "the proxy" becomes "the proxy <em>tier</em>" — and finds, satisfyingly, that every level of this course reappears wearing a bigger hat. Every claim below was verified against <code>rproxy/src</code> by grep, not recalled.</p>
+  <div class="badges">
+    <span class="badge">Audience: Vessey (built it) + the curious</span>
+    <span class="badge">Scope: theory — N &gt; 1 audit of this tree</span>
+    <span class="badge">Source: docs/level-14-scalability.md</span>
+    <span class="badge">Course status: 14/14 complete</span>
+    <span class="badge">Reading time: ~24 min</span>
+  </div>
+  <p class="muted" style="margin-top:18px">
+    <a href="index.html">&larr; Course index</a> &nbsp;&middot;&nbsp;
+    <a href="Level-13-Basic-WAF.html">&larr; Level 13: Basic WAF</a> &nbsp;&middot;&nbsp;
+    <a href="index.html">Course index &rarr;</a>
+  </p>
+</header>
+
+<div class="layout">
+<nav class="toc">
+  <h2>Orientation</h2>
+  <a href="#exec-summary">Executive Summary</a>
+  <a href="#big-picture">The Big Picture</a>
+  <h2>Core</h2>
+  <a href="#who-balances">Who Balances the Balancers?</a>
+  <a href="#state-audit">The State Audit</a>
+  <a href="#ha">High Availability</a>
+  <a href="#cdn">CDN Integration</a>
+  <a href="#closing-map">The Closing Map</a>
+  <a href="#code-map">Code Map</a>
+  <h2>Compare</h2>
+  <a href="#industry">How Industry Does It</a>
+  <h2>Reference</h2>
+  <a href="#quiz">Quiz</a>
+  <a href="#cheatsheet">Cheat Sheet &amp; Glossary</a>
+</nav>
+
+<main>
+  <section id="exec-summary">
+    <h2>Executive Summary</h2>
+    <p class="lead">Level 14 is the capstone: a theory level that takes the single-instance proxy built across Levels 1–13 and asks the one question the whole design has been quietly deferring — <strong>what breaks when there are N of these instead of one?</strong></p>
+    <p>The method is Level 9's: read the concepts through Ferrum's own code, verify every claim against the tree, and name precisely what would break at N &gt; 1. Four movements. First, <strong>who balances the load balancers</strong> — the traffic-distribution ladder (DNS round-robin, VRRP/keepalived floating VIPs, anycast, and the L4-tier-over-L7-tier architecture inside every major cloud), with the pleasing recursion that a Maglev-style L4 tier consistent-hashes flows exactly like <code>balancer.rs</code>'s <code>chash</code> ring, and hashes the 4-tuple for the same affinity reason <code>iphash</code> exists.</p>
+    <p>Second, the centerpiece: a <strong>state audit</strong> of <code>rproxy/src</code> against the design hierarchy <em>don't share / share approximately / share for real</em>. Routes, health, pools, and metrics ship to N instances unchanged. Rate limits, WAF reputation, and the cache go quietly approximate at N &gt; 1 — each with a remedy. Only exactly-once duties (cert renewal) need real consensus, and the honest rule is <em>use a store, don't implement Raft</em>. Third, <strong>high availability</strong>: the L4 flap-prevention asymmetry generalizes to fleet membership, L10's <code>/health</code> is what an L4 tier consumes, L12's drain is half a rolling deploy, and failure domains stack process → machine → site. Fourth, <strong>CDN integration</strong>, which lands on three seams this course already built. The closing claim: distributed systems aren't a different subject; they're the same subject, multiplied. <strong>Course complete: 14/14 levels, 280 tests, ~13.4k lines, two dependencies</strong> (regex, rustls) — everything else from scratch, on purpose.</p>
+    <div class="callout"><strong>Theory level, no code.</strong> Like Level 9 (OS Internals), nothing in <code>rproxy/src</code> changed. That is the correct outcome, not a shortfall: the single-instance code was built well enough that the fleet story is mostly about which existing state is safe to duplicate — and the surprising answer is "almost all of it."</div>
+  </section>
+
+  <section id="big-picture">
+    <h2>The Big Picture</h2>
+    <p class="lead">Ferrum spent Levels 3–4 deciding which <em>backend</em> gets a request. At cluster scale the same question recurses one layer up: which <em>proxy</em> gets the connection?</p>
+    <p>In production a Ferrum-shaped proxy is rarely the first thing a packet touches. Above it sit tiers whose only job is to spread load across the proxy fleet, and below it sit the backends it already knows how to balance. The mandatory diagram for this level is that full stack: anycast (or DNS) gets a client to a <em>site</em>; a thin L4 tier inside the site consistent-hashes the 4-tuple onto the L7 fleet; the Ferrum-shaped L7 proxies do the real work; and each proxy load-balances its backends exactly as Levels 3–4 built. Each layer does what it is cheapest at.</p>
+    <figure>
+<pre class="mermaid">
+flowchart TD
+  CL["Clients (worldwide)"] --> AZ["Anycast IP<br/>(one IP, many sites via BGP)"]
+  AZ --> S1["Site A"]
+  AZ --> S2["Site B"]
+  subgraph SITE["Inside one site"]
+    L4A["L4 tier<br/>(LVS / Maglev / NLB)<br/>consistent-hash the 4-tuple"]
+    L4A --> P1["Ferrum L7 #1"]
+    L4A --> P2["Ferrum L7 #2"]
+    L4A --> P3["Ferrum L7 #3"]
+  end
+  S1 --> L4A
+  P1 --> B["Backends<br/>(L3/L4 balancing — already built)"]
+  P2 --> B
+  P3 --> B
+</pre>
+    <figcaption>The tiered architecture this level is about. Ferrum is the L7 row. Everything above it (anycast, the L4 tier) is what a fleet adds; everything below it (backend balancing) is what Levels 3–4 already do. The L4 tier's consistent hashing is the same algorithm as Ferrum's own <code>chash</code> ring, one layer up.</figcaption>
+    </figure>
+    <div class="callout analogy"><strong>Analogy:</strong> a single ticket booth (one proxy) has a maximum throughput and shuts the whole show if the clerk faints. A fleet is a row of booths with a greeter at the door (the L4 tier) who sends you to a booth and remembers which one — so your follow-up questions go to the same clerk who has your file open (4-tuple affinity). A second greeter at a second venue (anycast) means even a fire at one venue doesn't close the show.</div>
+  </section>
+
+  <section id="who-balances">
+    <h2>1 &middot; Who Balances the Balancers?</h2>
+    <p class="lead">Once you run more than one proxy, some layer above must decide which proxy a given connection reaches. There are four standard answers, and they are usually <em>layered</em>, not chosen exclusively.</p>
+
+    <table>
+      <thead><tr><th>Mechanism</th><th>How it works</th><th>Failover speed</th><th>The catch</th></tr></thead>
+      <tbody>
+        <tr><td><strong>DNS round-robin</strong></td><td>Publish N A/AAAA records; a health-checked DNS provider (e.g. Route 53) pulls dead IPs from the answer set</td><td>Minutes (bounded by TTL)</td><td>Resolvers cache and clients disobey TTLs — failover is <em>advisory</em>, not enforced</td></tr>
+        <tr><td><strong>VRRP / keepalived</strong></td><td>The active proxy holds a floating VIP; the standby claims it via gratuitous ARP when the active dies</td><td>Sub-second</td><td>Active/passive wastes half the hardware, and it scales to <em>exactly two</em></td></tr>
+        <tr><td><strong>Anycast</strong></td><td>The SAME IP is announced from many sites via BGP; the internet's routing delivers each client to the nearest site</td><td>Route-convergence (seconds+)</td><td>Requires <em>owning IP space and running BGP sessions</em> — this is how Cloudflare puts one IP everywhere</td></tr>
+        <tr><td><strong>L4 tier over L7 tier</strong></td><td>Thin, near-stateless L4 balancers (LVS, Maglev, NLB) consistent-hash flows onto the L7 proxy fleet</td><td>Seconds, graceful</td><td>The architecture inside every major cloud — but it's one more tier you have to run</td></tr>
+      </tbody>
+    </table>
+
+    <p>The layering in practice reads top-to-bottom: <strong>anycast or DNS gets a client to a site; an L4 tier inside the site consistent-hashes the 4-tuple onto the L7 fleet; Ferrum-shaped proxies do the L7 work.</strong> Each layer does what it is cheapest at — coarse geographic steering at the top, cheap per-flow steering in the middle, expensive per-request logic (routing, TLS, WAF, caching) at the bottom.</p>
+
+    <h3>The recursion worth savoring</h3>
+    <p>The best part of this level is that Ferrum already <em>contains</em> the core idea of the tier that would sit above it. Two grep-verified facts:</p>
+    <div class="grid2">
+      <div class="card">
+        <span class="tag tech">Same algorithm, one layer up</span>
+        <h4>Maglev = our chash ring</h4>
+        <p>A Maglev-style L4 balancer spreads flows onto proxies using <strong>consistent hashing</strong> — the identical algorithm <code>balancer.rs:598</code> builds a ring for when the route uses <code>Algorithm::ConsistentHash</code> (<code>chash</code>). The reason is the same reason we chose it for backends: adding or removing one node reshuffles only ~1/N of the assignments instead of all of them, so a proxy joining or leaving the fleet doesn't scramble every flow.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Same key, same reason</span>
+        <h4>Hash the 4-tuple, don't round-robin</h4>
+        <p>The L4 tier hashes the connection's 4-tuple (src IP, src port, dst IP, dst port) for exactly the reason <code>IpHash</code> exists at <code>balancer.rs:711</code>: <strong>affinity to held state</strong>. Every packet of one TCP flow must land on the proxy that holds that flow's TCP/TLS state. Round-robin packets across proxies and you'd shatter every connection — packet 2 arrives at a proxy that never saw the handshake.</p>
+      </div>
+    </div>
+    <div class="callout analogy"><strong>Analogy:</strong> consistent hashing is a coat-check where each coat's ticket number maps to a fixed peg. Add a peg and only the coats near it move; the rest stay put. That's why a proxy can join the fleet mid-day without the L4 tier dropping every live connection — and it's the same ring we already built one floor down.</div>
+    <div class="callout warn"><strong>Which resource can't you just buy more of?</strong> Anycast. DNS records, VIPs, and L4 nodes are things you provision. Anycast requires <em>owning routable IP space</em> and running BGP sessions with transit providers — administrative, not purchasable off a shelf. That's the quiz-1 trap.</div>
+  </section>
+
+  <section id="state-audit">
+    <h2>2 &middot; The State Audit</h2>
+    <p class="lead">N proxies must agree on things Ferrum built as single-instance state. The design hierarchy — <strong>don't share; share approximately; share for real (rarely)</strong> — maps onto a concrete audit of the tree, done by grepping for every <code>static</code>, <code>OnceLock</code>, and per-process shard.</p>
+
+    <figure>
+<pre class="mermaid">
+flowchart TD
+  ST["Every piece of Ferrum state"] --> Q1{"Do instances<br/>need to agree?"}
+  Q1 -->|"No — identical or independent"| DS["DON'T SHARE<br/>routes, health, pools, metrics"]
+  Q1 -->|"Only loosely"| SA["SHARE APPROXIMATELY<br/>rate limits, WAF reputation, cache"]
+  Q1 -->|"Exactly-once truth"| SR["SHARE FOR REAL<br/>cert renewal, nightly purge"]
+  SA --> R1["Remedy: per-instance &divide;N,<br/>or Redis loose counts,<br/>or chash / CDN above"]
+  SR --> R2["Remedy: etcd/ZooKeeper lease<br/>— use a store, don't build Raft"]
+</pre>
+    <figcaption>The three-tier state hierarchy and where each Ferrum subsystem lands. The vast majority sits in the left branch — the payoff of having built single-instance state cleanly.</figcaption>
+    </figure>
+
+    <h3>Tier 1 — Ships to N instances unchanged (don't share)</h3>
+    <div class="grid2">
+      <div class="card">
+        <span class="tag beg">Don't share</span>
+        <h4>Route table / config</h4>
+        <p><code>RwLock&lt;Arc&lt;RouteTable&gt;&gt;</code> (L12). The identical <code>ferrum.toml</code> is pushed to every instance; SIGHUP is already the reload interface a config-push pipeline would call. The grown-up version is a control plane streaming config (Envoy's xDS) — and <strong>L12 unknowingly built the data-plane half</strong>: validate wholesale, swap atomically, never die on bad input. A control plane is just "someone else runs <code>reload()</code> for you, over gRPC."</p>
+      </div>
+      <div class="card">
+        <span class="tag beg">Don't share</span>
+        <h4>Health state</h4>
+        <p><code>balancer.rs</code> breakers + <code>health.rs</code> probers. Each instance learns independently. N instances probing one backend N times is mild extra load in exchange for total independence — no consensus, and slight disagreement is <em>harmless</em>: an instance that hasn't noticed a recovery yet just routes around a healthy server briefly. "Let each proxy learn" falls straight out of having built health checking with zero shared state.</p>
+      </div>
+      <div class="card">
+        <span class="tag beg">Don't share</span>
+        <h4>Connection pool (L7)</h4>
+        <p>Per-instance by nature — a pooled backend socket belongs to the process that opened it. Nothing to share; nothing to change.</p>
+      </div>
+      <div class="card">
+        <span class="tag beg">Don't share</span>
+        <h4>Metrics (L10)</h4>
+        <p>Prometheus was <em>designed</em> for fleets — the scraper aggregates across instances. <code>ferrum_requests_total</code> summed over N proxies is the fleet number. The per-instance registry needs zero changes; the fleet view is a query, not a code change.</p>
+      </div>
+    </div>
+
+    <h3>Tier 2 — Breaks quietly at N &gt; 1 (share approximately)</h3>
+    <p>These are the dangerous ones, because they don't crash — they silently do the wrong amount. Verified by grepping the tree for process-local state.</p>
+
+    <article class="concept">
+      <h3>Rate limiting — <code>middleware/ratelimit.rs</code>, 16-shard token buckets</h3>
+      <p>A <code>rate=100/s</code> route behind 3 proxies admits up to <strong>300/s</strong> — each instance's buckets are blind to the others. The hierarchy applies cleanly:</p>
+      <ul>
+        <li><strong>Remedy A — per-instance &divide;N:</strong> set 33/s per instance. Often exactly the right trade: zero coordination, and the fleet total is what you wanted.</li>
+        <li><strong>Remedy B — Redis loose counts:</strong> an async-replicated counter buys a slightly-loose <em>global</em> limit. The 16-shard design generalizes directly — the shards just move from in-process mutexes to Redis keys.</li>
+      </ul>
+      <div class="callout warn"><strong>Why not count exactly?</strong> Exact distributed counting costs a <em>synchronous round-trip per request</em> to the shared counter. That latency is almost never worth it; the approximate answer is the right trade. This is the quiz-5 cost that rules out exactness.</div>
+    </article>
+
+    <article class="concept">
+      <h3>WAF reputation — <code>waf.rs</code> <code>REPUTATION: OnceLock</code> (L13)</h3>
+      <p>Strikes and bans live in a process-wide <code>OnceLock</code> at <code>waf.rs:523</code> — so they are per-instance. An attacker spraying a 3-proxy fleet gets <strong>3&times; the strike budget</strong> before every instance has independently banned them. Same <em>shape</em> as rate limiting (a WAF reputation store IS a rate limiter for hostility), so same remedies. The twist: commercial WAFs share reputation across <em>customers</em>, not merely across their own instances — the network effect the vendors treat as a moat, and something a from-scratch build structurally can't replicate.</p>
+    </article>
+
+    <article class="concept">
+      <h3>The response cache — <code>cache.rs</code> (L11)</h3>
+      <p>N independent caches mean N misses per resource and N revalidations — <strong>wasteful but correct</strong>. Each cache honors the same RFC 9111 rules; nothing leaks and nothing is served stale that shouldn't be. Two fixes, and "don't fix it" is a legitimate one:</p>
+      <ul>
+        <li><strong>Don't fix it:</strong> a CDN above absorbs the hit rate, making the local cache a second-order optimization.</li>
+        <li><strong>Consistent-hash the cache keys</strong> across the tier so each resource has one home proxy — the L3 <code>chash</code> ring making its <em>third</em> appearance (backends → proxies → cache keys).</li>
+      </ul>
+    </article>
+
+    <div class="callout"><strong>The pleasant find — <code>active_connections</code>, request-id seeds, ban backoff clocks</strong> are all per-instance and all fine. The request-id scheme (L6) already seeds per-process precisely so N instances don't collide in a shared log. <em>That decision was cluster-ready three levels before clusters were on the table.</em></div>
+
+    <h3>Tier 3 — Needs real coordination (share for real — rarely)</h3>
+    <div class="grid2">
+      <div class="card">
+        <span class="tag adv">Share for real</span>
+        <h4>"Exactly one instance does X"</h4>
+        <p>Renew the TLS cert; run the nightly purge. This is <strong>leader election</strong>: an etcd/ZooKeeper <em>lease</em> — a TTL'd key the leader must keep renewing; lose it (crash, partition) and another instance takes over — built on Raft/Paxos consensus. The honest engineering rule: <em>use an existing store; implementing Raft is its own course.</em> Nothing in Ferrum needs this today.</p>
+      </div>
+      <div class="card">
+        <span class="tag adv">Share for real</span>
+        <h4>Sessions</h4>
+        <p>The cluster answer to L3's <code>iphash</code> affinity is to make affinity <em>unnecessary</em> — externalize session state (Redis) or carry it in the token (JWT), so ANY proxy and ANY backend can serve ANY user. Statelessness is what makes horizontal scaling linear. <code>iphash</code> remains the fallback when a legacy backend hoards state in memory.</p>
+      </div>
+    </div>
+    <div class="callout danger"><strong>Wasteful vs. wrong — the distinction that matters (quiz 6).</strong> N caches are <em>wasteful but correct</em>: redundant work, identical answers. N rate limiters are <em>quietly wrong</em>: they admit N&times; the intended traffic. The difference is whether the state is a <em>read-through optimization</em> (cache — being wrong just means a miss) or an <em>enforcement budget</em> (rate limit — being wrong means the limit is a lie). Optimizations tolerate duplication; budgets don't.</div>
+  </section>
+
+  <section id="ha">
+    <h2>3 &middot; High Availability — What Actually Pages You</h2>
+    <p class="lead">HA at fleet scale isn't new machinery; it's three single-instance mechanisms this course already built, generalized one level up.</p>
+
+    <article class="concept">
+      <h3>The health-check asymmetry generalizes</h3>
+      <p>L4's "down after 3 failures, up after 2 successes" prevents <em>flapping</em> for backends. Fleet membership uses the identical asymmetry for proxies: an L4 tier health-checks its L7 fleet the way <code>health.rs</code> probes backends. <strong>L10's <code>/health</code> endpoint is exactly what it would hit</strong> — and that endpoint's deliberate "degraded &ne; dead" distinction is what keeps a <em>backend</em> outage from cascading into the <em>proxy tier's</em> removal. A proxy whose backends are down is degraded, not dead; it should stay in rotation to serve cached content and return honest 502s, not be yanked and pile load onto its siblings.</p>
+    </article>
+
+    <article class="concept">
+      <h3>Graceful everything becomes rolling deploys</h3>
+      <p>L12's drain + <code>Connection: close</code> is the <em>per-instance</em> move. The fleet version is "remove from the L4 tier &rarr; drain &rarr; replace &rarr; re-add", orchestrated by Kubernetes or equivalent. The KB already conceded this at L12: in-process graceful restart (FD passing, <code>SO_REUSEPORT</code>) lost to the platform's rolling deploy, because the orchestrator now rolls pods. L12's drain is <strong>half</strong> of that dance — the "drain" step — and the other half (remove/re-add from the tier) is the orchestrator's job, not the proxy's.</p>
+    </article>
+
+    <article class="concept">
+      <h3>Failure domains stack</h3>
+      <p>Each domain's failure is the next domain's health-check event:</p>
+      <table>
+        <thead><tr><th>Domain</th><th>Detection</th><th>Recovery</th><th>Per-instance analogue built in</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Process</strong></td><td>Tokio task panics are contained (L12 worker-processes analysis)</td><td>Supervisor restarts the process</td><td>L12 — panic containment per task</td></tr>
+          <tr><td><strong>Machine</strong></td><td>VRRP peer / L4 tier health check fails</td><td>VRRP failover or L4 tier reroutes flows</td><td>L4 breakers + <code>health.rs</code> probers</td></tr>
+          <tr><td><strong>Site</strong></td><td>BGP session drops / site monitor fails</td><td>Anycast withdraws the site's BGP announcement</td><td>(no per-instance analogue — this is genuinely new)</td></tr>
+        </tbody>
+      </table>
+    </article>
+    <div class="callout"><strong>The one genuinely new problem (quiz 14).</strong> Almost everything here is a single-instance mechanism enlarged. The exception with <em>no</em> single-instance analogue in this codebase is <strong>distributed consensus / leader election</strong> (and its cousin, the network partition — "split brain"). A single process never disagrees with itself about who is the leader; a fleet can, and resolving that needs Raft/Paxos machinery that has no counterpart anywhere in Ferrum's tree. That's why the study doc deliberately ends on it rather than on self-congratulation.</div>
+  </section>
+
+  <section id="cdn">
+    <h2>4 &middot; CDN Integration — Know Your Place in the Chain</h2>
+    <p class="lead">In production, Ferrum-shaped proxies usually sit <em>behind</em> a CDN. Three consequences, and each lands on a seam this course already built.</p>
+    <div class="grid3">
+      <div class="card">
+        <span class="tag tech">Seam: L5 + L8</span>
+        <h4>The "client IP" is a CDN node</h4>
+        <p>L5's trust rules (overwrite <code>X-Real-IP</code>, append to XFF, key limits on the socket peer) need one refinement: a <em>published allowlist</em> of CDN ranges from which <code>X-Forwarded-For</code> may be trusted. <strong>L8's <code>CidrList</code> is literally the machinery</strong> (<code>security.rs</code>) — <code>--allow-cidr</code> pointed at <em>trust</em> rather than <em>admission</em>.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Seam: L11</span>
+        <h4>The cache becomes layer two</h4>
+        <p>The CDN's edge sites absorb the hit rate; L11's cache catches what leaks through. <code>s-maxage</code> vs <code>max-age</code> (L11 honored both) is exactly how an origin speaks to the two layers <em>differently</em> — a long shared-cache TTL for the CDN, a short/absent private TTL for the browser.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Seam: L7 + L1</span>
+        <h4>Origin pull is a keep-alive client</h4>
+        <p>A CDN node multiplexing thousands of users over a few hot connections is the <em>ideal</em> customer for L7's connection pools and L1's keep-alive loop. Nothing to change — the design that made pooling worthwhile makes CDN origin-pull cheap.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="closing-map">
+    <h2>5 &middot; The Closing Map</h2>
+    <p class="lead">Every level of this course reappears at cluster scale wearing a bigger hat. This table is the whole thesis in one glance.</p>
+    <table>
+      <thead><tr><th>Single instance (built)</th><th>Fleet (theory)</th></tr></thead>
+      <tbody>
+        <tr><td>L3 consistent-hash ring over backends</td><td>Maglev-style hashing of flows over proxies</td></tr>
+        <tr><td>L4 breakers + probers</td><td>Fleet membership + L4-tier health checks</td></tr>
+        <tr><td>L6 / L13 per-IP buckets &amp; strikes</td><td>Redis-replicated approximate global limits</td></tr>
+        <tr><td>L10 <code>/health</code>, <code>/metrics</code></td><td>The endpoints the tier and the scraper consume</td></tr>
+        <tr><td>L11 cache</td><td>Layer two behind the CDN, or chash-partitioned</td></tr>
+        <tr><td>L12 SIGHUP reload</td><td>Control plane (xDS); config push</td></tr>
+        <tr><td>L12 drain</td><td>Rolling deploys</td></tr>
+      </tbody>
+    </table>
+    <div class="callout story"><strong>The closing claim.</strong> Distributed systems aren't a different subject; they're the same subject, multiplied. The vocabulary built here — consistent hashing, breakers, drain, atomic config swap, anomaly scoring — is the vocabulary of the Envoy architecture docs, the Maglev paper, and the Pingora posts, readable now as a peer rather than a tourist. <strong>Course complete: 14/14 levels. 280 tests, ~13.4k lines, two dependencies</strong> (regex, rustls) — everything else from scratch, on purpose.</div>
+  </section>
+
+  <section id="code-map">
+    <h2>Code Map</h2>
+    <p class="lead">A theory level changes no code. This map instead points at the <em>existing</em> code each fleet concept audits — the files you would open to see the single-instance form of every fleet idea above.</p>
+    <table>
+      <thead><tr><th>File / symbol</th><th>What it is (single instance)</th><th>Fleet role</th></tr></thead>
+      <tbody>
+        <tr><td><code>balancer.rs:598</code> — <code>ConsistentHash</code> ring</td><td>The <code>chash</code> ring over backends</td><td>The same algorithm a Maglev L4 tier runs over proxies</td></tr>
+        <tr><td><code>balancer.rs:711</code> — <code>IpHash</code></td><td>Client-IP affinity to a backend</td><td>Why the L4 tier hashes the 4-tuple (affinity to held TCP state)</td></tr>
+        <tr><td><code>balancer.rs</code> breakers + <code>health.rs</code> probers</td><td>Three-state breaker, one prober per upstream</td><td>Independent per-instance learning; generalizes to fleet membership</td></tr>
+        <tr><td><code>middleware/ratelimit.rs</code> — 16-shard buckets (<code>SHARDS = 16</code>)</td><td>Per-process token buckets, socket-IP keyed</td><td>&times;N admission; shards move to Redis keys for a loose global limit</td></tr>
+        <tr><td><code>waf.rs:523</code> — <code>REPUTATION: OnceLock</code></td><td>Per-process strikes &amp; bans</td><td>&times;N strike budget; commercial feeds share cross-customer</td></tr>
+        <tr><td><code>cache.rs</code> (L11)</td><td>Sharded approximate-LRU, RFC 9111</td><td>&times;N misses — wasteful but correct; chash-partition or CDN above</td></tr>
+        <tr><td><code>RwLock&lt;Arc&lt;RouteTable&gt;&gt;</code> + SIGHUP reload (L12)</td><td>Validate wholesale, swap atomically</td><td>The data-plane half of an xDS control plane</td></tr>
+        <tr><td><code>ConnLimiter</code> drain (L12) + <code>Connection: close</code></td><td>Per-instance graceful shutdown</td><td>The "drain" step of a rolling deploy</td></tr>
+        <tr><td><code>admin.rs</code> — <code>/health</code>, <code>/metrics</code> (L10)</td><td>Degraded &ne; dead; Prometheus text</td><td>Consumed by the L4 tier and the fleet scraper</td></tr>
+        <tr><td><code>security.rs</code> — <code>CidrList</code> (L8)</td><td>allow/deny on socket peer</td><td>The trusted-CDN-ranges allowlist for XFF</td></tr>
+        <tr><td>request-id seeding (L6, <code>observe.rs</code>)</td><td>Per-process seed</td><td>Cluster-ready collision avoidance, built three levels early</td></tr>
+      </tbody>
+    </table>
+    <div class="callout warn"><strong>Unverified in code, stated as theory:</strong> the exact line for <code>RwLock&lt;Arc&lt;RouteTable&gt;&gt;</code> and the <code>ConnLimiter</code>-as-drain wiring are attributed to L12 per PROGRESS.md and the study doc rather than re-grepped here; the <code>chash</code> (598), <code>iphash</code> (711), <code>REPUTATION</code> (523), <code>SHARDS = 16</code>, and <code>CidrList</code> references were grep-confirmed against the tree while building this page.</div>
+  </section>
+
+  <section id="industry">
+    <h2>How Industry Does It</h2>
+    <p class="lead">Ferrum is a single-instance teaching build; the fleet story is theory. Here's how the production proxies actually solve "who balances the balancers" and the shared-state problem — and honestly where ours would sit.</p>
+    <div class="grid2">
+      <div class="card">
+        <span class="tag tech">nginx</span>
+        <h4>Instance + external orchestration</h4>
+        <p>A single nginx is, like Ferrum, one process (well, one master + N workers). Fleet HA is bolted on <em>around</em> it: keepalived/VRRP for VIP failover, or an upstream L4 (nginx itself can be the L4 tier via <code>stream</code>). Shared rate limiting needs the commercial <em>nginx Plus</em> (zone sync) or a Lua/Redis module. Our per-instance &divide;N story is exactly the open-source nginx story.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Apache httpd</span>
+        <h4>The oldest model, least fleet-native</h4>
+        <p>httpd's process/thread MPMs predate the cluster era; HA is entirely external (VRRP, a hardware LB, or a CDN in front). Shared reputation/rate state across instances isn't a first-class concept — <code>mod_qos</code> and friends are per-process, the same limitation Ferrum has. It's the clearest example of "the fleet lives outside the proxy."</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">HAProxy</span>
+        <h4>Built to be the L4/L7 tier</h4>
+        <p>HAProxy is frequently the L4-over-L7 tier <em>itself</em>, and it has real fleet features: <strong>stick-tables</strong> with peer synchronization propagate rate-limit counters and reputation across a cluster (approximately, async — exactly the Redis-loose-count trade we described). This is the mature version of Ferrum's biggest gap; ours would need Redis to reach parity.</p>
+      </div>
+      <div class="card">
+        <span class="tag tech">Envoy</span>
+        <h4>Data plane + control plane, split by design</h4>
+        <p>Envoy is a pure <em>data plane</em>; configuration streams in over <strong>xDS</strong> from a separate control plane (Istio, etc.). This is precisely the split L14 names: <strong>L12's validate-wholesale/atomic-swap reload is Envoy's data-plane half already built</strong>; the other half (gRPC config streaming, service discovery, fleet-wide push) is what a control plane adds. Envoy is the north star this whole course was quietly triangulating toward.</p>
+      </div>
+    </div>
+    <div class="callout"><strong>Honest placement.</strong> On shared fleet state, Ferrum today is at the open-source-nginx / httpd tier: per-instance, no cross-instance sync. HAProxy's stick-table peers and Envoy's xDS are the two directions ours would grow. The satisfying part — and the point of this level — is that the <em>shapes</em> already match: our reload IS xDS's data plane, our chash ring IS Maglev's, our breakers ARE fleet membership. The gap is coordination plumbing, not architecture.</div>
+  </section>
+
+  <section id="quiz">
+    <h2>Quiz</h2>
+    <p class="lead">The final quiz, copied verbatim from PROGRESS.md — Vessey answers these to close the course. No answers here.</p>
+    <div class="qa">
+      <ol class="flow">
+        <li>Rank DNS round-robin, VRRP, and anycast by failover speed and explain what mechanically limits each. Which one requires resources you cannot simply buy more of, and what are they?</li>
+        <li>The L4-over-L7 architecture puts a consistent-hashing tier ABOVE your proxies. Why must the L4 tier hash the 4-tuple rather than round-robin packets, and which Ferrum algorithm exists for the same reason one layer down?</li>
+        <li>Classify Ferrum's route table, rate limiter, and TLS-cert renewal into the KB's three-tier state hierarchy, and justify each placement in one sentence.</li>
+        <li>Health state is deliberately NOT shared across a fleet. What makes slight disagreement between instances harmless here, and what property of the L4 breaker design (built eight levels earlier) makes independent learning cheap?</li>
+        <li>A <code>rate=100/s</code> route behind 3 Ferrum instances admits ~300/s. Give the two remedies in the share-approximately tier and state the cost that rules out exact distributed counting.</li>
+        <li>Why is N independent caches "wasteful but correct" while N independent rate limiters are "quietly wrong"? What distinguishes the two kinds of state?</li>
+        <li>An attacker sprays a 3-instance fleet. Walk through what the L13 reputation store does per instance, what the fleet-level effect is, and what commercial WAFs have that structurally fixes it.</li>
+        <li>Leader election via an etcd lease: describe the mechanism (what is leased, what renewing means, what losing it triggers), and name the one Ferrum duty on the horizon that would first need it.</li>
+        <li>"Statelessness is what makes horizontal scaling linear." Connect that claim to L3's iphash: what problem does iphash solve, why does the cluster answer make it unnecessary, and when does it remain the right tool?</li>
+        <li>Your proxy moves behind a CDN. Name the three integration consequences from the study doc and, for each, the existing Ferrum seam (level + mechanism) it lands on.</li>
+        <li>L12 built SIGHUP reload; Envoy uses xDS. State precisely which half of the control-plane/data-plane split L12 already implements, and what the other half adds.</li>
+        <li>Failure domains stack: process, machine, site. For each, name the detection mechanism and the recovery mechanism from the study doc, and identify which levels of this course built the per-instance analogue.</li>
+        <li>The Rust concepts map says ArcSwap/atomic config swap solves hot reload. Ferrum used <code>RwLock&lt;Arc&lt;T&gt;&gt;</code> instead. What does real <code>arc_swap</code> buy over the RwLock form, and why was the difference immaterial here? (L12's design doc took a position — check it.)</li>
+        <li>The course's final claim: "distributed systems are the same subject, multiplied." Argue it concretely using exactly three mechanisms you built, tracing each from its single-instance form to its fleet form — then name ONE genuinely new problem that only exists at fleet scale, with no single-instance analogue in this codebase.</li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="cheatsheet">
+    <h2>Cheat Sheet &amp; Glossary</h2>
+
+    <h3>The numbers</h3>
+    <table>
+      <thead><tr><th>Item</th><th>Value</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td>Course levels complete</td><td>14 / 14</td><td>Build phase done; L9 &amp; L14 are theory levels</td></tr>
+        <tr><td>Total tests</td><td>280</td><td>261 kept green from L12 + 19 in L13; unchanged in L14</td></tr>
+        <tr><td>Total lines</td><td>~13.4k</td><td>Everything except regex + rustls from scratch</td></tr>
+        <tr><td>Dependencies</td><td>2</td><td><code>regex</code> (L2, linear-time), <code>rustls</code> (L8)</td></tr>
+        <tr><td>Rate-limit shards</td><td>16</td><td><code>SHARDS = 16</code> in <code>middleware/ratelimit.rs</code></td></tr>
+        <tr><td>chash ring</td><td><code>balancer.rs:598</code></td><td>Same algorithm a Maglev L4 tier runs</td></tr>
+        <tr><td>iphash</td><td><code>balancer.rs:711</code></td><td>4-tuple affinity, one layer down from the L4 tier</td></tr>
+        <tr><td>WAF reputation store</td><td><code>waf.rs:523</code></td><td>Process-wide <code>OnceLock</code>; per-instance at N&gt;1</td></tr>
+        <tr><td>VRRP scaling ceiling</td><td>2</td><td>Active/passive; wastes half the hardware</td></tr>
+        <tr><td>Ban backoff cap (L13)</td><td>1 h</td><td>Per-instance clock — fine to duplicate</td></tr>
+      </tbody>
+    </table>
+
+    <h3>State-tier quick reference</h3>
+    <table>
+      <thead><tr><th>Tier</th><th>Members</th><th>Fleet remedy</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Don't share</strong></td><td>routes/config, health, pools, metrics</td><td>Ship identical / let each learn / scraper aggregates</td></tr>
+        <tr><td><strong>Share approximately</strong></td><td>rate limits, WAF reputation, cache</td><td>per-instance &divide;N, or Redis loose counts, or chash / CDN above</td></tr>
+        <tr><td><strong>Share for real</strong></td><td>cert renewal, nightly purge, leader election</td><td>etcd/ZooKeeper lease — use a store, don't build Raft</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Glossary</h3>
+    <dl>
+      <p><strong>Anycast</strong> — one IP address announced from many physical sites via BGP; the internet routes each client to the nearest. Requires owning IP space + BGP sessions.</p>
+      <p><strong>VRRP / keepalived</strong> — an active proxy holds a floating VIP; a standby claims it via gratuitous ARP on failure. Sub-second failover, scales to exactly two.</p>
+      <p><strong>L4 tier / L7 tier</strong> — L4 balancers steer whole TCP flows (fast, near-stateless); L7 proxies (Ferrum) do per-request logic. Production layers L4 over L7.</p>
+      <p><strong>4-tuple</strong> — (source IP, source port, destination IP, destination port); the identity of a TCP flow. The L4 tier hashes it so every packet of a flow lands on the same proxy.</p>
+      <p><strong>Maglev</strong> — Google's consistent-hashing L4 load balancer; the production embodiment of the same ring Ferrum's <code>chash</code> builds.</p>
+      <p><strong>Consistent hashing</strong> — a hashing scheme where adding/removing one node reshuffles only ~1/N of keys, not all of them. Used at three layers: backends, proxies, cache keys.</p>
+      <p><strong>xDS</strong> — Envoy's family of gRPC discovery APIs by which a control plane streams config to data-plane proxies. L12's reload is its data-plane half.</p>
+      <p><strong>Control plane / data plane</strong> — the data plane moves packets/requests (Ferrum); the control plane decides config and pushes it. L12 built the data-plane half of config management.</p>
+      <p><strong>Leader election</strong> — picking exactly one instance to perform a singleton duty, via a TTL'd lease on a consensus store (etcd/ZooKeeper). The one genuinely new fleet problem with no single-instance analogue here.</p>
+      <p><strong>Lease</strong> — a key with a TTL the holder must keep renewing; losing it (crash/partition) hands the role to another instance. (Distinct from Ferrum's L3 RAII <code>Lease</code>, which is inflight-connection accounting.)</p>
+      <p><strong>Rolling deploy</strong> — replace fleet instances one at a time: remove from the L4 tier &rarr; drain &rarr; replace &rarr; re-add. L12's drain is the middle step.</p>
+      <p><strong>Failure domain</strong> — a blast radius (process / machine / site); each domain's failure is the next domain's health-check event.</p>
+      <p><strong>Wasteful vs. wrong</strong> — duplicated read-through state (cache) is wasteful but correct; duplicated enforcement budgets (rate limits) are quietly wrong because they multiply the limit.</p>
+    </dl>
+    <p class="muted">Full write-up: <code>docs/level-14-scalability.md</code>. Per-level "what was studied" and this quiz: <code>PROGRESS.md</code> &sect; Level 14.</p>
+  </section>
+</main>
+</div>
+
+<footer>
+  <p>Ferrum KB &mdash; Level 14: Scalability &amp; High Availability &bull; Built 2026-09-02</p>
+  <p class="muted">A teaching reverse proxy in Rust. Claims verified against <code>rproxy/src</code> and <code>docs/level-14-scalability.md</code>. This is a theory level; where the fleet story is aspirational rather than built, the page says so plainly.</p>
+</footer>
+</body>
+</html>

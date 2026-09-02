@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ferrum KB — Level 11: Caching</title>
+<meta name="description" content="Level 11 of the Ferrum reverse-proxy course: a sharded, approximately-LRU in-memory response cache that honors RFC 9111 shared-cache semantics — the cache key as the one dangerous decision, both revalidation legs, a body tee, and unsafe-method invalidation." />
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    flowchart: { htmlLabels: true, useMaxWidth: true, padding: 12, nodeSpacing: 55, rankSpacing: 55 },
+    startOnLoad: true, theme: 'base', securityLevel: 'loose',
+    themeVariables: {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '15px',
+      primaryColor: '#e7e8ea', primaryTextColor: '#15203a', primaryBorderColor: '#7e848c',
+      lineColor: '#6a6f77', secondaryColor: '#dddfe2', tertiaryColor: '#f3f4f6',
+      noteBkgColor: '#fff3d6', noteTextColor: '#3a2f12', noteBorderColor: '#caa84a',
+      actorBkg: '#e7e8ea', actorTextColor: '#15203a', actorBorder: '#7e848c',
+      clusterBkg: '#eef0f2', clusterBorder: '#a0a4aa'
+    }
+  });
+</script>
+<style>
+  :root{--bg:#0f1320;--panel:#161c2e;--panel-2:#1d2540;--ink:#e8ecf5;--muted:#9aa6c4;--accent:#7c5cff;--accent-2:#22d3a6;--warn:#ffb454;--danger:#ff6b81;--line:#2a3354;--code-bg:#0b0f1a;--max:1100px;}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:linear-gradient(180deg,#0c1020,#0f1320 40%);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  a{color:var(--accent-2);text-decoration:none}a:hover{text-decoration:underline}
+  header.hero{padding:56px 24px 40px;text-align:center;background:radial-gradient(1200px 400px at 50% -10%,rgba(255,107,129,.18),transparent 60%);border-bottom:1px solid var(--line);}
+  header.hero .eyebrow{letter-spacing:.25em;text-transform:uppercase;color:var(--accent-2);font-size:.75rem;font-weight:700}
+  header.hero h1{font-size:clamp(1.9rem,4vw,3rem);margin:.3em 0 .2em;line-height:1.1}
+  header.hero p.sub{color:var(--muted);max-width:790px;margin:0 auto;font-size:1.05rem}
+  .badges{margin-top:18px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .badge{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);padding:4px 12px;border-radius:999px;font-size:.8rem}
+  .layout{display:grid;grid-template-columns:260px 1fr;gap:32px;align-items:start;max-width:1320px;margin:0 auto;padding:0 22px}
+  nav.toc{position:sticky;top:0;max-height:100vh;overflow:auto;padding:28px 10px 60px;border-right:1px solid var(--line);font-size:.9rem;}
+  nav.toc h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.18em;color:var(--muted);margin:18px 8px 6px}
+  nav.toc a{display:block;color:var(--muted);padding:5px 10px;border-radius:8px;border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--panel);color:var(--ink);text-decoration:none;border-left-color:var(--accent)}
+  main{padding:34px 0 80px;min-width:0}
+  section{margin:0 0 46px;scroll-margin-top:18px}
+  section>h2{font-size:1.7rem;margin:0 0 .5em;padding-bottom:.3em;border-bottom:2px solid var(--line);display:flex;align-items:center;gap:.5em;}
+  h3{font-size:1.25rem;margin:1.6em 0 .4em;color:#fff}
+  h4{font-size:1.02rem;margin:1.2em 0 .3em;color:var(--accent-2);text-transform:uppercase;letter-spacing:.04em}
+  p,li{color:var(--ink)}.muted{color:var(--muted)}
+  article.concept{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin:22px 0}
+  article.concept>h3:first-child{margin-top:0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr} .layout{grid-template-columns:1fr} nav.toc{position:static;max-height:none;border-right:none;border-bottom:1px solid var(--line)}}
+  .card{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card h4{margin-top:.2em}
+  .callout{border-left:4px solid var(--accent);background:var(--panel-2);padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  .callout.analogy{border-left-color:var(--accent-2)}.callout.warn{border-left-color:var(--warn)}.callout.danger{border-left-color:var(--danger)}.callout.story{border-left-color:#5ec2ff}
+  .tag{display:inline-block;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:2px 8px;border-radius:6px;margin-bottom:6px}
+  .tag.beg{background:rgba(34,211,166,.15);color:var(--accent-2)}.tag.tech{background:rgba(124,92,255,.18);color:#b9a6ff}.tag.adv{background:rgba(255,107,129,.15);color:var(--danger)}
+  code{background:var(--code-bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.86em;color:#ffd9a0}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.85rem;line-height:1.55}
+  pre code{background:none;border:none;padding:0;color:#d7e0f5}
+  pre.art{color:#ffd9a0;font-size:.95rem;line-height:1.4;letter-spacing:.04em}
+  pre.mermaid{background:#f7f8fc;color:#111;text-align:center}
+  .mermaid svg text,.mermaid text{fill:#15203a !important}
+  .mermaid .nodeLabel,.mermaid .edgeLabel,.mermaid .label,.mermaid span,.mermaid p,.mermaid div,.mermaid foreignObject *{color:#15203a !important;fill:#15203a !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p{background:#f3f5fc !important}
+  .mermaid .cluster-label .nodeLabel,.mermaid .cluster-label p,.mermaid .cluster span,.mermaid .cluster p{color:#3c4046 !important}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.92rem;overflow:hidden;border-radius:10px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel-2);color:#fff}
+  tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  details{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:12px 0}
+  details summary{cursor:pointer;font-weight:600;color:var(--accent-2);padding:6px 0}
+  details[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px}
+  figure{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  figcaption{color:var(--muted);font-size:.85rem;text-align:center;margin-top:8px;font-style:italic}
+  .qa{margin:10px 0}.qa .q{font-weight:600}.qa .a{color:var(--muted);margin:2px 0 0}
+  ol.flow{counter-reset:step;list-style:none;padding-left:0}
+  ol.flow>li{counter-increment:step;position:relative;padding:10px 0 10px 52px;border-bottom:1px dashed var(--line)}
+  ol.flow>li::before{content:counter(step);position:absolute;left:0;top:8px;width:34px;height:34px;background:var(--accent);color:#fff;border-radius:50%;display:grid;place-items:center;font-weight:700}
+  .rank{font-weight:800;color:var(--accent);margin-right:6px}
+  footer{border-top:1px solid var(--line);padding:30px 22px;text-align:center;color:var(--muted);font-size:.88rem}
+  .lead{font-size:1.08rem}
+  .formula{background:var(--code-bg);border:1px dashed var(--accent);border-radius:10px;padding:12px 16px;font-family:monospace;color:#ffd9a0;text-align:center;margin:14px 0}
+
+  /* KB-THEME START */
+  /* Azure (blue palette) */
+  :root{--bg:#0e1c30;--panel:#152740;--panel-2:#1d3458;--ink:#e6edf7;--muted:#93a6c4;--accent:#1a8ae5;--accent-2:#41a7f5;--warn:#d6a96a;--danger:#d98a8a;--line:#264064;--code-bg:#0b1626;}
+  body{background:linear-gradient(180deg,var(--bg),var(--bg))}
+  header.hero{background:radial-gradient(1100px 400px at 50% -10%,rgba(20,119,210,.26),transparent 60%)}
+  h3,.parthead{color:var(--ink)}
+  th{color:var(--ink)}
+  .tag.tech{background:rgba(65,167,245,.16);color:var(--accent-2)}
+  ol.flow>li::before{color:#0b1626}
+  /* KB-THEME END */
+  /* prevent node/edge label clipping */
+  .mermaid foreignObject{overflow:visible !important}
+  .mermaid .nodeLabel,.mermaid .label,.mermaid foreignObject>div,.mermaid foreignObject span,.mermaid foreignObject p{white-space:nowrap !important;overflow:visible !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p,.mermaid .edgeLabel span{white-space:nowrap !important;overflow:visible !important;padding:1px 4px}
+  .mermaid svg{max-width:100%;height:auto}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyebrow">Ferrum KB &middot; Level 11 of 14 &middot; Caching</div>
+  <h1>Caching<br/><span style="font-size:.6em;color:var(--muted)">a shared RFC 9111 cache — the fastest backend request is the one you never make</span></h1>
+  <p class="sub">Level 11 turns Ferrum into a <em>shared</em> HTTP cache that <em>honors</em> the protocol's caching contract rather than inventing one. Two halves in one file, <code>cache.rs</code>: a bounded, sharded, approximately-LRU, TTL-expiring store that knows nothing about HTTP; and a set of pure functions that encode RFC 9111's cacheability rules and know nothing about locking. The level's whole danger is concentrated in one place — <strong>the cache key</strong> — because getting it wrong is how a shared cache leaks one user's data to another.</p>
+  <div class="badges">
+    <span class="badge">Audience: Vessey (built it) + the curious</span>
+    <span class="badge">Scope: storage engine + RFC 9111 semantics, std + tokio only</span>
+    <span class="badge">Key file: cache.rs (1121 lines)</span>
+    <span class="badge">Reading time: ~26 min</span>
+  </div>
+  <p class="muted" style="margin-top:18px">
+    <a href="index.html">&larr; Course index</a> &nbsp;&middot;&nbsp;
+    <a href="Level-10-Observability.html">&larr; Level 10: Observability</a> &nbsp;&middot;&nbsp;
+    <a href="Level-12-Production-Features.html">Level 12: Production Features &rarr;</a>
+  </p>
+</header>
+
+<div class="layout">
+<nav class="toc">
+  <h2>Orientation</h2>
+  <a href="#exec-summary">Executive Summary</a>
+  <a href="#big-picture">The Big Picture</a>
+  <h2>Core</h2>
+  <a href="#store">The Store: sharded approximate-LRU</a>
+  <a href="#semantics">RFC 9111 Semantics</a>
+  <a href="#key">The Cache Key: the dangerous decision</a>
+  <a href="#placement">Placement: after middleware, instead of the lease</a>
+  <a href="#revalidation">Revalidation, Both Legs</a>
+  <a href="#tee">The Body Tee</a>
+  <a href="#invalidation">Invalidation &amp; Observability</a>
+  <a href="#debt">Recorded Debt</a>
+  <a href="#code-map">Code Map</a>
+  <h2>Compare</h2>
+  <a href="#industry">How Industry Does It</a>
+  <h2>Reference</h2>
+  <a href="#quiz">Quiz</a>
+  <a href="#cheatsheet">Cheat Sheet &amp; Glossary</a>
+</nav>
+
+<main>
+  <section id="exec-summary">
+    <h2>Executive Summary</h2>
+    <p class="lead">Level 11 makes Ferrum a shared cache in the RFC 9111 sense: it sits between many clients and an origin, so every rule the protocol writes for <em>shared</em> caches (<code>private</code>, <code>s-maxage</code>) applies to us specifically.</p>
+    <p>The <strong>store</strong> (<code>cache.rs</code>) is 16 <code>Mutex&lt;Shard&gt;</code> shards, each a <code>HashMap&lt;Key, Entry&gt;</code> with a running byte total. It is <strong>doubly bounded</strong> — <code>--cache-max-bytes</code> (default 64&nbsp;MB, the real bound because bodies dominate) and <code>--cache-max-entries</code> (default 4096, a metadata bound so a million tiny responses can't balloon the map). Recency is <strong>approximate</strong>: each entry carries a <code>last_used</code> <code>Instant</code>; on an insert that overflows a bound, the shard scans <em>itself</em> for the oldest and evicts. That is <em>not</em> the textbook O(1) linked-list LRU — which is "famously miserable" in safe Rust because aliasing-plus-mutation is exactly what the borrow checker rejects (and rightly: LRU aliasing bugs are real CVEs in C caches). TTL is <strong>lazy</strong> (checked on lookup, no sweeper task), and bodies are <code>Arc&lt;[u8]&gt;</code> so a hit is a refcount bump and an entry evicted mid-stream stays alive until the response finishes.</p>
+    <p>The <strong>semantics</strong> half is pure functions over head structs: GET-only, status 200/301/404, hard <code>no</code> on request <code>Authorization</code> and response <code>Set-Cookie</code>, <code>s-maxage</code> beats <code>max-age</code> for a shared cache, <code>no-cache</code> means <em>store but always revalidate</em> while <code>no-store</code> means <em>never write</em>, <code>private</code> means a shared cache must not, <code>Vary</code> becomes a two-step keyed lookup with a tiny index entry, <code>Vary: *</code> is uncacheable, and the route's default TTL applies <em>only</em> when the response carries a validator.</p>
+    <p>The <strong>cache key</strong> is the level's one dangerous decision: route index + pre-rewrite host/target + each Vary header's value, stored in full and compared by struct equality so a hash collision degrades to a <em>miss</em>, never to another user's data. A <code>KeyInput</code> snapshot is taken before Level 5 rewrites the live head, because the cache is consulted twice per exchange.</p>
+    <p>Lookup runs <strong>after</strong> the middleware chain (a 401'd client gets no cache read) and <strong>instead of</strong> the balancer lease on a hit (no socket, no breaker traffic). Both <strong>revalidation legs</strong> ship: proxy&rarr;origin conditional requests (a 304 re-stamps and serves, <code>X-Cache: REVALIDATED</code>) and client&rarr;proxy conditionals (client's <code>If-None-Match</code> &rarr; 304 with no body). A <code>TeeWriter</code> captures streamed bodies relay-first, capturing only what the wire accepted, and silently cancels the store on overflow. Unsafe methods invalidate per RFC&nbsp;9111 §4.4. <strong>250 unit tests</strong> (230 kept green, +20) and 13 live checks, all green.</p>
+  </section>
+
+  <section id="big-picture">
+    <h2>The Big Picture</h2>
+    <p class="lead">Caching is the one stage in the pipeline that can <em>short-circuit</em> everything downstream of it. On a fresh hit, the request never reaches the load balancer, never opens a backend socket, never touches a circuit breaker — the whole right-hand side of the pipeline goes dark.</p>
+    <p>The lookup is deliberately placed <strong>after</strong> the middleware chain and <strong>before</strong> the balancer lease. That ordering is the design: a cached response must never bypass auth or rate limiting (so the chain runs first), but a hit must skip the backend entirely (so the lease is what it replaces). The highlighted stage below is where this level lives.</p>
+    <figure>
+<pre class="mermaid">
+flowchart TD
+  C["Client request"] --> ACC["Accept + parse head (L1)"]
+  ACC --> RT["Route match (L2) — route index + cache_ttl"]
+  RT --> MW["Middleware chain (L6): auth, rate limit, request-id"]
+  MW --> LK{"THIS LEVEL: cache lookup<br/>(after MW, before lease)"}
+  LK -->|"fresh HIT"| SC["serve_cached: build head from Entry,<br/>run client-leg pipeline — NO backend"]
+  LK -->|"stale + validator"| REV["forward with If-None-Match /<br/>If-Modified-Since"]
+  LK -->|"MISS"| LEASE["Balancer lease (L3) + breaker (L4)"]
+  REV --> LEASE
+  LEASE --> ORI["Origin exchange"]
+  ORI -->|"304"| RESTAMP["restamp entry, serve body<br/>X-Cache: REVALIDATED"]
+  ORI -->|"200 etc."| TEE["TeeWriter captures body,<br/>store if cacheable — X-Cache: MISS"]
+  SC --> OUT["Response to client (+ X-Cache, Age)"]
+  RESTAMP --> OUT
+  TEE --> OUT
+</pre>
+    <figcaption>The request path with Level 11 highlighted. A fresh hit exits at <code>serve_cached</code> without ever reaching the lease; a stale-with-validator entry turns the outbound request conditional; a miss stores via the tee on the way back.</figcaption>
+    </figure>
+    <div class="callout analogy"><strong>Analogy:</strong> a shared cache is the concierge desk in a big office building. When a courier asks for "the Q3 report for the 14th floor," the concierge who already has a fresh copy hands it over without calling upstairs (a hit — no backend). If the copy might be stale, the concierge phones up and asks "still the same version?" — a five-second call, not a re-delivery (revalidation). The one thing the concierge must <em>never</em> do is hand a personalized, signed-for envelope (an <code>Authorization</code>ed or <code>Set-Cookie</code>'d response) to the next person who asks — that is the whole reason the desk has strict rules about what it will keep a copy of.</div>
+  </section>
+
+  <section id="store">
+    <h2>The Store: sharded approximate-LRU</h2>
+    <p class="lead">The storage engine (<code>Section 1</code> of <code>cache.rs</code>) knows nothing about HTTP. It is a bounded, sharded, approximately-LRU, TTL-expiring <code>HashMap&lt;Key, Entry&gt;</code>. Every design choice here is a deliberate rejection of a "more correct" textbook alternative that costs <code>unsafe</code>, a dependency, or speed we cannot measure.</p>
+
+    <article class="concept">
+      <h3>Why NOT the O(1) linked-list LRU</h3>
+      <p>The textbook cache is a hash map into a doubly-linked recency list: O(1) to look up, O(1) to move-to-front on a hit, O(1) to evict the tail. In C it is a rite of passage. In <strong>safe Rust it is famously miserable</strong> — a doubly-linked list is aliasing (every node points at its neighbours) plus mutation (splicing a node moves those pointers), which is precisely the pattern the borrow checker rejects. And it is <em>right</em> to reject it: LRU splice bugs — use-after-free when a node is evicted while another path holds it — are real CVEs in C caches.</p>
+      <p>The alternatives are an index arena (a <code>Vec&lt;Node&gt;</code> with integer "pointers", correct but a second allocator to hand-maintain), a dependency (against the course's zero-deps rule), or what concurrent production caches actually do: <strong>shard the map and accept approximate recency</strong>. Ferrum takes the third. It is Level 6's 16-shard rate-limiter idiom with a bigger value type, so the codebase already contains the pattern.</p>
+      <div class="callout"><strong>The cost accounting, stated plainly.</strong> Approximate-LRU eviction scans one shard for the entry with the oldest <code>last_used</code> — <strong>O(shard)</strong>, but <em>only on the insert-when-full path</em>. The hit path pays one hash, one short lock, one <code>Instant</code> store — the same as any hash map. A true O(1) recency list would optimize a path already measured in nanoseconds, at the cost of <code>unsafe</code> or an arena nobody asked for. The doc comment in <code>cache.rs</code> says exactly this.</div>
+    </article>
+
+    <article class="concept">
+      <h3>16 shards, per-shard byte + entry budgets</h3>
+      <p><code>Cache</code> holds <code>Vec&lt;Mutex&lt;Shard&gt;&gt;</code> with <code>SHARDS = 16</code>. A <code>Shard</code> is <code>{ map: HashMap&lt;Key, Entry&gt;, bytes: u64 }</code>. The shard is the unit of locking, so it must also be the unit of accounting — otherwise an insert would need two locks and an ordering discipline. Both bounds are enforced per shard at <code>total / 16</code>:</p>
+      <ul>
+        <li><strong><code>max_bytes_per_shard</code></strong> — the <em>real</em> bound; bodies dominate memory. Default 64&nbsp;MB total &rarr; 4&nbsp;MB/shard.</li>
+        <li><strong><code>max_entries_per_shard</code></strong> — a <em>metadata</em> bound so a flood of 10-byte responses can't balloon the map itself. Default 4096 total &rarr; 256/shard.</li>
+      </ul>
+      <p>The discipline matches every lock since Level 6: a plain <code>fn</code>, a lock scope of a few lines, <strong>never held across an <code>.await</code></strong> (compiler-enforced, per Level 9's audit). The <code>probe</code>, <code>insert</code>, <code>restamp</code>, and <code>invalidate</code> methods each take the shard lock, do their map work, and drop it before anything can suspend.</p>
+      <pre><code>// cache.rs — eviction scans THIS shard only, oldest last_used first
+while !shard.map.is_empty()
+    &amp;&amp; (shard.bytes + new_cost &gt; self.max_bytes_per_shard
+        || shard.map.len() + 1 &gt; self.max_entries_per_shard)
+{
+    let oldest = shard.map.iter()
+        .min_by_key(|(_, e)| e.last_used)   // O(shard) scan
+        .map(|(k, _)| k.clone());
+    // ... remove it, subtract its cost, count an eviction ...
+}</code></pre>
+      <div class="callout warn"><strong>Watch out:</strong> a single body larger than <code>max_bytes_per_shard</code> is never stored (the final <code>if new_cost &gt; self.max_bytes_per_shard { return; }</code>) — otherwise one giant response would evict an entire shard to make room for itself and still not fit. The store <em>fails open</em>: too-big-to-store is not an error, the request already streamed to the client fine.</div>
+    </article>
+
+    <article class="concept">
+      <h3>Lazy TTL: no sweeper task</h3>
+      <p>Expiry is checked <strong>on lookup</strong>, via <code>Entry::is_fresh(now)</code> = <code>now.duration_since(stored_at) &lt; ttl</code>. There is <em>no</em> background sweeper. Level 9 counted exactly three spawn sites in the whole proxy; a sweeper would be a fourth, buying memory reclamation a few seconds earlier than the next insert-eviction would anyway.</p>
+      <p>More importantly, <strong>an expired entry is not garbage</strong>. If it carries a validator (<code>ETag</code> or <code>Last-Modified</code>), it is a <em>revalidation candidate</em> — worth keeping precisely because a 304 re-stamps it without re-transferring the body. So on lookup an expired entry splits: <em>with</em> a validator &rarr; <code>Lookup::Stale</code>; <em>without</em> &rarr; treated as a miss and eagerly removed right there (freeing its bytes immediately rather than at the next eviction scan).</p>
+    </article>
+
+    <article class="concept">
+      <h3>Bodies are <code>Arc&lt;[u8]&gt;</code>: refcount-bump hits, evict-during-stream safe</h3>
+      <p>An <code>Entry.body</code> is an <code>Arc&lt;[u8]&gt;</code>, not a <code>Vec&lt;u8&gt;</code>. Three properties fall out for free:</p>
+      <ul>
+        <li><strong>A hit is a refcount bump, not a copy.</strong> <code>probe</code> returns a <code>CachedResponse</code> holding <code>Arc::clone(&amp;e.body)</code> — one atomic increment, regardless of body size.</li>
+        <li><strong>Eviction racing a streaming hit is safe.</strong> If a hit already cloned the <code>Arc</code> and is streaming those bytes to the client when another thread evicts the entry, the <code>Arc</code>'s refcount keeps the buffer alive until the streaming response finishes. No copy, no use-after-evict.</li>
+        <li><strong>No lock near an <code>.await</code>.</strong> The snapshot is cheap enough that the shard lock is dropped the instant <code>probe</code> returns — the bytes stream to the client with no lock held anywhere near the suspend point.</li>
+      </ul>
+      <p><code>CachedResponse</code> is a <em>snapshot</em>, not a guard borrowing from the shard, precisely so that nothing borrowed from the map survives past the lock. That is what lets the store hand out a response and immediately release the shard for other threads.</p>
+    </article>
+
+    <figure>
+<pre class="mermaid">
+flowchart TD
+  L["lookup(KeyInput)"] --> SH["hash key &rarr; shard index (% 16)"]
+  SH --> LOCK["lock that ONE shard"]
+  LOCK --> GET{"entry present?"}
+  GET -->|"no"| MISS["Lookup::Miss (miss++)"]
+  GET -->|"yes"| FRESH{"is_fresh(now)?"}
+  FRESH -->|"yes"| HIT["bump last_used, Arc::clone body<br/>Lookup::Hit (hit++)"]
+  FRESH -->|"no, has validator"| STALE["Lookup::Stale{key, etag, last_modified}"]
+  FRESH -->|"no, no validator"| DROP["remove entry, free bytes<br/>Lookup::Miss"]
+</pre>
+    <figcaption>The lookup state machine for a non-varying key. Only one shard is ever locked. The <code>Stale</code> path keeps the entry alive as a revalidation candidate; the validator-less expired path reclaims immediately.</figcaption>
+    </figure>
+  </section>
+
+  <section id="semantics">
+    <h2>RFC 9111 Semantics</h2>
+    <p class="lead">The second half of <code>cache.rs</code> is pure functions over head structs — no locking, no I/O. They encode <em>what the protocol says a shared cache may do</em>. Caching is opt-in per route (<code>;cache[=SECS]</code>); once enabled, the HTTP decides the rest per response.</p>
+
+    <article class="concept">
+      <h3>Opt-in per route, then the protocol decides</h3>
+      <p>A route enables caching with the <code>;cache</code> option (bare, or <code>;cache=SECS</code> for a default TTL). This is a new <code>L11_KEYS = ["cache"]</code> arm in the router's existing option partition (<code>router.rs</code>); <code>Route.cache_ttl</code> is <code>Some(default_ttl)</code> when set, <code>None</code> means the route never caches. Off by default — a proxy that silently starts caching is a behavior change an operator must ask for (nginx's <code>proxy_cache</code> is opt-in for the same reason). <code>rewrite.rs</code> and the middleware module needed no changes.</p>
+      <p>Once enabled, <code>request_is_cacheable</code> and <code>freshness_from_headers</code> gate every exchange:</p>
+      <table>
+        <thead><tr><th>Gate</th><th>Rule</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Method</strong></td><td>GET only</td><td>Not HEAD (serving a cached GET body to a HEAD is wrong the other way).</td></tr>
+          <tr><td><strong>Request <code>Authorization</code></strong></td><td>hard no — no read, no write, no <code>X-Cache</code> at all</td><td>The KB's "worst bug class" is a shared cache serving one user's authorized response to another.</td></tr>
+          <tr><td><strong>Status</strong></td><td>200, 301, 404 only</td><td>200 is the point; 301 is permanent by definition; 404 shields the backend from retry storms on dead links.</td></tr>
+          <tr><td><strong>Response <code>Set-Cookie</code></strong></td><td>never store</td><td>User-specific, full stop — replaying one user's cookie is a session-fixation machine.</td></tr>
+          <tr><td><strong>Body size</strong></td><td>&le; <code>--cache-max-body</code> (1&nbsp;MB)</td><td>Keeps one response from monopolizing a shard's budget.</td></tr>
+        </tbody>
+      </table>
+    </article>
+
+    <article class="concept">
+      <h3>TTL: <code>s-maxage</code> beats <code>max-age</code> for a shared cache</h3>
+      <p><code>freshness_from_headers</code> parses <code>Cache-Control</code> and picks the TTL with <code>s_maxage.or(max_age)</code> — <strong><code>s-maxage</code> wins whenever present</strong>. This is not arbitrary: <code>s-maxage</code> is <em>the</em> directive addressed to shared caches specifically, and Ferrum <em>is</em> the shared cache it was written for. A browser (a private cache) ignores <code>s-maxage</code> and uses <code>max-age</code>; Ferrum does the opposite.</p>
+      <p>If neither directive is present, the route's <code>DEFAULT_TTL</code> applies — <strong>but only when the response carries a validator</strong> (<code>ETag</code> or <code>Last-Modified</code>). Freshness we <em>invent</em> must at least be revalidatable; a response with no explicit freshness and no validator is not stored at all.</p>
+      <pre><code>// cache.rs — the TTL decision, after directive parsing
+let ttl = match s_maxage.or(max_age) {
+    Some(secs) =&gt; Some(Duration::from_secs(secs)),
+    None if has_validator =&gt; Some(default_ttl),   // invented, but checkable
+    None =&gt; None,                                  // do not store
+};</code></pre>
+    </article>
+
+    <article class="concept">
+      <h3>The confusables, handled by name</h3>
+      <div class="grid2">
+        <div class="card">
+          <span class="tag adv">directive</span>
+          <h4>no-store</h4>
+          <p><strong>Never write.</strong> Return <code>ttl: None</code> — the exchange is not cached at all, on either the request or response side.</p>
+        </div>
+        <div class="card">
+          <span class="tag adv">directive</span>
+          <h4>no-cache</h4>
+          <p><strong>Store, but revalidate before EVERY use.</strong> Expressed as <code>ttl: Some(Duration::ZERO)</code> + a validator — with no validator, don't store (revalidation would be impossible). Zero TTL means <code>is_fresh</code> is always false, so every lookup returns <code>Stale</code> and revalidates — <em>no special case in the lookup path</em>.</p>
+        </div>
+        <div class="card">
+          <span class="tag adv">directive</span>
+          <h4>private</h4>
+          <p>The browser may cache this; a <strong>shared</strong> cache must not. We are the shared cache the directive was written for &rarr; <code>ttl: None</code>.</p>
+        </div>
+        <div class="card">
+          <span class="tag tech">directive</span>
+          <h4>Vary</h4>
+          <p>The named request headers' values join the cache key (two-step lookup below). <code>Vary: *</code> = "depends on things you cannot see" = uncacheable &rarr; <code>ttl: None</code>.</p>
+        </div>
+      </div>
+      <p>Directive <em>names</em> are compared case-insensitively (RFC 9111 §5.2: <code>MAX-AGE</code> = <code>max-age</code>); quoted values are unquoted before parsing.</p>
+    </article>
+
+    <article class="concept">
+      <h3>Vary: the two-step keyed lookup</h3>
+      <p>The caller cannot know <em>which</em> request headers belong in the key until a stored response's <code>Vary</code> says so — a chicken-and-egg the code solves with a probe-then-probe dance and a tiny <strong>vary-index entry</strong>.</p>
+      <ol class="flow">
+        <li><strong>Probe 1</strong> — build the key with an empty Vary list and look it up. For a non-varying resource, this <em>is</em> the entry (a hit or miss, done).</li>
+        <li><strong>The index entry</strong> — for a varying resource, the vary-less slot holds a tiny bodyless entry whose only job is to record <em>which</em> headers matter (its <code>vary_names</code>). It is written alongside every variant on store, and is never itself servable (<code>probe</code> returns <code>Probe::VaryIndex(names)</code> for it).</li>
+        <li><strong>Probe 2</strong> — rebuild the key with <em>this</em> request's values for those named headers, and look up the real variant. An absent named header contributes the empty string — a distinct variant per RFC 9111 §4.1.</li>
+      </ol>
+      <p>Live-verified: <code>Vary: Accept-Encoding</code> stored a gzip variant and a plain variant separately and served each requester its own body.</p>
+    </article>
+  </section>
+
+  <section id="key">
+    <h2>The Cache Key: the dangerous decision</h2>
+    <p class="lead">The KB names the cache key "the worst bug class in this level" — worse than any crash, because getting it wrong is how a shared cache <em>leaks one user's data to another</em>. Every field of <code>Key</code>, and every casing rule, IS a security argument.</p>
+
+    <article class="concept">
+      <h3>What is in the key, and why each field</h3>
+      <pre><code>// cache.rs
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Key {
+    pub route: usize,                    // routes must NOT share entries
+    pub method: String,                  // GET (invalidation matches on it too)
+    pub host: String,                    // ORIGINAL host, port-stripped, lowercased
+    pub target: String,                  // ORIGINAL target (path + query), pre-rewrite
+    pub vary: Vec&lt;(String, String)&gt;,     // each Vary header's (name, value), sorted
+}</code></pre>
+      <ul>
+        <li><strong>Route index</strong> — two routes can rewrite the same client target into different backend requests; their entries must never mix.</li>
+        <li><strong>Pre-rewrite host + target</strong> — keyed on <em>what the client asked for</em>, captured before Level 5 rewrites either. Keying on post-rewrite values would merge distinct client resources that happen to rewrite to one backend path.</li>
+        <li><strong>Host: port-stripped, lowercased</strong> — host comparison is case-insensitive; <code>EXAMPLE.com</code> and <code>example.com</code> are one resource. (Verified by test <code>hosts_do_not_share_entries_and_host_is_case_insensitive</code>.)</li>
+        <li><strong>Vary values: names lowercased (case-insensitive lookup), values verbatim (case-sensitive), names sorted</strong> — wire order of headers must not split one variant into two entries.</li>
+      </ul>
+    </article>
+
+    <article class="concept">
+      <h3>Full-struct equality: a collision degrades to a miss, never to another user's data</h3>
+      <p>The hash <em>only picks the shard</em> (<code>shard_index</code> hashes the key <code>% 16</code>). The lookup itself is <code>HashMap::get(key)</code>, which compares by <code>derive(PartialEq)</code> — <strong>full struct equality</strong>. So if two genuinely different keys happen to hash identically, they land in the same shard but compare <em>unequal</em>, and the lookup is a clean miss. A collision costs a wasted probe; it can <em>never</em> serve the colliding entry's body.</p>
+      <div class="callout danger"><strong>Danger avoided:</strong> the alternative — trusting the hash and skipping the field comparison — is the classic cache-poisoning primitive. Two different URLs (or two different <code>Vary</code> variants, or two different routes) that collide would serve each other's bodies. Because the comparison is by content, that is structurally impossible here: this is why the collision test needs no assertion beyond "different keys &rarr; miss."</div>
+    </article>
+
+    <article class="concept">
+      <h3>Why <code>KeyInput</code> is a snapshot</h3>
+      <p>The cache is consulted <strong>twice per exchange</strong>: a lookup <em>before</em> the Level 5 rewrite, and a store/restamp <em>after</em> the response returns. Between those two moments the live <code>RequestHead</code> is <em>mutated in place</em> — target stripped, Host clobbered, headers injected. Keying on the mutated head at store time would silently change what "the same resource" means between the two consultations.</p>
+      <p><code>KeyInput</code> is the fix: a cheap struct capturing <code>route</code>, <code>method</code>, the pre-rewrite <code>host</code>, <code>target</code>, and a copy of the request <code>headers</code>, taken once via <code>KeyInput::from_request</code> on caching routes only. <code>Key::build(&amp;input, &amp;vary_names)</code> then produces the same key at lookup and at store — the head can be rewritten in between, and the key does not care.</p>
+      <div class="callout warn"><strong>Note on the returned key.</strong> <code>Lookup::Stale</code> carries the <em>key it was found with</em>. By the time a 304 comes back and <code>restamp</code> runs, the live head has been rewritten and can no longer rebuild that key — so the entry can only be found again by the key <code>Stale</code> captured. This is the same "snapshot because the live head moves" reasoning, one layer deeper.</div>
+    </article>
+  </section>
+
+  <section id="placement">
+    <h2>Placement: after middleware, instead of the lease</h2>
+    <p class="lead">Where the lookup sits in <code>serve_one</code> is as much a security decision as the key. Two rules: it runs <strong>after</strong> the middleware chain, and on a hit it runs <strong>instead of</strong> the balancer lease.</p>
+
+    <article class="concept">
+      <h3>After middleware — a 401'd client gets no cache read</h3>
+      <p>The lookup lives <em>after</em> the Level 6 middleware chain has run (auth, rate limiting, request-id). A cached response must <strong>never</strong> bypass those. If the lookup ran <em>before</em> the chain, a client blocked by auth or throttled by the rate limiter could still be served a cached body — the cache would neuter the very middleware protecting the resource. So a 401'd or 429'd client never reaches the cache read at all.</p>
+      <div class="callout warn"><strong>This is different from the <code>Authorization</code> gate.</strong> The <code>Authorization</code> request-header gate (in <code>request_is_cacheable</code>) is about <em>storage safety</em> — never keep or serve a copy of a per-user authorized response. The after-middleware placement is about <em>access control</em> — never let a cache hit skip a policy check. A resource can be publicly cacheable yet still rate-limited; only the placement rule catches that.</div>
+    </article>
+
+    <article class="concept">
+      <h3>Instead of the lease — the shield goes dark on a hit</h3>
+      <p>A fresh hit calls <code>serve_cached</code> and returns without ever taking a balancer lease. That means, on a hit, three pieces of Level 3/4 machinery <strong>never see the request</strong>: no backend socket is opened, no circuit-breaker traffic is recorded, no inflight/least-connections count moves. This is the cache <em>as a shield</em> — the backend is protected from load it never learns about.</p>
+      <p>The hit then runs the <strong>same client-leg pipeline</strong> as a forwarded response: middleware response phase (request-id, logging), Level 5 <code>apply_response</code> rules, the framing/Connection block. Cached and forwarded responses are indistinguishable to everything downstream <em>except</em> for the <code>X-Cache</code> and <code>Age</code> headers — and those are set <strong>before</strong> the chain/L5 passes, so an operator's explicit response rule keeps the last word (Level 5's ordering principle, appearing a third time).</p>
+      <pre><code>// proxy.rs serve_one — the lookup, after the middleware chain
+if let Some(default_ttl) = route.cache_ttl {
+    let (req_no_store, req_no_cache) = cache::request_cache_control(&amp;req);
+    if cache::request_is_cacheable(&amp;req) &amp;&amp; !req_no_store {
+        let key_input = cache::KeyInput::from_request(route_idx, &amp;req, client_host);
+        if !req_no_cache {
+            match cache.lookup(&amp;key_input) {
+                Lookup::Hit(cached)  =&gt; { /* serve_cached, NO lease */ }
+                Lookup::Stale { .. } =&gt; { /* set If-None-Match, forward */ }
+                Lookup::Miss         =&gt; { ctx.cache = Some("miss"); }
+            }
+        }
+        cache_plan = Some((key_input, default_ttl)); // remembered for store
+    }
+}</code></pre>
+    </article>
+
+    <article class="concept">
+      <h3>What is stored: the origin's response, not the client's</h3>
+      <p>The entry captures the <strong>origin's</strong> response — snapshotted after <code>strip_hop_by_hop(resp)</code> but <em>before</em> the client-leg mutations. Hop-by-hop headers (<code>Connection</code>, <code>Transfer-Encoding</code>) are connection-specific by definition; the client-leg headers describe <em>this</em> client's connection, not the resource. Storing either would poison the next client with the wrong connection semantics.</p>
+      <div class="callout"><strong>The one gap found live and fixed.</strong> A miss on a caching route originally carried <em>no</em> <code>X-Cache</code> header, making a caching route's miss indistinguishable from an uncached route. <code>X-Cache: MISS</code> is now set on the forwarded path — <em>after</em> the cache snapshot (the stored entry must stay free of per-exchange annotations) and <em>before</em> the chain/L5 passes.</div>
+    </article>
+  </section>
+
+  <section id="revalidation">
+    <h2>Revalidation, Both Legs</h2>
+    <p class="lead">Revalidation is the ETag lesson: instead of re-transferring a payload, ask the origin (or answer the client) "still the same version?" with a one-line conditional. Ferrum implements both directions.</p>
+
+    <article class="concept">
+      <h3>Proxy&rarr;origin: <code>If-None-Match</code> &rarr; 304 re-stamps and serves</h3>
+      <p>When a lookup returns <code>Lookup::Stale</code>, the entry is expired but has a validator. The outbound request is turned <strong>conditional</strong>: the cache's <code>ETag</code> is set as <code>If-None-Match</code> (else <code>Last-Modified</code> as <code>If-Modified-Since</code>) on the forwarded head.</p>
+      <ul>
+        <li><strong>Origin answers 304</strong> &rarr; <code>restamp(key, ttl_from_304(...))</code> resets <code>stored_at</code> and <code>ttl</code> (TTL from the 304's own <code>Cache-Control</code>, else the route default), then serves the <em>cached body</em>. One tiny round trip, no payload re-transfer. Counted as <code>revalidated</code>, header <code>X-Cache: REVALIDATED</code>. Live-verified with the origin hit count frozen at 1.</li>
+        <li><strong>Origin answers 200</strong> &rarr; normal miss path, the entry is replaced via the tee.</li>
+        <li><strong>Entry vanished under us</strong> (evicted between lookup and 304) &rarr; <code>restamp</code> returns <code>None</code>; the exchange falls back to an uncacheable pass-through, logged as <code>304 for evicted cache entry; passing through</code>.</li>
+      </ul>
+      <div class="callout warn"><strong>The client's own conditional was replaced.</strong> If the client sent its <em>own</em> <code>If-None-Match</code>, the proxy&rarr;origin leg overwrites it with the <em>cache's</em> validator — otherwise the origin would answer the client's question, not the cache's. The client's conditional is snapshotted first (<code>client_inm</code>) so <code>serve_cached</code> can still answer it locally (next card).</div>
+    </article>
+
+    <article class="concept">
+      <h3>Client&rarr;proxy: <code>If-None-Match</code> matches &rarr; 304 with no body</h3>
+      <p>On a fresh hit (or after a successful restamp), if the client sent an <code>If-None-Match</code> that matches the entry's <code>ETag</code> and the entry is fresh, the proxy answers <strong>304 with no body</strong>, straight from the cache — the client already has the bytes; save the transfer.</p>
+      <p>The full weak/strong comparison rules of RFC 9110 §13.1.2 collapse to <code>etag_matches</code>: strip any <code>W/</code> prefix, compare octet-exact (quotes included), and honor <code>*</code> (matches any entity) and comma-lists. The 304 head carries only the caching-relevant subset (<code>ETag</code>, <code>Cache-Control</code>, <code>Vary</code>, <code>Last-Modified</code>, <code>Expires</code>) — never <code>Content-Type</code>/<code>Content-Length</code>, verified by <code>not_modified_head_carries_caching_headers_only</code>.</p>
+      <div class="callout"><strong>Scope cut, recorded not forgotten.</strong> Client-side <code>If-Modified-Since</code> is <em>not</em> answered at the proxy — it needs HTTP-date parsing and ordering, and the ETag path answers the same question better wherever an ETag exists. <code>Entry</code> still keeps <code>Last-Modified</code> for the proxy&rarr;origin leg, where the <em>origin</em> does the comparing, not us.</div>
+    </article>
+
+    <figure>
+<pre class="mermaid">
+flowchart TD
+  RQ["Request on a caching route"] --> LK{"lookup"}
+  LK -->|"Hit (fresh)"| CINM{"client sent<br/>If-None-Match matching ETag?"}
+  CINM -->|"yes"| C304["304, no body (client&rarr;proxy leg)"]
+  CINM -->|"no"| BODY["serve cached body, X-Cache: HIT, Age"]
+  LK -->|"Stale (has validator)"| COND["forward with If-None-Match: entry ETag<br/>(proxy&rarr;origin leg)"]
+  COND --> O{"origin status"}
+  O -->|"304"| RS["restamp entry, serve cached body<br/>X-Cache: REVALIDATED"]
+  O -->|"200"| REPL["miss path: replace entry via tee"]
+  LK -->|"Miss"| FWD["forward, X-Cache: MISS, tee body"]
+</pre>
+    <figcaption>Both revalidation legs on one map. The client's conditional is answered at the proxy on a fresh hit; the cache's own conditional goes to the origin on a stale-but-validatable entry.</figcaption>
+    </figure>
+  </section>
+
+  <section id="tee">
+    <h2>The Body Tee</h2>
+    <p class="lead">The cache must capture streamed response bodies <em>without</em> breaking Level 1's flat-memory guarantee (every byte touched once, no unbounded buffering). <code>TeeWriter</code> is the answer: a thin <code>AsyncWrite</code> wrapper around the client sink that captures a copy as it relays.</p>
+
+    <article class="concept">
+      <h3>Relay first, capture what was accepted</h3>
+      <p><code>TeeWriter::new(client.stream_mut(), cache.max_body as usize)</code> wraps the client-side sink inside the existing <code>copy_body_to</code> loop. Its <code>poll_write</code> <strong>relays first</strong>, then captures <em>only the bytes the inner sink actually accepted</em>:</p>
+      <pre><code>// proxy.rs — TeeWriter::poll_write
+match Pin::new(&amp;mut *me.inner).poll_write(cx, data) {
+    Poll::Ready(Ok(n)) =&gt; {
+        if !me.overflow {
+            if me.buf.len() + n &gt; me.cap {
+                me.overflow = true;
+                me.buf = Vec::new();          // free eagerly; store is cancelled
+            } else {
+                me.buf.extend_from_slice(&amp;data[..n]);  // only the n accepted
+            }
+        }
+        Poll::Ready(Ok(n))
+    }
+    other =&gt; other,
+}</code></pre>
+      <div class="callout danger"><strong>Why "only what was accepted" matters.</strong> A short write (the inner sink accepts <code>n &lt; data.len()</code>) is normal for a socket. If the tee captured all of <code>data</code> anyway, the cached body would run <em>ahead</em> of what the client actually received — a corrupted entry that later serves bytes the origin sent but this transfer never confirmed. Capturing exactly <code>&amp;data[..n]</code> keeps the buffer in lockstep with the wire.</div>
+    </article>
+
+    <article class="concept">
+      <h3>Overflow cancels the store silently</h3>
+      <p>If the captured buffer would exceed <code>--cache-max-body</code> mid-stream, the tee sets an <code>overflow</code> flag, drops the buffer eagerly, and <strong>keeps relaying</strong>. The client's transfer is completely unaffected — it never learns the store was abandoned. Overflow <em>cancels</em> the store rather than <em>erroring the exchange</em> because a cache must fail open: the request is already succeeding for the client, and "too big to cache" is not a reason to break a working response.</p>
+      <p>This is the level-wide stance: cache full, oversized body, poisoned shard mutex — <strong>every cache decision fails open</strong>. The request proceeds uncached and only the metrics see it.</p>
+    </article>
+  </section>
+
+  <section id="invalidation">
+    <h2>Invalidation &amp; Observability</h2>
+    <p class="lead">Two smaller pieces close the level: RFC 9111 §4.4 invalidation for write-through correctness, and the Level 10 observability surfaces the cache pays forward into.</p>
+
+    <article class="concept">
+      <h3>Unsafe-method invalidation (RFC 9111 §4.4)</h3>
+      <p>A <strong>non-error</strong> (2xx/3xx) response to an unsafe method (POST/PUT/DELETE/PATCH) through a caching route removes <em>every</em> variant of that URI's cached GET entry — all Vary variants and the index. <code>Cache::invalidate(route, host, target)</code> scans all shards for keys matching route + host + target + <code>method == "GET"</code> and removes them, counting each.</p>
+      <p>This buys write-through correctness for the common CRUD shape: <em>update-then-read sees the update</em>. Live-verified as <code>HIT</code> &rarr; POST &rarr; <code>MISS</code> with a fresh origin hit.</p>
+      <div class="callout warn"><strong>Why the next GET is a MISS, not a fresh entry.</strong> Invalidation <em>removes</em> the entry; the POST response itself does not <em>refresh</em> the cache. The POST response is the answer to a <em>different</em> request (a POST, not a GET) — caching its body under the GET key would violate the RFC's method-keyed model and could serve a mutation's response to a reader. Correct behavior is: forget what you knew, re-fetch on the next read. No admin purge endpoint this level — a real purge API belongs with Level 12's config story.</div>
+    </article>
+
+    <article class="concept">
+      <h3>Observability: L10 pays forward</h3>
+      <ul>
+        <li><strong>Metrics:</strong> one counter family, <code>ferrum_cache_events_total{result="hit"|"miss"|"revalidated"|"stored"|"evicted"|"invalidated"}</code>, rendered by <code>Cache::render_prometheus</code> inside <code>cache.rs</code> itself and <em>appended</em> to the Level 10 exposition by the admin listener — one scrape, one document. Same no-alloc discipline: fixed label set, atomics, zero-value series elided.</li>
+        <li><strong>Response headers:</strong> <code>X-Cache: HIT|MISS|REVALIDATED</code> on cached routes; <code>Age</code> on hits (seconds since <code>stored_at</code>), per RFC.</li>
+        <li><strong>Access log:</strong> a <code>"cache"</code> field (<code>middleware/mod.rs</code> <code>ctx.cache: Option&lt;&amp;'static str&gt;</code>) &rarr; <code>"hit"|"miss"|"revalidated"|null</code> (null = route not cached / request not cacheable).</li>
+      </ul>
+    </article>
+  </section>
+
+  <section id="debt">
+    <h2>Recorded Debt</h2>
+    <p class="lead">Some things were deliberately left out — recorded, not forgotten, so the quiz can ask about them. The largest is stampede defense.</p>
+
+    <article class="concept">
+      <h3>No stampede defenses (the level's known debt)</h3>
+      <p>When a popular entry expires, every concurrent request for it misses at once and all of them stampede the origin — the <strong>dog-pile</strong>. Ferrum ships no defense against this. The three classic mitigations are all out of scope:</p>
+      <div class="grid3">
+        <div class="card"><span class="tag adv">debt</span><h4>Coalescing / singleflight</h4><p>Let one request fetch while the other 999 wait on the result. The KB calls this "a lovely exercise" — and a <em>second</em> synchronization design on top of a level that already has one. Its own lesson.</p></div>
+        <div class="card"><span class="tag adv">debt</span><h4>stale-while-revalidate</h4><p>Serve the stale copy immediately while revalidating in the background. Needs a background spawn (the fourth site L9 was avoiding).</p></div>
+        <div class="card"><span class="tag adv">debt</span><h4>TTL jitter</h4><p>Randomize expiries so a batch stored together doesn't all expire together. Cheap, but pointless without one of the above.</p></div>
+      </div>
+      <p>Also out: disk persistence (memory only — a restart is a cold cache, correct for a teaching proxy and most edges), <code>stale-if-error</code>, range requests, and <code>Warning</code> headers (YAGNI). A revalidation against a dead backend follows the existing connect-retry/breaker path and, with no <code>stale-if-error</code>, the client gets the same 502 an uncached request would — the stale entry is <em>not</em> served.</p>
+    </article>
+  </section>
+
+  <section id="code-map">
+    <h2>Code Map</h2>
+    <p class="lead">Files this level added or changed, verified against <code>rproxy/src/</code>.</p>
+    <table>
+      <thead><tr><th>File · unit</th><th>Responsibility</th></tr></thead>
+      <tbody>
+        <tr><td><code>cache.rs</code> — Section 1 (storage)</td><td>New file. <code>Cache</code> (16 <code>Mutex&lt;Shard&gt;</code>), <code>Shard</code>, <code>Entry</code>, <code>Key</code>, <code>CachedResponse</code>, <code>CacheStats</code>. Sharded approximate-LRU + lazy TTL store; <code>lookup</code>/<code>probe</code>/<code>store</code>/<code>insert</code>/<code>restamp</code>/<code>invalidate</code>. Knows no HTTP.</td></tr>
+        <tr><td><code>cache.rs</code> — Section 2 (semantics)</td><td>Pure functions: <code>KeyInput</code>/<code>Key::build</code>, <code>request_is_cacheable</code>, <code>request_cache_control</code>, <code>freshness_from_headers</code>, <code>ttl_from_304</code>, <code>etag_matches</code>, <code>validators</code>, <code>not_modified_head</code>. Knows no locking.</td></tr>
+        <tr><td><code>cache.rs</code> — <code>render_prometheus</code></td><td>Emits the <code>ferrum_cache_events_total</code> counter family for the admin listener to append to the L10 exposition.</td></tr>
+        <tr><td><code>proxy.rs</code> — <code>serve_one</code> (edit)</td><td>Lookup after middleware / instead of lease; the <code>cache_plan</code>, <code>revalidate</code>, <code>store_plan</code> flow; <code>X-Cache</code>/<code>Age</code> stamping; invalidation call on unsafe methods.</td></tr>
+        <tr><td><code>proxy.rs</code> — <code>serve_cached</code> (new)</td><td>Answers a request from the cache: drains the request body, answers a client conditional with 304, else builds a head from the <code>Entry</code> and runs the normal client-leg pipeline.</td></tr>
+        <tr><td><code>proxy.rs</code> — <code>TeeWriter</code> (new)</td><td><code>AsyncWrite</code> wrapper capturing the streamed body relay-first, capping at <code>--cache-max-body</code>, overflow cancels the store.</td></tr>
+        <tr><td><code>router.rs</code> (edit)</td><td><code>L11_KEYS = ["cache"]</code> option-partition arm; <code>Route.cache_ttl: Option&lt;Duration&gt;</code>; <code>parse_cache_option</code>; <code>find_route_indexed</code> yields the route index for the key.</td></tr>
+        <tr><td><code>main.rs</code> (edit)</td><td><code>--cache-max-bytes</code>/<code>-entries</code>/<code>-body</code> CLI flags; one shared <code>Arc&lt;Cache&gt;</code> built at boot and passed into <code>serve_one</code>.</td></tr>
+        <tr><td><code>middleware/mod.rs</code> (edit)</td><td><code>ctx.cache: Option&lt;&amp;'static str&gt;</code> &rarr; the <code>"cache"</code> JSON access-log field.</td></tr>
+      </tbody>
+    </table>
+    <div class="callout warn"><strong>Claims I could not pin to an exact line:</strong> the <code>--cache-max-body</code> <em>default of 1&nbsp;MB</em> is <code>DEFAULT_MAX_BODY = 1024 * 1024</code> in <code>cache.rs</code>, but I did not confirm <code>main.rs</code> wires that exact constant as the CLI default (it reads the three values from parsed args). The <code>metrics.rs</code> "family" wiring in the spec's component table is realized as <code>Cache::render_prometheus</code> living in <code>cache.rs</code> and appended by the admin listener, rather than a new series in <code>metrics.rs</code> — the spec's own comment notes this placement.</div>
+  </section>
+
+  <section id="industry">
+    <h2>How Industry Does It</h2>
+    <p class="lead">HTTP caching is one of the most mature areas in the proxy world — RFC 9111 is a shared contract, so the <em>semantics</em> converge, but the <em>storage engines</em> and <em>stampede defenses</em> diverge sharply. Here is where Ferrum sits, honestly, as a teaching build.</p>
+    <table>
+      <thead><tr><th>Concern</th><th>nginx</th><th>Apache httpd</th><th>HAProxy</th><th>Envoy</th><th>Ferrum (ours)</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Storage</strong></td>
+          <td><code>proxy_cache</code>: on-<em>disk</em> store with an in-memory keys zone; shared across workers.</td>
+          <td><code>mod_cache</code> + <code>mod_cache_disk</code> (or socache): mostly disk-backed.</td>
+          <td>Small in-memory object cache (<code>cache</code> section); intended for tiny hot objects, not a general store.</td>
+          <td>In-memory by default; pluggable cache filter with custom backends.</td>
+          <td>In-memory only, 16 <code>Mutex</code> shards, <code>Arc&lt;[u8]&gt;</code> bodies. No disk.</td>
+        </tr>
+        <tr>
+          <td><strong>Eviction</strong></td>
+          <td>LRU-ish via the cache manager process; <code>inactive</code> + <code>max_size</code>.</td>
+          <td>Time + size limits; periodic <code>htcacheclean</code>.</td>
+          <td>TTL + size; small by design.</td>
+          <td>Configurable; LRU-family.</td>
+          <td><strong>Approximate LRU</strong>: per-shard scan for oldest <code>last_used</code>, no recency list.</td>
+        </tr>
+        <tr>
+          <td><strong>Key</strong></td>
+          <td>Configurable <code>proxy_cache_key</code> (default scheme+host+uri); Vary honored.</td>
+          <td>URL + Vary-derived.</td>
+          <td>Config-driven key.</td>
+          <td>Route + Vary; customizable.</td>
+          <td>Route index + pre-rewrite host/target + Vary values; <strong>full-struct equality</strong> so collisions degrade to a miss.</td>
+        </tr>
+        <tr>
+          <td><strong>Revalidation</strong></td>
+          <td>Conditional GETs to origin; <code>proxy_cache_revalidate on</code>.</td>
+          <td>Conditional requests via <code>mod_cache</code>.</td>
+          <td>Limited (small-object focus).</td>
+          <td>Full conditional support.</td>
+          <td>Both legs: proxy&rarr;origin <code>If-None-Match</code>/304 re-stamp; client&rarr;proxy <code>If-None-Match</code>&rarr;304.</td>
+        </tr>
+        <tr>
+          <td><strong>Stampede defense</strong></td>
+          <td><code>proxy_cache_lock</code> (coalescing) + <code>proxy_cache_use_stale updating</code> (serve-stale).</td>
+          <td><code>CacheLock</code> directive.</td>
+          <td>Minimal.</td>
+          <td>Coalescing / request collapsing available.</td>
+          <td><strong>None</strong> — recorded debt (coalescing, stale-while-revalidate, TTL jitter all out of scope).</td>
+        </tr>
+        <tr>
+          <td><strong>Invalidation</strong></td>
+          <td>PURGE via 3rd-party module; RFC §4.4 on unsafe methods.</td>
+          <td><code>mod_cache</code> honors invalidation.</td>
+          <td>Limited.</td>
+          <td>Filter-dependent.</td>
+          <td>RFC 9111 §4.4 unsafe-method invalidation only; no purge API this level.</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="callout"><strong>The honest trade-off.</strong> Ferrum's cache is a faithful teaching implementation of RFC 9111's <em>semantics</em> — the confusables (<code>no-cache</code> vs <code>no-store</code>, <code>private</code>, <code>s-maxage</code>), the Vary two-step, both revalidation legs, and the security-critical key are all correct. Where it is deliberately crude next to production caches: it is <strong>memory-only</strong> (nginx and httpd survive a restart with a warm disk cache; Ferrum does not), its eviction is an <strong>O(shard) scan</strong> rather than an O(1) recency structure (fine at 64&nbsp;MB, would not scale to a multi-GB edge cache), and it ships <strong>no stampede defense at all</strong> — the one gap that bites hardest under real load, and the one the KB most wants Vessey to be able to design from first principles (see the last quiz question). It is a shared cache you could read end to end in an afternoon, which is the point.</div>
+  </section>
+
+  <section id="quiz">
+    <h2>Quiz</h2>
+    <p class="lead">Copied verbatim from <code>PROGRESS.md</code> &sect; "Level 11 quiz — Vessey to answer before Level 12". Answers are Vessey's to write.</p>
+    <div class="qa"><ol>
+      <li><p class="q">The KB calls the cache key "the worst bug class in this level." Walk through what happens, request by request, if the key omits (a) the Vary values, (b) the route index, (c) the original pre-rewrite target. Which of the three leaks one user's data to another?</p></li>
+      <li><p class="q">Why does the lookup compare full key structs when the hash already picked the shard? What exactly goes wrong if two different keys hash identically and the code trusts the hash?</p></li>
+      <li><p class="q"><code>no-cache</code> and <code>no-store</code> differ by one word and by everything. What does each direct this cache to do, and how does the code express "store but revalidate before every use" without a special case in the lookup path?</p></li>
+      <li><p class="q">Why does <code>s-maxage</code> override <code>max-age</code> for Ferrum but not for a browser? What kind of cache is each directive addressed to?</p></li>
+      <li><p class="q">The route's <code>;cache=SECS</code> default TTL applies only when the response carries a validator. What could a validator-less response with invented freshness do that a validated one cannot, and why is that asymmetry worth a rule?</p></li>
+      <li><p class="q">Vary lookup takes two probes. What does the first probe's entry store for a varying resource, why can't the caller build the right key in one step, and what happens to a request whose named header is absent?</p></li>
+      <li><p class="q">A fresh hit skips the balancer lease entirely. Name three distinct pieces of L3/L4 machinery that consequently never see the request, and argue in each case whether that blindness is correct.</p></li>
+      <li><p class="q">The cache lookup runs AFTER the middleware chain. What specific attack works if it runs before? Which L6 middleware would it neuter, and how is that different from the <code>Authorization</code> request-header gate?</p></li>
+      <li><p class="q">Proxy&rarr;origin revalidation replaced the client's own If-None-Match with the cache's validator. Where did the client's conditional go, and how does the client still get its 304 when its validator matches? Trace both the fresh-hit and the revalidated-stale paths.</p></li>
+      <li><p class="q"><code>TeeWriter</code> captures "only what the inner sink actually accepted." What corruption does that clause prevent, and why does overflow cancel the store instead of erroring the exchange?</p></li>
+      <li><p class="q">The stored entry snapshots headers after <code>strip_hop_by_hop</code> but before the middleware response phase, L5 response rules, and the framing block. For each of the three, give a concrete header that would be wrong in the cache if the snapshot moved after it.</p></li>
+      <li><p class="q">POST-invalidation removes the entry but the next GET is a MISS, not a fresh entry. Why doesn't the POST response itself refresh the cache, and what RFC-shaped assumption would that violate?</p></li>
+      <li><p class="q">Eviction scans the shard for the oldest <code>last_used</code> instead of keeping a recency list. State the exact asymptotic costs of both designs on the hit path and the insert-when-full path, and the argument for paying the scan here.</p></li>
+      <li><p class="q">The level ships with no stampede defense. Describe the dog-pile scenario concretely (numbers welcome), then sketch how request coalescing would fit THIS codebase — which type would own the in-flight map, and what Tokio primitive would the 999 waiters block on?</p></li>
+    </ol></div>
+  </section>
+
+  <section id="cheatsheet">
+    <h2>Cheat Sheet &amp; Glossary</h2>
+    <p class="lead">The level's numbers, flags, and defaults; then a small glossary of the vocabulary.</p>
+
+    <h3>Numbers, flags &amp; defaults</h3>
+    <table>
+      <thead><tr><th>Name</th><th>Value / default</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>SHARDS</code></td><td>16</td><td>Number of <code>Mutex&lt;Shard&gt;</code>; matches L6's rate-limiter shard count.</td></tr>
+        <tr><td><code>--cache-max-bytes</code></td><td>64 MB (<code>DEFAULT_MAX_BYTES</code>)</td><td>Total byte budget; the real bound. Per shard = total/16 = 4 MB.</td></tr>
+        <tr><td><code>--cache-max-entries</code></td><td>4096 (<code>DEFAULT_MAX_ENTRIES</code>)</td><td>Total entry budget; metadata bound. Per shard = 256.</td></tr>
+        <tr><td><code>--cache-max-body</code></td><td>1 MB (<code>DEFAULT_MAX_BODY</code>)</td><td>Largest single body worth storing; enforced by the tee + at insert.</td></tr>
+        <tr><td><code>;cache[=SECS]</code></td><td>route option; default TTL 60 s</td><td>Opt-in per route; <code>SECS</code> is the default TTL applied only with a validator.</td></tr>
+        <tr><td>Cacheable statuses</td><td>200, 301, 404</td><td>The heavily-cacheable trio; everything else is not stored.</td></tr>
+        <tr><td>TTL precedence</td><td><code>s-maxage</code> &gt; <code>max-age</code> &gt; route default (w/ validator)</td><td>Shared-cache directive wins; invented freshness needs a validator.</td></tr>
+        <tr><td><code>no-cache</code> TTL</td><td><code>Duration::ZERO</code> (+ validator)</td><td>Always stale &rarr; revalidate every use; no lookup special case.</td></tr>
+        <tr><td>Metric</td><td><code>ferrum_cache_events_total{result=...}</code></td><td>Labels: hit, miss, revalidated, stored, evicted, invalidated.</td></tr>
+        <tr><td>Response headers</td><td><code>X-Cache: HIT|MISS|REVALIDATED</code>, <code>Age</code></td><td>On caching routes; <code>Age</code> on hits only.</td></tr>
+        <tr><td>Tests</td><td>250 total (+20)</td><td>230 prior tests kept green; 13 live checks all green.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Glossary</h3>
+    <table>
+      <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td>Shared cache</td><td>A cache serving many clients from one origin (vs a browser's private cache). RFC 9111's <code>private</code>/<code>s-maxage</code> rules are written for exactly this — Ferrum is one.</td></tr>
+        <tr><td>Approximate LRU</td><td>Recency tracked with a per-entry <code>last_used</code> timestamp and an O(shard) scan on eviction, instead of an exact O(1) recency list — trades a little accuracy for no <code>unsafe</code>.</td></tr>
+        <tr><td>Sharded locking</td><td>Splitting the map into N independently-locked shards so concurrent access rarely contends. L6's rate-limiter idiom, reused.</td></tr>
+        <tr><td>Lazy TTL</td><td>Expiry checked on lookup rather than by a background sweeper; expired-with-validator entries survive as revalidation candidates.</td></tr>
+        <tr><td>Vary-index entry</td><td>A tiny bodyless entry at the vary-less key that records which request headers a varying resource depends on, enabling the two-step lookup.</td></tr>
+        <tr><td>Revalidation</td><td>Asking "still the same version?" with a conditional request (<code>If-None-Match</code>/<code>If-Modified-Since</code>) instead of re-transferring the body; a 304 answers "yes."</td></tr>
+        <tr><td>Re-stamp</td><td>Resetting a stale entry's <code>stored_at</code> and <code>ttl</code> after a 304 so it is fresh again without re-fetching the body.</td></tr>
+        <tr><td>Tee</td><td>Splitting a byte stream so it goes to the client <em>and</em> a capture buffer at once; <code>TeeWriter</code> does this relay-first.</td></tr>
+        <tr><td>Fail open</td><td>On any cache failure (full, oversized, poisoned lock) the request proceeds <em>uncached</em> rather than erroring — a cache must never break a working response.</td></tr>
+        <tr><td>Dog-pile / stampede</td><td>Many concurrent requests all missing on the same freshly-expired entry and hammering the origin at once; Ferrum has no defense (recorded debt).</td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+</div>
+
+<footer>
+  <p>Ferrum KB &mdash; Level 11: Caching &bull; Built 2026-09-02</p>
+  <p class="muted">A teaching reverse proxy in Rust. Claims verified against <code>rproxy/src/cache.rs</code>, <code>proxy.rs</code>, <code>router.rs</code>, <code>main.rs</code>, <code>middleware/mod.rs</code> and PROGRESS.md. Where ours is crude next to production caches, the page says so.</p>
+</footer>
+</body>
+</html>
