@@ -6,6 +6,7 @@
 //! in Level 7.
 
 use std::io;
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -509,6 +510,24 @@ fn is_poolable(
     buffer_empty
 }
 
+/// Level 12: process-wide drain flag. Set once by the shutdown sequence in
+/// `main.rs`; read per exchange. During a drain every response carries
+/// `Connection: close` — a keep-alive connection would otherwise hold the
+/// process alive until its client got bored, and the KB's drain step is
+/// exactly "answer the current request with Connection: close and let the
+/// connection end naturally". An `AtomicBool` rather than a channel because
+/// nothing needs to WAIT on it: every reader is already awake, mid-request,
+/// and just needs the current answer.
+static SHUTTING_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn begin_shutdown() {
+    SHUTTING_DOWN.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn draining() -> bool {
+    SHUTTING_DOWN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Serve one client connection: a sequence of request/response exchanges
 /// on the same socket (keep-alive), each routed to a backend by `routes`.
 ///
@@ -531,7 +550,7 @@ fn is_poolable(
 /// binary, which is the right trade for a proxy.
 pub async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
     client: S,
-    routes: &RouteTable,
+    routes: &std::sync::RwLock<Arc<RouteTable>>,
     peer: std::net::SocketAddr,
     backend_timeout: Duration,
     scheme: &'static str,
@@ -547,9 +566,22 @@ pub async fn handle_client<S: AsyncRead + AsyncWrite + Unpin>(
     let mut client = Conn::new(client);
 
     loop {
+        // Level 12: snapshot the route table PER EXCHANGE, not per
+        // connection. This is the hot-reload granularity decision: a request
+        // mid-flight keeps the table it started with (a consistent snapshot,
+        // by Arc ownership), while the NEXT request on this same keep-alive
+        // connection sees a freshly-swapped config. Per-connection would let
+        // one chatty client pin a stale config forever. The read lock is
+        // held for one refcount bump — never across an await, as ever.
+        let table: Arc<RouteTable> = match routes.read() {
+            Ok(guard) => Arc::clone(&guard),
+            // Poisoned = a reload thread panicked mid-swap, which cannot
+            // happen (the swap is one pointer store), but fail safe anyway.
+            Err(poisoned) => Arc::clone(&poisoned.into_inner()),
+        };
         match serve_one(
             &mut client,
-            routes,
+            &table,
             peer,
             backend_timeout,
             scheme,
@@ -1269,11 +1301,14 @@ async fn serve_one<S: AsyncRead + AsyncWrite + Unpin>(
                 resp.headers
                     .push(("Transfer-Encoding".to_string(), "chunked".to_string()));
             }
+            // Level 12: a drain overrides keep-alive. The client's current
+            // request is honored in full; the CONNECTION ends with it.
+            let keep = client_keep_alive && !draining();
             resp.headers.push((
                 "Connection".to_string(),
-                if client_keep_alive { "keep-alive" } else { "close" }.to_string(),
+                if keep { "keep-alive" } else { "close" }.to_string(),
             ));
-            client_still_usable = client_keep_alive;
+            client_still_usable = keep;
         }
     }
 
@@ -1497,7 +1532,7 @@ where
     if !client_304 {
         http::set_header(&mut resp.headers, "Content-Length", &body.len().to_string());
     }
-    let keep = reusable && client_keep_alive;
+    let keep = reusable && client_keep_alive && !draining();
     resp.headers.push((
         "Connection".to_string(),
         if keep { "keep-alive" } else { "close" }.to_string(),

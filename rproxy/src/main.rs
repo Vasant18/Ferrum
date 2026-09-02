@@ -39,177 +39,91 @@ use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    let mut args = std::env::args().skip(1);
-    let listen_addr = args.next().unwrap_or_else(|| "127.0.0.1:8080".to_string());
-
-    // Split the remaining args into `--upstream NAME=SPEC` flags, `--hc-*`
-    // health tunables, and plain route specs. Upstreams are declared pools a
-    // route can target by name; routes may appear before or after the upstreams
-    // they reference because we collect every declaration first and resolve
-    // names only afterwards.
-    //
-    // This is a `match` rather than an `if/else` so unknown *non-flag* args
-    // still fall through to `route_specs` (the `_` arm). That fall-through is
-    // exactly what preserves every pre-Level-4 invocation: a bare `host:port`
-    // shorthand and full `path=BACKEND` route specs are neither `--upstream`
-    // nor `--hc-*`, so they land in `route_specs` untouched.
-    let mut upstream_specs: Vec<String> = Vec::new();
-    let mut route_specs: Vec<String> = Vec::new();
-    // Global health-check tunables, seeded with the documented defaults. Each
-    // `--hc-*` flag overrides one field; declared upstreams inherit the result.
-    let mut hc = balancer::HealthConfig::default();
-    // Whether to inject the forwarded headers (X-Forwarded-For and friends).
-    // On by default — honest origin reporting is the expected reverse-proxy
-    // behavior; `--no-forwarded` opts out for the rare deployment that wants
-    // the proxy to stay invisible. Applies to every route.
-    let mut forwarded = true;
-    // Level 6 observability middleware. Both ON by default — a request id on
-    // every response and one access-log line per request are what you want from
-    // a proxy on day one, and neither can reject traffic. `--no-*` opts out.
-    let mut request_id = true;
-    let mut access_log = true;
-    // Level 10: the admin plane (`/metrics` + `/health`). `None` = no admin
-    // listener at all — exposing it is an explicit choice (see admin.rs).
-    let mut admin_addr: Option<String> = None;
-    // Level 11: cache bounds. The cache itself is per-route opt-in
-    // (`;cache=`), but the store is one shared, process-wide budget.
-    let mut cache_max_bytes = cache::DEFAULT_MAX_BYTES;
-    let mut cache_max_entries = cache::DEFAULT_MAX_ENTRIES;
-    let mut cache_max_body = cache::DEFAULT_MAX_BODY;
-    // Level 7 pool tunables, seeded with the same defaults the hardcoded
-    // constants carried. Each flag overrides one field; every declared upstream
-    // (and the default catch-all) inherits the result — these are GLOBAL, with
-    // no per-route override by design. `backend_timeout` mirrors `pool_cfg` but
-    // rides a separate path: it is a per-connection deadline threaded straight
-    // into `handle_client`, not part of pool construction.
-    let mut pool_cfg = balancer::PoolConfig::default();
-    let mut backend_timeout = proxy::DEFAULT_BACKEND_RESPONSE_TIMEOUT;
-    // Level 8 security surface. TLS is entirely opt-in (no flags = the same
-    // plaintext listener Levels 1-7 had), but everything in the armoring half is
-    // ON by default with safe values — this level's stated theme is that the
-    // config a lazy user gets must be the safe one, and an unbounded listener is
-    // a memory-exhaustion primitive rather than a neutral default.
-    let mut tls_args = tls::TlsArgs::default();
-    let mut max_conns = security::DEFAULT_MAX_CONNS;
-    let mut max_conns_per_ip = security::DEFAULT_MAX_CONNS_PER_IP;
-    let mut cidrs = security::CidrList::default();
-    let mut limits = security::Limits::default();
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--upstream" => upstream_specs.push(next_val(&mut args, "--upstream")?),
-            "--hc-interval" => hc.interval = parse_duration(&next_val(&mut args, "--hc-interval")?)?,
-            "--hc-timeout" => hc.timeout = parse_duration(&next_val(&mut args, "--hc-timeout")?)?,
-            "--hc-backoff-base" => {
-                hc.backoff_base = parse_duration(&next_val(&mut args, "--hc-backoff-base")?)?
-            }
-            "--hc-backoff-max" => {
-                hc.backoff_max = parse_duration(&next_val(&mut args, "--hc-backoff-max")?)?
-            }
-            "--hc-fail" => {
-                hc.fail_threshold = next_val(&mut args, "--hc-fail")?
-                    .parse()
-                    .map_err(|_| bad_arg("--hc-fail expects a number"))?
-            }
-            "--hc-success" => {
-                hc.success_threshold = next_val(&mut args, "--hc-success")?
-                    .parse()
-                    .map_err(|_| bad_arg("--hc-success expects a number"))?
-            }
-            "--pool-max-idle" => {
-                pool_cfg.max_idle = next_val(&mut args, "--pool-max-idle")?
-                    .parse()
-                    .map_err(|_| bad_arg("--pool-max-idle expects a number"))?
-            }
-            "--pool-idle-timeout" => {
-                pool_cfg.idle_timeout = parse_duration(&next_val(&mut args, "--pool-idle-timeout")?)?
-            }
-            "--backend-timeout" => {
-                backend_timeout = parse_duration(&next_val(&mut args, "--backend-timeout")?)?
-            }
-            // ---- Level 8: TLS termination + mTLS ----
-            "--tls-cert" => tls_args.cert = Some(next_val(&mut args, "--tls-cert")?.into()),
-            "--tls-key" => tls_args.key = Some(next_val(&mut args, "--tls-key")?.into()),
-            "--tls-client-ca" => {
-                tls_args.client_ca = Some(next_val(&mut args, "--tls-client-ca")?.into())
-            }
-            "--tls-client-auth" => {
-                tls_args.client_auth =
-                    tls::ClientAuth::parse(&next_val(&mut args, "--tls-client-auth")?)?
-            }
-            // ---- Level 8: armoring ----
-            "--max-conns" => {
-                max_conns = next_val(&mut args, "--max-conns")?
-                    .parse()
-                    .map_err(|_| bad_arg("--max-conns expects a number"))?
-            }
-            "--max-conns-per-ip" => {
-                max_conns_per_ip = next_val(&mut args, "--max-conns-per-ip")?
-                    .parse()
-                    .map_err(|_| bad_arg("--max-conns-per-ip expects a number"))?
-            }
-            "--max-body" => {
-                limits.max_body = security::parse_size(&next_val(&mut args, "--max-body")?)
-                    .map_err(|e| bad_arg(&e))?
-            }
-            "--max-headers" => {
-                limits.max_headers = next_val(&mut args, "--max-headers")?
-                    .parse()
-                    .map_err(|_| bad_arg("--max-headers expects a number"))?
-            }
-            // Repeatable: each occurrence adds one range, so an operator can
-            // write several `--deny-cidr` flags rather than inventing a
-            // comma-separated sub-grammar. A comma-separated value is also
-            // accepted for convenience.
-            "--allow-cidr" => {
-                for part in next_val(&mut args, "--allow-cidr")?.split(',') {
-                    cidrs.push_allow(security::Cidr::parse(part).map_err(|e| bad_arg(&e))?);
+    // ---- Level 12: config file + --validate, resolved before anything ----
+    // The file lowers into the same argument vector the CLI parser below
+    // consumes (see config.rs for why one vocabulary). Order: file args
+    // first, real CLI args after — the parse loop's last-write-wins arms
+    // make the CLI override the file with zero precedence code here.
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+    let mut cli: Vec<String> = Vec::new();
+    let mut config_path: Option<String> = None;
+    let mut validate_only = false;
+    let mut it = raw.into_iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--config" => config_path = Some(next_val(&mut it, "--config")?),
+            "--validate" => validate_only = true,
+            _ => cli.push(a),
+        }
+    }
+    let file_cfg = match &config_path {
+        Some(p) => Some(config::load(std::path::Path::new(p))?),
+        None => None,
+    };
+    if validate_only {
+        // nginx -t: parse and exit. Reaching this line means the file parsed
+        // (config::load errored otherwise); the deeper guardrails (routes,
+        // upstreams, TLS coherence) run in build_routes below on a normal
+        // boot, so --validate additionally builds the whole table.
+        match &file_cfg {
+            Some(cfg) => {
+                let mut probe = cfg.args.clone();
+                probe.extend(cli.clone());
+                // Reuse the entire startup path in a dry run: parse + build.
+                if let Err(e) = dry_run_build(&probe) {
+                    eprintln!("config INVALID: {e}");
+                    std::process::exit(1);
                 }
+                println!("config OK");
+                return Ok(());
             }
-            "--deny-cidr" => {
-                for part in next_val(&mut args, "--deny-cidr")?.split(',') {
-                    cidrs.push_deny(security::Cidr::parse(part).map_err(|e| bad_arg(&e))?);
-                }
+            None => {
+                eprintln!("--validate requires --config PATH");
+                std::process::exit(1);
             }
-            "--no-forwarded" => forwarded = false,
-            "--no-request-id" => request_id = false,
-            "--no-access-log" => access_log = false,
-            // ---- Level 10: observability ----
-            "--log-level" => {
-                let l = logging::Level::parse(&next_val(&mut args, "--log-level")?)
-                    .map_err(|e| bad_arg(&e))?;
-                logging::set_level(l);
-            }
-            "--log-plain" => middleware::observe::set_plain(true),
-            "--admin" => admin_addr = Some(next_val(&mut args, "--admin")?),
-            // ---- Level 11: cache bounds ----
-            "--cache-max-bytes" => {
-                cache_max_bytes = security::parse_size(&next_val(&mut args, "--cache-max-bytes")?)
-                    .map_err(|e| bad_arg(&e))?
-            }
-            "--cache-max-entries" => {
-                cache_max_entries = next_val(&mut args, "--cache-max-entries")?
-                    .parse()
-                    .map_err(|_| bad_arg("--cache-max-entries expects a number"))?
-            }
-            "--cache-max-body" => {
-                cache_max_body = security::parse_size(&next_val(&mut args, "--cache-max-body")?)
-                    .map_err(|e| bad_arg(&e))?
-            }
-            // Anything else is a route spec (bare host:port or path=BACKEND).
-            _ => route_specs.push(arg),
         }
     }
 
-    let routes = build_routes(
-        &upstream_specs,
-        &route_specs,
-        &hc,
-        pool_cfg,
-        forwarded,
-        request_id,
-        access_log,
-    )?;
-    let routes = Arc::new(routes);
+    // Merge: file first, CLI second. The listen address is positional, so the
+    // CLI's (if any) wins over the file's `listen` key.
+    let cli_listen = cli.first().map(|a| !a.starts_with("--")).unwrap_or(false);
+    let mut merged: Vec<String> = Vec::new();
+    if let Some(cfg) = &file_cfg {
+        merged.extend(cfg.args.iter().cloned());
+    }
+    let file_listen = file_cfg.as_ref().and_then(|c| c.listen.clone());
+    let mut cli_iter = cli.into_iter();
+    let listen_addr = if cli_listen {
+        cli_iter.next().expect("checked non-empty")
+    } else {
+        file_listen.unwrap_or_else(|| "127.0.0.1:8080".to_string())
+    };
+    merged.extend(cli_iter);
+
+    let settings = parse_settings(merged)?;
+    let Settings {
+        routes,
+        admin_addr,
+        drain_timeout,
+        cache_max_bytes,
+        cache_max_entries,
+        cache_max_body,
+        backend_timeout,
+        tls_args,
+        max_conns,
+        max_conns_per_ip,
+        cidrs,
+        limits,
+    } = settings;
+    // Level 12: the swappable handle. `RwLock<Arc<RouteTable>>` is arc-swap
+    // without the dependency: readers clone the Arc under a read lock held
+    // for one refcount bump; a reload replaces the Arc under the write lock.
+    // In-flight requests keep the snapshot they loaded (see handle_client);
+    // the old table frees itself when its last holder drops — ownership
+    // solving the torn-config problem by construction, as the KB promised
+    // back when Level 2 first wrapped the table in an Arc.
+    let routes: Arc<std::sync::RwLock<Arc<RouteTable>>> =
+        Arc::new(std::sync::RwLock::new(Arc::new(routes)));
 
     // Level 10: the metrics registry. Built AFTER the route table because its
     // label slots are the declared upstream names — the registry is shaped by
@@ -226,6 +140,8 @@ async fn main() -> std::io::Result<()> {
 
     let metrics = Arc::new(metrics::Metrics::new(
         &routes
+            .read()
+            .unwrap()
             .upstreams()
             .iter()
             .map(|u| u.name().to_string())
@@ -272,7 +188,7 @@ async fn main() -> std::io::Result<()> {
     if !cidrs.is_empty() {
         println!("  access: {}", cidrs.describe());
     }
-    for line in routes.describe() {
+    for line in routes.read().unwrap().describe() {
         println!("  route: {line}");
     }
 
@@ -287,9 +203,9 @@ async fn main() -> std::io::Result<()> {
         println!("  admin: {addr} (/metrics, /health)");
         let metrics = Arc::clone(&metrics);
         let cache = Arc::clone(&cache);
-        let upstreams = routes.upstreams();
+        let routes = Arc::clone(&routes);
         tokio::spawn(async move {
-            admin::serve(admin_listener, metrics, cache, upstreams).await;
+            admin::serve(admin_listener, metrics, cache, routes).await;
         });
     }
 
@@ -297,13 +213,36 @@ async fn main() -> std::io::Result<()> {
     // one task per pool, independent of client traffic. This must happen inside
     // the tokio runtime (we are already in `async fn main`, after binding), as
     // `spawn_probers` calls `tokio::spawn`, which panics outside a runtime.
-    health::spawn_probers(routes.upstreams());
+    health::spawn_probers(routes.read().unwrap().upstreams());
+
+    // Level 12: the three signals that make a program infrastructure.
+    // SIGTERM/SIGINT begin the drain; SIGHUP reloads config. Registered once,
+    // outside the loop — `signal()` installs a handler and yields a stream.
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+    let mut sighup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?;
 
     // The accept loop is deliberately tiny: pop a completed connection off
     // the kernel's backlog, hand it to its own task, repeat. Anything slow
-    // in this loop delays *every* new client.
+    // in this loop delays *every* new client. Level 12 selects the accept
+    // against the signal streams — a signal breaks or reroutes the loop
+    // without a poll interval or a watcher thread.
     loop {
-        match listener.accept().await {
+        let accepted = tokio::select! {
+            r = listener.accept() => r,
+            _ = sigterm.recv() => break,
+            _ = sigint.recv() => break,
+            _ = sighup.recv() => {
+                // Hot reload. Everything happens off to the side; the swap is
+                // one pointer store. A failed reload logs and changes nothing.
+                match &config_path {
+                    Some(p) => reload(std::path::Path::new(p), &routes),
+                    None => crate::warn!("SIGHUP ignored: no --config file to reload"),
+                }
+                continue;
+            }
+        };
+        match accepted {
             Ok((stream, peer)) => {
                 // ---- Level 8 gate 1: CIDR policy ----
                 // Checked first, and on the *socket* peer address only. This is
@@ -441,6 +380,318 @@ async fn main() -> std::io::Result<()> {
             }
         }
     }
+
+    // ---- Level 12: graceful shutdown — the KB's four-step choreography ----
+    // (1) The signal broke the loop. (2) Stop accepting: dropping the
+    // listener closes the socket, so the kernel refuses new connections from
+    // here on. (3) Drain: the flag makes every completing exchange answer
+    // `Connection: close` (see proxy.rs), and we wait for the in-flight
+    // count L8's ConnLimiter already maintains — the RAII guard built for
+    // security accounting IS a drain tracker; no new machinery. (4) Deadline:
+    // a hung client must not hold the deploy hostage.
+    drop(listener);
+    proxy::begin_shutdown();
+    crate::info!(
+        "shutdown: draining {} connection(s), deadline {:?}",
+        limiter.in_flight(),
+        drain_timeout
+    );
+    let drained = tokio::time::timeout(drain_timeout, async {
+        // Poll, don't subscribe: connections already signal completion by
+        // dropping their guard, and a 100 ms tick on a code path that runs
+        // once per process lifetime is not worth a channel's plumbing.
+        while limiter.in_flight() > 0 {
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
+                // A second SIGTERM/SIGINT during the drain means "now": the
+                // operator asked twice, skip the wait.
+                _ = sigterm.recv() => break,
+                _ = sigint.recv() => break,
+            }
+        }
+    })
+    .await;
+    match (drained, limiter.in_flight()) {
+        (Ok(()), 0) => crate::info!("shutdown: drained cleanly"),
+        (_, n) => crate::warn!("shutdown: cutting {n} connection(s) still in flight"),
+    }
+    // Exit 0 either way: the deploy succeeded; the log records what was cut.
+    Ok(())
+}
+
+/// Level 12: SIGHUP hot reload. Re-read the file, run the ENTIRE boot-time
+/// parse+build+guardrail path off to the side, and only then swap the table
+/// pointer. Wholesale validation is the contract: a reload can never take a
+/// working proxy down — any error keeps the old config live.
+///
+/// Scope: routes + upstreams (and their per-route L5/L6/L11 options).
+/// Startup-only keys (listener, TLS, limits, cache bounds, log settings)
+/// are parsed and VALIDATED but their new
+/// values are not applied; that boundary is nginx's too: you can reroute
+/// live, you cannot re-listen. We deliberately do not diff-and-warn on them
+/// here: detecting "changed" would need the boot-time values threaded
+/// through, and the config file's own header documents the boundary.
+///
+/// The new table's probers are spawned here; the OLD table's probers hold
+/// only `Weak<Upstream>` (health.rs) and expire within one probe interval
+/// of the last in-flight request dropping the old Arc. Old pooled backend
+/// connections close with their pools. Metrics label slots stay boot-time
+/// (the L10 cardinality decision); a reload-introduced upstream name
+/// records under `upstream="-"` until a restart — the documented seam.
+fn reload(path: &std::path::Path, routes: &std::sync::RwLock<Arc<RouteTable>>) {
+    let started = std::time::Instant::now();
+    let new_table = config::load(path)
+        .and_then(|cfg| parse_settings(cfg.args))
+        .map(|s| s.routes);
+    match new_table {
+        Ok(table) => {
+            let table = Arc::new(table);
+            health::spawn_probers(table.upstreams());
+            let mut guard = match routes.write() {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            *guard = Arc::clone(&table);
+            drop(guard);
+            crate::info!(
+                "reload: config applied in {:?} ({} route(s))",
+                started.elapsed(),
+                table.describe().len()
+            );
+            for line in table.describe() {
+                crate::info!("  route: {line}");
+            }
+        }
+        Err(e) => {
+            crate::error!("reload REJECTED (old config stays live): {e}");
+        }
+    }
+}
+
+
+/// Level 12: everything the argument vocabulary configures, parsed in one
+/// place. Extracted from `main` verbatim so boot, `--validate`, and SIGHUP
+/// reload run the IDENTICAL parse + build + guardrail path — three callers,
+/// one parser, no drift. (The alternative — a separate "reload parser" that
+/// accepts a subset — is how a config that validates at boot fails at
+/// reload, or worse, vice versa.)
+struct Settings {
+    routes: RouteTable,
+    admin_addr: Option<String>,
+    drain_timeout: std::time::Duration,
+    cache_max_bytes: u64,
+    cache_max_entries: usize,
+    cache_max_body: u64,
+    backend_timeout: std::time::Duration,
+    tls_args: tls::TlsArgs,
+    max_conns: usize,
+    max_conns_per_ip: usize,
+    cidrs: security::CidrList,
+    limits: security::Limits,
+}
+
+fn parse_settings(args: impl IntoIterator<Item = String>) -> std::io::Result<Settings> {
+    let mut args = args.into_iter();
+    // Split the remaining args into `--upstream NAME=SPEC` flags, `--hc-*`
+    // health tunables, and plain route specs. Upstreams are declared pools a
+    // route can target by name; routes may appear before or after the upstreams
+    // they reference because we collect every declaration first and resolve
+    // names only afterwards.
+    //
+    // This is a `match` rather than an `if/else` so unknown *non-flag* args
+    // still fall through to `route_specs` (the `_` arm). That fall-through is
+    // exactly what preserves every pre-Level-4 invocation: a bare `host:port`
+    // shorthand and full `path=BACKEND` route specs are neither `--upstream`
+    // nor `--hc-*`, so they land in `route_specs` untouched.
+    let mut upstream_specs: Vec<String> = Vec::new();
+    let mut route_specs: Vec<String> = Vec::new();
+    // Global health-check tunables, seeded with the documented defaults. Each
+    // `--hc-*` flag overrides one field; declared upstreams inherit the result.
+    let mut hc = balancer::HealthConfig::default();
+    // Whether to inject the forwarded headers (X-Forwarded-For and friends).
+    // On by default — honest origin reporting is the expected reverse-proxy
+    // behavior; `--no-forwarded` opts out for the rare deployment that wants
+    // the proxy to stay invisible. Applies to every route.
+    let mut forwarded = true;
+    // Level 6 observability middleware. Both ON by default — a request id on
+    // every response and one access-log line per request are what you want from
+    // a proxy on day one, and neither can reject traffic. `--no-*` opts out.
+    let mut request_id = true;
+    let mut access_log = true;
+    // Level 10: the admin plane (`/metrics` + `/health`). `None` = no admin
+    // listener at all — exposing it is an explicit choice (see admin.rs).
+    let mut admin_addr: Option<String> = None;
+    // Level 12: how long a graceful shutdown waits for in-flight connections
+    // before cutting them. 15 s default: long enough for real requests,
+    // short enough that a hung client cannot hold a deploy hostage.
+    let mut drain_timeout = std::time::Duration::from_secs(15);
+    // Level 11: cache bounds. The cache itself is per-route opt-in
+    // (`;cache=`), but the store is one shared, process-wide budget.
+    let mut cache_max_bytes = cache::DEFAULT_MAX_BYTES;
+    let mut cache_max_entries = cache::DEFAULT_MAX_ENTRIES;
+    let mut cache_max_body = cache::DEFAULT_MAX_BODY;
+    // Level 7 pool tunables, seeded with the same defaults the hardcoded
+    // constants carried. Each flag overrides one field; every declared upstream
+    // (and the default catch-all) inherits the result — these are GLOBAL, with
+    // no per-route override by design. `backend_timeout` mirrors `pool_cfg` but
+    // rides a separate path: it is a per-connection deadline threaded straight
+    // into `handle_client`, not part of pool construction.
+    let mut pool_cfg = balancer::PoolConfig::default();
+    let mut backend_timeout = proxy::DEFAULT_BACKEND_RESPONSE_TIMEOUT;
+    // Level 8 security surface. TLS is entirely opt-in (no flags = the same
+    // plaintext listener Levels 1-7 had), but everything in the armoring half is
+    // ON by default with safe values — this level's stated theme is that the
+    // config a lazy user gets must be the safe one, and an unbounded listener is
+    // a memory-exhaustion primitive rather than a neutral default.
+    let mut tls_args = tls::TlsArgs::default();
+    let mut max_conns = security::DEFAULT_MAX_CONNS;
+    let mut max_conns_per_ip = security::DEFAULT_MAX_CONNS_PER_IP;
+    let mut cidrs = security::CidrList::default();
+    let mut limits = security::Limits::default();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--upstream" => upstream_specs.push(next_val(&mut args, "--upstream")?),
+            "--hc-interval" => hc.interval = parse_duration(&next_val(&mut args, "--hc-interval")?)?,
+            "--hc-timeout" => hc.timeout = parse_duration(&next_val(&mut args, "--hc-timeout")?)?,
+            "--hc-backoff-base" => {
+                hc.backoff_base = parse_duration(&next_val(&mut args, "--hc-backoff-base")?)?
+            }
+            "--hc-backoff-max" => {
+                hc.backoff_max = parse_duration(&next_val(&mut args, "--hc-backoff-max")?)?
+            }
+            "--hc-fail" => {
+                hc.fail_threshold = next_val(&mut args, "--hc-fail")?
+                    .parse()
+                    .map_err(|_| bad_arg("--hc-fail expects a number"))?
+            }
+            "--hc-success" => {
+                hc.success_threshold = next_val(&mut args, "--hc-success")?
+                    .parse()
+                    .map_err(|_| bad_arg("--hc-success expects a number"))?
+            }
+            "--pool-max-idle" => {
+                pool_cfg.max_idle = next_val(&mut args, "--pool-max-idle")?
+                    .parse()
+                    .map_err(|_| bad_arg("--pool-max-idle expects a number"))?
+            }
+            "--pool-idle-timeout" => {
+                pool_cfg.idle_timeout = parse_duration(&next_val(&mut args, "--pool-idle-timeout")?)?
+            }
+            "--backend-timeout" => {
+                backend_timeout = parse_duration(&next_val(&mut args, "--backend-timeout")?)?
+            }
+            // ---- Level 8: TLS termination + mTLS ----
+            "--tls-cert" => tls_args.cert = Some(next_val(&mut args, "--tls-cert")?.into()),
+            "--tls-key" => tls_args.key = Some(next_val(&mut args, "--tls-key")?.into()),
+            "--tls-client-ca" => {
+                tls_args.client_ca = Some(next_val(&mut args, "--tls-client-ca")?.into())
+            }
+            "--tls-client-auth" => {
+                tls_args.client_auth =
+                    tls::ClientAuth::parse(&next_val(&mut args, "--tls-client-auth")?)?
+            }
+            // ---- Level 8: armoring ----
+            "--max-conns" => {
+                max_conns = next_val(&mut args, "--max-conns")?
+                    .parse()
+                    .map_err(|_| bad_arg("--max-conns expects a number"))?
+            }
+            "--max-conns-per-ip" => {
+                max_conns_per_ip = next_val(&mut args, "--max-conns-per-ip")?
+                    .parse()
+                    .map_err(|_| bad_arg("--max-conns-per-ip expects a number"))?
+            }
+            "--max-body" => {
+                limits.max_body = security::parse_size(&next_val(&mut args, "--max-body")?)
+                    .map_err(|e| bad_arg(&e))?
+            }
+            "--max-headers" => {
+                limits.max_headers = next_val(&mut args, "--max-headers")?
+                    .parse()
+                    .map_err(|_| bad_arg("--max-headers expects a number"))?
+            }
+            // Repeatable: each occurrence adds one range, so an operator can
+            // write several `--deny-cidr` flags rather than inventing a
+            // comma-separated sub-grammar. A comma-separated value is also
+            // accepted for convenience.
+            "--allow-cidr" => {
+                for part in next_val(&mut args, "--allow-cidr")?.split(',') {
+                    cidrs.push_allow(security::Cidr::parse(part).map_err(|e| bad_arg(&e))?);
+                }
+            }
+            "--deny-cidr" => {
+                for part in next_val(&mut args, "--deny-cidr")?.split(',') {
+                    cidrs.push_deny(security::Cidr::parse(part).map_err(|e| bad_arg(&e))?);
+                }
+            }
+            "--no-forwarded" => forwarded = false,
+            "--no-request-id" => request_id = false,
+            "--no-access-log" => access_log = false,
+            // ---- Level 10: observability ----
+            "--log-level" => {
+                let l = logging::Level::parse(&next_val(&mut args, "--log-level")?)
+                    .map_err(|e| bad_arg(&e))?;
+                logging::set_level(l);
+            }
+            "--log-plain" => middleware::observe::set_plain(true),
+            "--admin" => admin_addr = Some(next_val(&mut args, "--admin")?),
+            // ---- Level 12 ----
+            "--drain-timeout" => {
+                drain_timeout = parse_duration(&next_val(&mut args, "--drain-timeout")?)?
+            }
+            // ---- Level 11: cache bounds ----
+            "--cache-max-bytes" => {
+                cache_max_bytes = security::parse_size(&next_val(&mut args, "--cache-max-bytes")?)
+                    .map_err(|e| bad_arg(&e))?
+            }
+            "--cache-max-entries" => {
+                cache_max_entries = next_val(&mut args, "--cache-max-entries")?
+                    .parse()
+                    .map_err(|_| bad_arg("--cache-max-entries expects a number"))?
+            }
+            "--cache-max-body" => {
+                cache_max_body = security::parse_size(&next_val(&mut args, "--cache-max-body")?)
+                    .map_err(|e| bad_arg(&e))?
+            }
+            // Anything else is a route spec (bare host:port or path=BACKEND).
+            _ => route_specs.push(arg),
+        }
+    }
+
+    let routes = build_routes(
+        &upstream_specs,
+        &route_specs,
+        &hc,
+        pool_cfg,
+        forwarded,
+        request_id,
+        access_log,
+    )?;
+
+    Ok(Settings {
+        routes,
+        admin_addr,
+        drain_timeout,
+        cache_max_bytes,
+        cache_max_entries,
+        cache_max_body,
+        backend_timeout,
+        tls_args,
+        max_conns,
+        max_conns_per_ip,
+        cidrs,
+        limits,
+    })
+}
+
+/// `--validate` support: run the full parse+build with no side effects on
+/// the network. Log-level/log-plain global stores DO run (harmless), which
+/// is the honest cost of reusing the real parser.
+fn dry_run_build(args: &[String]) -> std::io::Result<()> {
+    let s = parse_settings(args.iter().cloned())?;
+    // TLS config construction is the one guardrail build_routes doesn't run.
+    let _ = s.tls_args.build()?;
+    Ok(())
 }
 
 /// An `InvalidInput` error from a static message. A one-liner shared by the

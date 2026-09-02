@@ -9,7 +9,7 @@
 //! sync, lock-free, and unit-testable without sockets; probing is async and
 //! socket-bound. Keeping them in different modules preserves that testability.
 
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Instant;
 
 use tokio::net::TcpStream;
@@ -18,19 +18,38 @@ use crate::balancer::{HealthConfig, Server, Upstream};
 use crate::http;
 use crate::proxy::Conn;
 
-/// Spawn one prober task per upstream. Called once at startup; the tasks run
-/// for the life of the process.
+/// Spawn one prober task per upstream. Called at startup and again after
+/// every successful hot reload (Level 12) for the new table's pools.
+///
+/// Each task holds only a `Weak<Upstream>`: the strong references live in
+/// the route table(s), so when a reload swaps the table and the last
+/// in-flight request drops the old `Arc<RouteTable>`, the old pools' probers
+/// find their upgrade failing and exit within one interval. The `Weak` IS
+/// the shutdown signal — no kill channel, no generation counter, no task
+/// registry. (Before Level 12 the task held the `Arc` itself, which was
+/// harmless when tables were immortal and a leak the moment they weren't:
+/// a prober owning a strong ref would keep its pool — and its idle
+/// connections — alive forever.)
 pub fn spawn_probers(upstreams: Vec<Arc<Upstream>>) {
     for up in upstreams {
-        tokio::spawn(async move { probe_loop(up).await });
+        let weak = Arc::downgrade(&up);
+        tokio::spawn(async move { probe_loop(weak).await });
     }
 }
 
-/// Probe every due server in this pool, forever.
-async fn probe_loop(up: Arc<Upstream>) {
-    let cfg = Arc::clone(up.health());
+/// Probe every due server in this pool until the pool itself is dropped.
+async fn probe_loop(weak: Weak<Upstream>) {
+    // The config is immutable and shared; grab it through one early upgrade.
+    let cfg = match weak.upgrade() {
+        Some(up) => Arc::clone(up.health()),
+        None => return,
+    };
     loop {
         tokio::time::sleep(cfg.interval).await;
+        // Upgrade per tick, and hold the strong ref only for the tick's
+        // duration: between ticks this task keeps no claim on the pool, so
+        // it can never be the thing keeping a retired config alive.
+        let Some(up) = weak.upgrade() else { return };
         let now = Instant::now();
 
         // Decide which servers to probe *before* awaiting, so the breaker
@@ -127,6 +146,36 @@ mod tests {
 
     fn cfg() -> Arc<HealthConfig> {
         Arc::new(HealthConfig { fail_threshold: 2, ..HealthConfig::default() })
+    }
+
+    // Level 12: the Weak-upgrade lifetime contract. A prober loop must end
+    // when the last strong ref to its pool drops (a reload retired the
+    // table), and must keep running while any strong ref lives. The loop
+    // itself needs a runtime; the contract it relies on is Weak::upgrade,
+    // tested directly.
+    #[test]
+    fn weak_upgrade_ends_with_the_last_strong_ref() {
+        let up = Arc::new(Upstream::for_test(
+            "w",
+            Algorithm::RoundRobin,
+            &["127.0.0.1:1"],
+            cfg(),
+        ));
+        let weak = Arc::downgrade(&up);
+        assert!(weak.upgrade().is_some(), "pool alive: prober keeps ticking");
+        // A tick's temporary strong ref must not extend the pool's life
+        // past the tick.
+        let tick_ref = weak.upgrade().unwrap();
+        drop(up); // the "route table" retires the pool
+        assert!(
+            weak.upgrade().is_some(),
+            "mid-tick the prober's own ref keeps it alive"
+        );
+        drop(tick_ref); // tick ends
+        assert!(
+            weak.upgrade().is_none(),
+            "after the tick the prober's next upgrade fails -> loop exits"
+        );
     }
 
     // The prober's only job is mapping a probe result onto the breaker.

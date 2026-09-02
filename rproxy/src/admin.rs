@@ -37,6 +37,8 @@ use crate::balancer::Upstream;
 use crate::http;
 use crate::metrics::Metrics;
 use crate::proxy::Conn;
+use crate::router::RouteTable;
+use std::sync::RwLock;
 
 /// Whole-exchange deadline: read the request head, write the response. On a
 /// localhost socket a healthy scraper finishes in microseconds; anything
@@ -51,14 +53,22 @@ pub async fn serve(
     listener: TcpListener,
     metrics: Arc<Metrics>,
     cache: Arc<crate::cache::Cache>,
-    upstreams: Vec<Arc<Upstream>>,
+    routes: Arc<RwLock<Arc<RouteTable>>>,
 ) {
     loop {
         match listener.accept().await {
             Ok((stream, peer)) => {
                 let metrics = Arc::clone(&metrics);
                 let cache = Arc::clone(&cache);
-                let upstreams = upstreams.clone();
+                // Level 12: resolve the upstream list PER REQUEST through the
+                // shared handle. Capturing a Vec<Arc<Upstream>> at boot (the
+                // pre-reload design) would have made this task a permanent
+                // strong ref to the boot-time pools — /health would report a
+                // retired config forever, and worse, keep it alive.
+                let upstreams = match routes.read() {
+                    Ok(guard) => guard.upstreams(),
+                    Err(poisoned) => poisoned.into_inner().upstreams(),
+                };
                 tokio::spawn(async move {
                     if let Err(e) = tokio::time::timeout(
                         ADMIN_TIMEOUT,

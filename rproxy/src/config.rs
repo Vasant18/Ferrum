@@ -79,26 +79,6 @@ const SWITCH_KEYS: &[&str] = &[
     "log-plain",
 ];
 
-/// Keys that only take effect at startup. A hot reload (SIGHUP) applies
-/// routes/upstreams and warns, by name, about changes to any of these —
-/// the same line nginx draws: you can reroute live, you cannot re-listen.
-pub const STARTUP_ONLY_KEYS: &[&str] = &[
-    "listen",
-    "admin",
-    "log-level",
-    "log-plain",
-    "tls-cert",
-    "tls-key",
-    "tls-client-ca",
-    "tls-client-auth",
-    "max-conns",
-    "max-conns-per-ip",
-    "cache-max-bytes",
-    "cache-max-entries",
-    "cache-max-body",
-    "drain-timeout",
-];
-
 /// A parsed config file, lowered and ready to merge with the real CLI.
 #[derive(Debug)]
 pub struct FileConfig {
