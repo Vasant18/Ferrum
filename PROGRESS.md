@@ -21,7 +21,7 @@ Course defined in [Build.md](Build.md). Theory reference: [Reverse-Proxy-Knowled
 | 11 | Caching (LRU, TTL, ETag, revalidation) | 🟢 **Implemented** (2026-08-26/27) | `cache.rs`: sharded approximately-LRU store (16 `std::sync::Mutex` shards, per-shard byte+entry budgets, lazy TTL, `Arc<[u8]>` bodies) + pure RFC 9111 semantics (GET-only, 200/301/404, `Authorization`/`Set-Cookie`/`no-store`/`private` gates, `s-maxage`>`max-age`, `no-cache`=store-but-always-revalidate, `Vary` two-step keying, full-key equality so hash collisions miss); `proxy.rs`: lookup after middleware (auth before cache), fresh hit skips the balancer lease entirely, stale entries send `If-None-Match` and a 304 re-stamps+serves (`X-Cache: REVALIDATED`), `TeeWriter` captures streamed bodies with zero extra reads, RFC 9111 §4.4 unsafe-method invalidation, client `If-None-Match` answered 304 at the proxy; `;cache[=SECS]` route option (third partition family), `--cache-max-*` flags, `cache_events_total` metrics, `"cache"` access-log field, `X-Cache`+`Age` headers. 250 unit tests. Live-verified all 13 checks incl. both revalidation legs, Vary variants, POST invalidation, LRU eviction under a 16 KB budget. Quiz pending. |
 | 12 | Production Features (graceful shutdown, config, hot reload) | 🟢 **Implemented** (2026-09-02) | `config.rs`: hand-rolled TOML-subset parser that LOWERS the file onto the existing CLI vocabulary (one parser per value forever; CLI-beats-file precedence falls out of arg ordering; duplicate keys are errors; line-numbered messages) + `--config`/`--validate` (nginx -t); `main.rs`: parse loop extracted into `parse_settings` (boot, --validate, and reload share ONE path), accept loop `select!`s accept vs SIGTERM/SIGINT/SIGHUP, graceful shutdown = drop listener → drain flag → poll L8's ConnLimiter to zero under `--drain-timeout` (double-signal skips the wait), SIGHUP reload builds the whole new table off to the side and swaps one `Arc` pointer (invalid config rejected wholesale, old config stays live); `proxy.rs`: `RwLock<Arc<RouteTable>>` snapshotted PER EXCHANGE (mid-flight keeps its table, next keep-alive request sees the new one), drain forces `Connection: close`; `health.rs`: probers hold `Weak<Upstream>` and expire with their table. Graceful restart + worker processes explained, deliberately not built. 261 unit tests. Live-verified: file boot, --validate both ways, CLI-over-file, reload under a concurrent slow request, broken reload rejected, clean drain (`Connection: close` + exit after in-flight completes), deadline cut of a too-slow request. Quiz pending. |
 | 13 | Basic WAF (SQLi/XSS/traversal detection, reputation) | 🟢 **Implemented** (2026-09-02) | `waf.rs`: normalization first (two-pass percent decode with double-encoding flagged AND scored, entity decode, whitespace collapse, null-byte flag, path canonicalization with climb-above-root detection) + a ~16-rule table (data, not code) scanned over path/query/UA/Referer + CRS-style anomaly scoring (lone quote 2, unambiguous attack grammar 10, block only ≥ threshold) + `Reputation` (16-shard strikes → temp ban with L4-style doubling backoff, lazy decay, process-wide store surviving L12 reloads); wired as an L6 middleware at log → request-id → **waf** → ratelimit → auth → authz; `;waf=block\|detect` + `;waf-threshold=N`; `--waf-ban-after/-secs`; rule names log-only (no payload-tuning oracle); `waf_events_total` metrics + `waf_score` log field. Body inspection deliberately absent (streams stay flat-memory). 280 unit tests. Live-verified: SQLi/XSS/traversal/double-encoded payloads 403'd with zero backend contact, benign lookalikes pass, 3 convictions → ban → innocent request also 403 → decay → served, detect mode forwards + logs, unprotected route untouched. Quiz pending. |
-| 14 | Scalability (clusters, HA, anycast) — theory | ⚪ Not started | |
+| 14 | Scalability (clusters, HA, anycast) — theory | 🔵 **Studied** (2026-09-02) | Theory level, no production code — the course's closing move. [`docs/level-14-scalability.md`](docs/level-14-scalability.md): who balances the load balancers (DNS → VRRP → anycast → L4-over-L7, and why they layer); **a verified audit of Ferrum's own state** against the KB's don't-share / share-approximately / share-for-real hierarchy — route table, health state, pools, and metrics ship to N instances unchanged; rate limits, WAF reputation, and the cache go quietly approximate (×N admission, ×N strike budgets, ×N misses — each with its remedy); only "exactly-one-does-X" needs consensus (etcd leases; *use a store, don't implement Raft*); sessions externalize so `iphash` affinity becomes unnecessary; CDN integration lands on three seams already built (L5 XFF trust + L8 CidrList, L11 as cache layer two via `s-maxage`, L7 pools serving origin pull); every level's fleet-scale reappearance mapped (chash → Maglev, breakers → fleet membership, SIGHUP → xDS, drain → rolling deploys). **Course complete: 14/14.** Quiz pending. |
 
 ## Level 1 — what was built
 
@@ -1690,6 +1690,111 @@ the WAF is middleware with opinions."
     Name the three commercial layers above signatures, and for each, what
     it catches that this level structurally cannot.
 
+## Level 14 — what was studied
+
+Scalability & HA — the final level, theory like Level 9. Full write-up in
+[`docs/level-14-scalability.md`](docs/level-14-scalability.md). No
+production code changed; the work was auditing THIS tree against the
+question "what breaks at N > 1?", with every claim verified by grep
+rather than recalled.
+
+- [x] **Who balances the load balancers** — the recursion at the top of
+      the stack: DNS round-robin (cheap, TTL-slow failover), VRRP floating
+      IPs (sub-second, scales to 2), anycast (one IP everywhere via BGP),
+      and the L4-tier-over-L7-tier architecture inside every major cloud.
+      The satisfying part verified in code: Maglev-style L4 tiers spread
+      flows by consistent hashing — the ring `balancer.rs` already builds
+      for `chash` — and they hash the 4-tuple for the same reason
+      `iphash` exists: affinity to held state.
+- [x] **The state audit** (the level's centerpiece): every `static`,
+      `OnceLock`, and sharded map in the tree classified per the KB's
+      hierarchy. **Don't share:** route table (identical config to all
+      instances — L12's validate-wholesale/swap-atomic reload IS the data
+      plane of an xDS-style control plane), health state (independent
+      learning, slight disagreement harmless), pools and metrics
+      (per-instance by nature; Prometheus aggregates fleets). **Share
+      approximately:** rate limits (×N admission — per-instance ÷N is
+      usually fine; Redis for a loose global count), WAF reputation (×N
+      strike budgets; commercial cross-customer feeds are the moat), the
+      cache (×N misses — wasteful, never incorrect; chash partitioning or
+      "the CDN above absorbs it"). **Share for real:** only exactly-once
+      duties (cert renewal) via etcd/ZooKeeper leases — use a store,
+      implementing Raft is its own course. One pleasant find: L6's
+      per-process request-id seeding was cluster-ready three levels
+      before clusters existed.
+- [x] **HA:** the L4 flap-prevention asymmetry generalizes to fleet
+      membership; L10's `/health` (with its deliberate degraded-≠-dead
+      distinction) is exactly the endpoint an L4 tier would consume; L12's
+      drain is the per-instance half of a rolling deploy; failure domains
+      stack process → machine → site, each layer's failure the next
+      layer's health-check event.
+- [x] **CDN integration** — three consequences, each landing on a seam
+      already built: the "client IP" becomes a CDN node (L5's XFF trust
+      rules + L8's CidrList = the trusted-ranges allowlist), the L11
+      cache becomes layer two of two (`s-maxage` is how origins address
+      the layers separately), and origin pull is the ideal customer for
+      L7's pools.
+- [x] **The closing map:** every level reappears at cluster scale —
+      chash → Maglev, breakers → fleet membership, per-IP buckets →
+      replicated approximate limits, SIGHUP → control planes, drain →
+      rolling deploys. Distributed systems are the same subject,
+      multiplied. Course complete: **14/14 levels, 280 tests, ~13.4k
+      lines, two dependencies** (regex, rustls) — everything else from
+      scratch, on purpose.
+- [ ] **Level 14 quiz — Vessey to answer to close the course** (below)
+
+### Level 14 quiz — Vessey to answer to close the course
+
+1. Rank DNS round-robin, VRRP, and anycast by failover speed and explain
+   what mechanically limits each. Which one requires resources you cannot
+   simply buy more of, and what are they?
+2. The L4-over-L7 architecture puts a consistent-hashing tier ABOVE your
+   proxies. Why must the L4 tier hash the 4-tuple rather than
+   round-robin packets, and which Ferrum algorithm exists for the same
+   reason one layer down?
+3. Classify Ferrum's route table, rate limiter, and TLS-cert renewal
+   into the KB's three-tier state hierarchy, and justify each placement
+   in one sentence.
+4. Health state is deliberately NOT shared across a fleet. What makes
+   slight disagreement between instances harmless here, and what
+   property of the L4 breaker design (built eight levels earlier) makes
+   independent learning cheap?
+5. A `rate=100/s` route behind 3 Ferrum instances admits ~300/s. Give
+   the two remedies in the share-approximately tier and state the cost
+   that rules out exact distributed counting.
+6. Why is N independent caches "wasteful but correct" while N
+   independent rate limiters are "quietly wrong"? What distinguishes the
+   two kinds of state?
+7. An attacker sprays a 3-instance fleet. Walk through what the L13
+   reputation store does per instance, what the fleet-level effect is,
+   and what commercial WAFs have that structurally fixes it.
+8. Leader election via an etcd lease: describe the mechanism (what is
+   leased, what renewing means, what losing it triggers), and name the
+   one Ferrum duty on the horizon that would first need it.
+9. "Statelessness is what makes horizontal scaling linear." Connect that
+   claim to L3's iphash: what problem does iphash solve, why does the
+   cluster answer make it unnecessary, and when does it remain the
+   right tool?
+10. Your proxy moves behind a CDN. Name the three integration
+    consequences from the study doc and, for each, the existing Ferrum
+    seam (level + mechanism) it lands on.
+11. L12 built SIGHUP reload; Envoy uses xDS. State precisely which half
+    of the control-plane/data-plane split L12 already implements, and
+    what the other half adds.
+12. Failure domains stack: process, machine, site. For each, name the
+    detection mechanism and the recovery mechanism from the study doc,
+    and identify which levels of this course built the per-instance
+    analogue.
+13. The Rust concepts map says ArcSwap/atomic config swap solves hot
+    reload. Ferrum used `RwLock<Arc<T>>` instead. What does real
+    `arc_swap` buy over the RwLock form, and why was the difference
+    immaterial here? (L12's design doc took a position — check it.)
+14. The course's final claim: "distributed systems are the same subject,
+    multiplied." Argue it concretely using exactly three mechanisms you
+    built, tracing each from its single-instance form to its fleet form
+    — then name ONE genuinely new problem that only exists at fleet
+    scale, with no single-instance analogue in this codebase.
+
 ## Session log
 
 - **2026-07-26** — Course kickoff. Knowledge base built (all 14 levels). `rproxy` crate created. Module 1.1 taught & assigned. Repo pushed to github.com/Vasant18/Ferrum.
@@ -1708,3 +1813,4 @@ the WAF is middleware with opinions."
 - **2026-08-26/27** — Level 11 (Caching) implemented inline across two sessions in auto mode (Vessey pre-approved the recommended decisions), per the approved design (`docs/superpowers/specs/2026-08-26-level-11-caching-design.md`). Session 1 (08-26): design brainstormed and spec committed (from-scratch sharded approximate-LRU per the KB's own blessing — the linked-list LRU is the borrow checker's least favorite data structure and production caches shard anyway; opt-in `;cache=` per route with HTTP deciding per response; separate storage/semantics sections in one `cache.rs`); storage engine + RFC 9111 semantics built with 20 unit tests (key isolation, Vary two-step, lazy TTL, restamp, LRU bounds, directive parsing, weak ETag comparison, 8-thread hammer); router grew a third option-partition family (`L11_KEYS`) and `find_route_indexed` (the key carries the route index). Session 2 (08-27): the wiring — `KeyInput` snapshot refactor (the cache is consulted before AND after the in-place L5 rewrite, so the key inputs must be captured once, early), `Lookup::Stale` carrying its key (by restamp time the live head is rewritten), lookup-after-middleware/instead-of-lease in `serve_one`, `serve_cached` running the full client-leg pipeline (chain → L5 → framing) so cached responses are indistinguishable from forwarded ones, proxy→origin conditionals with 304 restamp+serve, client `If-None-Match` answered 304 at the proxy, `TeeWriter` (an `AsyncWrite` wrapper capturing only what the sink accepted, overflow = silent store-cancel, client unaffected), §4.4 unsafe-method invalidation, `--cache-max-*` flags, `cache_events_total` appended to `/metrics` by the admin listener, `"cache"` JSON log field. 250 tests pass (230 kept green, +20). One test's assertion was corrected against the code rather than vice versa (the size gate rejects BEFORE counting `stored` — "stored" means in the cache, not offered to it). `find_route` went production-dead and took the documented `#[allow(dead_code)]`-with-why treatment (the `find`/`for_test` precedent); `CachedResponse.last_modified` was instead REMOVED with the scope-cut argument written where the field was (client-side `If-Modified-Since` needs HTTP-date parsing; the ETag path answers the same question better; `Entry` keeps Last-Modified for the origin leg where the origin compares). Live verification: 13/13 green — miss→hit with the origin's own hit-counter frozen, TTL expiry, `REVALIDATED` with origin answering 304 to our `If-None-Match`, client-conditional 304 with no body and caching headers only, `no-store`/`private` never stored, `Authorization` bypassing the cache entirely, `Vary: Accept-Encoding` serving per-encoding variants, POST invalidation (HIT → POST → MISS with fresh origin hit), 30 LRU evictions under `--cache-max-bytes 16k`, metrics/log fields, an uncached route carrying zero cache artifacts, keep-alive across hits. **One gap found live, fixed, committed separately:** misses on caching routes carried no `X-Cache` at all — indistinguishable from an uncached route; `X-Cache: MISS` now set after the cache snapshot and before the chain/L5 passes so the stored entry stays annotation-free and operator rules keep the last word. Commits `081fae5` (spec), `d453077` (implementation), `cfc3b66` (X-Cache fix), plus docs, pushed to `github.com/Vasant18/Ferrum` main via the `switching-gh-accounts` skill, gh switched back afterwards.
 - **2026-09-02** — Level 12 (Production Features) implemented inline in one session in auto mode, per the approved design (`docs/superpowers/specs/2026-09-02-level-12-production-features-design.md`). New `config.rs`: a hand-rolled TOML-subset parser that LOWERS the file onto the existing CLI vocabulary — `max-conns = 10000` IS `--max-conns 10000`, an `[upstreams]` entry IS `--upstream NAME=SPEC`, a `routes` element IS a positional route spec — so every value keeps its one parser and "CLI overrides file" falls out of argument ordering with zero precedence code; duplicate keys are hard errors (last-wins hides drift), messages carry line numbers, and the subset is stated exactly and rejected loudly outside it. `main.rs`: the eleven-level parse loop extracted verbatim into `parse_settings` so boot, `--validate` (nginx -t, runs the FULL guardrail path incl. `TlsArgs::build`), and SIGHUP reload share one parser; the accept loop now `select!`s accept against SIGTERM/SIGINT (break → drain) and SIGHUP (reload → continue); graceful shutdown drops the listener (kernel refuses from that instant), sets a process-wide drain flag that makes every completing exchange — cached responses included — answer `Connection: close`, and polls **L8's ConnLimiter** (the RAII security accounting IS a drain tracker; zero new machinery) to zero under `--drain-timeout`, second signal skips the wait, exit 0 either way with the cut count logged. Hot reload: `RwLock<Arc<RouteTable>>` snapshotted PER EXCHANGE in `handle_client` (mid-flight requests keep a consistent table; the next request on a keep-alive connection sees the new config; per-connection granularity would let a chatty client pin a retired config forever), the whole new table built off to the side through the identical boot path and swapped with one pointer store, invalid files rejected wholesale at ERROR with the old config live. The reload's lifetime problem: `health.rs` probers now hold `Weak<Upstream>` upgraded per tick — a retired table's probers expire within one interval of its last Arc dropping, the `Weak` IS the shutdown signal (no kill channel, no generation counter); same class of fix in `admin.rs`, whose boot-time `Vec<Arc<Upstream>>` capture would have pinned (and misreported) the boot config forever — `/health` now resolves upstreams per request through the shared handle. Graceful restart (FD passing / SO_REUSEPORT) and worker processes explained and deliberately not built, with the KB's own "the orchestrator rolls pods now" concession and Pingora's single-process argument recorded. One dead-code decision: the spec's diff-and-warn on startup-only keys was consciously dropped during implementation (detecting "changed" needs boot values threaded through for a WARN nobody acts on), so `STARTUP_ONLY_KEYS` was REMOVED rather than `#[allow]`ed, and the doc comment that referenced it fixed in the same pass. 261 tests (250 kept green, +11: the config grammar end to end, and the `Weak` upgrade lifetime contract tested directly). Live verification all green: file boot identical to CLI, `--validate` 0/1 with boot-quality errors, CLI `--admin` overriding the file's, SIGHUP swapping routes under a concurrent 4 s request that completed on the OLD table, a garbage config line rejected with traffic uninterrupted, a clean drain (in-flight request finished, response carried `Connection: close`, "drained cleanly" logged, process exited), a deadline drain cutting a too-slow request at 3 s with the count logged, and new connections refused the instant the listener dropped. Commits `ffb8636` (spec), `5b2dbb9` (config parser WIP), `549b0c9` (shutdown+reload), plus docs, pushed to `github.com/Vasant18/Ferrum` main via the `switching-gh-accounts` skill, gh switched back afterwards.
 - **2026-09-02 (later)** — Level 13 (Basic WAF) implemented inline in one session in auto mode, per the approved design (`docs/superpowers/specs/2026-09-02-level-13-basic-waf-design.md`). New `waf.rs` (~750 lines incl. tests), the KB's "middleware with opinions" built literally: normalization first (two-pass percent decode where a changed second pass IS double-encoding — flagged and scored, legitimate clients single-encode; targeted entity decode; whitespace collapse; null-byte flag; broken escapes stay literal because a WAF must never 500 on hostile input), path canonicalization with the climb-above-root ATTEMPT convicted even when the resolved path lands innocent (the backend's resolution is unknowable), a ~16-rule `const` table scanned linearly over four normalized surfaces (canonical path, query, UA, Referer — body inspection deliberately absent, it conflicts with L1's flat-memory streaming and the module docs say so), CRS-style anomaly scoring with benign lookalikes as first-class tests (O'Brien, union station, select a plan all pass), and `Reputation` — the L4 breaker pointed inward: sharded strikes with lazy decay, bans with doubling backoff capped at 1 h, banned IPs refused for one hash + one lock before any inspection. Wired as an L6 middleware (chain slot: log → request-id → waf → ratelimit → auth → authz, so hostility never consumes a rate token or a credential comparison), `;waf=block|detect` + `;waf-threshold=N` through the existing option partition, threshold-without-waf a boot error, one process-wide `OnceLock` reputation store shared across routes AND surviving L12 reloads (rerouting is not an amnesty). Rule names are log-only in both modes — a response naming the fired rule is a payload-tuning oracle. Three implementation corrections worth recording: the tautology rule's precise form needs a backreference, which Rust's regex crate rejects BY DESIGN (the same linear-time guarantee L9 identified as what keeps L2's `~regex` routes DoS-safe) — the looser `digit=digit` form convicts blind-injection probes (`or 1=2`) correctly anyway; and `union+select` co-occurrence and `;DDL-verb` stacked queries were raised to conviction weight after the test suite showed them under threshold — no benign URL reading exists for either conjunction. 280 tests (261 kept green, +19). Live verification all green: five payload families incl. double-encoded traversal 403'd with generic bodies and zero backend contact, 3 convictions → ban that refused an INNOCENT request from that IP → 2 s decay → served again, detect mode forwarding the attack while logging `score=10 rules=[...]`, the unprotected route passing the same attack untouched, metrics (convicted/detected/banned/ban_refused) and the `waf_score` log field all moving. **Two gaps found live, fixed, committed separately:** WAF counters were rendered but never appended to the `/metrics` document (caught by the warning baseline — dead-code warnings are a wiring detector, third time this course), and the startup banner's middleware summary omitted the WAF layer (the banner exists so execution order is readable at boot). Commits `04f7b0a` (spec), `4623bd3` (implementation), `fcdff9e` (metrics wiring), `817fa27` (banner), plus docs, pushed to `github.com/Vasant18/Ferrum` main via the `switching-gh-accounts` skill, gh switched back afterwards.
+- **2026-09-02 (evening)** — Level 14 (Scalability & HA) studied. **Theory level, zero production code changed — and with it the course's build phase is COMPLETE: 14/14 levels.** Write-up at `docs/level-14-scalability.md`, following the L9 method: every claim verified against the tree rather than recalled. The traffic-distribution ladder (DNS → VRRP → anycast → L4-over-L7) with the recursion named and grepped: Maglev-style L4 tiers consistent-hash flows exactly like `balancer.rs:598`'s `chash` ring, and hash the 4-tuple for the same affinity reason `iphash` exists at `:711`. The centerpiece is a state audit of `rproxy/src` against the KB's don't-share / share-approximately / share-for-real hierarchy: route table, health state, pools, and metrics ship to N instances unchanged (L12's validate-wholesale/swap-atomic reload turns out to be the data-plane half of an xDS control plane; L6's per-process request-id seeding was cluster-ready three levels early); rate limits, WAF reputation, and the cache go quietly approximate at N>1 (×N admission, ×N strike budgets, ×N misses — the first two get per-instance ÷N or Redis-replicated loose counts, the cache is wasteful-but-correct and either lives behind the CDN's hit rate or chash-partitions across the tier); only exactly-once duties need consensus (etcd/ZooKeeper leases, and the KB's rule — use a store, implementing Raft is its own course — kept verbatim; nearest future need is ACME renewal of L8's certs). HA: the L4 flap asymmetry generalizes to fleet membership, L10's `/health` with its degraded-≠-dead distinction is precisely what an L4 tier consumes, L12's drain is half of a rolling deploy, failure domains stack process→machine→site. CDN integration lands on three pre-built seams: L5's XFF trust + L8's CidrList (trusted CDN ranges), L11 as cache layer two (`s-maxage` addresses the layers separately), L7's pools serving origin pull. Closing map: chash→Maglev, breakers→fleet membership, SIGHUP→control planes, drain→rolling deploys — distributed systems are the same subject, multiplied. Final tally recorded: 14/14 levels, 280 tests, ~13.4k lines, two dependencies (regex, rustls), everything else from scratch on purpose. 14-question quiz added (deliberately including one question — #14 — that asks for a problem with NO single-instance analogue, so the closing lesson isn't self-congratulation). Quizzes L9–L14 all pending Vessey. Commits `3c0fe90` (study doc) + docs, pushed to `github.com/Vasant18/Ferrum` main via the `switching-gh-accounts` skill, gh switched back afterwards.
