@@ -29,6 +29,7 @@ mod rewrite;
 mod router;
 mod security;
 mod tls;
+mod waf;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -525,6 +526,10 @@ fn parse_settings(args: impl IntoIterator<Item = String>) -> std::io::Result<Set
     // before cutting them. 15 s default: long enough for real requests,
     // short enough that a hung client cannot hold a deploy hostage.
     let mut drain_timeout = std::time::Duration::from_secs(15);
+    // Level 13: reputation tunables. Global (not per route) because the
+    // store is process-wide by design — see waf::shared_reputation.
+    let mut waf_ban_after: u32 = waf::DEFAULT_BAN_AFTER;
+    let mut waf_ban_secs = waf::DEFAULT_BAN_BASE;
     // Level 11: cache bounds. The cache itself is per-route opt-in
     // (`;cache=`), but the store is one shared, process-wide budget.
     let mut cache_max_bytes = cache::DEFAULT_MAX_BYTES;
@@ -639,6 +644,15 @@ fn parse_settings(args: impl IntoIterator<Item = String>) -> std::io::Result<Set
             "--drain-timeout" => {
                 drain_timeout = parse_duration(&next_val(&mut args, "--drain-timeout")?)?
             }
+            // ---- Level 13 ----
+            "--waf-ban-after" => {
+                waf_ban_after = next_val(&mut args, "--waf-ban-after")?
+                    .parse()
+                    .map_err(|_| bad_arg("--waf-ban-after expects a number"))?
+            }
+            "--waf-ban-secs" => {
+                waf_ban_secs = parse_duration(&next_val(&mut args, "--waf-ban-secs")?)?
+            }
             // ---- Level 11: cache bounds ----
             "--cache-max-bytes" => {
                 cache_max_bytes = security::parse_size(&next_val(&mut args, "--cache-max-bytes")?)
@@ -657,6 +671,12 @@ fn parse_settings(args: impl IntoIterator<Item = String>) -> std::io::Result<Set
             _ => route_specs.push(arg),
         }
     }
+
+    // Level 13: the reputation store must exist before any chain is built
+    // (each Waf middleware clones the Arc at build time). First-set wins;
+    // the reload path re-runs parse_settings and its build_routes, whose
+    // chains re-clone the SAME store — strikes survive a reload.
+    crate::waf::configure_reputation(waf_ban_after, waf_ban_secs);
 
     let routes = build_routes(
         &upstream_specs,

@@ -192,7 +192,7 @@ impl Middleware for AccessLog {
              \"target\":\"{target}\",\"status\":{status},\"dur_ms\":{dur_ms},\
              \"route_ms\":{route_ms},\"connect_ms\":{connect_ms},\"ttfb_ms\":{ttfb_ms},\
              \"upstream\":\"{upstream}\",\"backend\":\"{backend}\",\"user\":\"{user}\",\
-             \"pooled\":{pooled},\"cache\":{cache},\"rejected_by\":{rejected}}}",
+             \"pooled\":{pooled},\"cache\":{cache},\"waf_score\":{waf},\"rejected_by\":{rejected}}}",
             ts = crate::logging::rfc3339_now(),
             id = json_escape(&ctx.request_id),
             peer = ctx.peer,
@@ -209,6 +209,10 @@ impl Middleware for AccessLog {
             pooled = ctx.pooled,
             cache = match ctx.cache {
                 Some(c) => format!("\"{c}\""),
+                None => "null".to_string(),
+            },
+            waf = match ctx.waf_score {
+                Some(s) => s.to_string(),
                 None => "null".to_string(),
             },
         );

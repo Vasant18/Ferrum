@@ -53,7 +53,17 @@ use ratelimit::{Limiter, RateLimit};
 /// each `;option` to the right sub-parser (see `rewrite::L5_KEYS`). Note there
 /// are more spellings than middleware: `realm` tunes `auth`, `require-user`
 /// feeds authz, `burst` tunes the limiter.
-pub const L6_KEYS: &[&str] = &["auth", "realm", "require-user", "rate", "burst"];
+pub const L6_KEYS: &[&str] = &[
+    "auth",
+    "realm",
+    "require-user",
+    "rate",
+    "burst",
+    // Level 13: the WAF is configured here because it IS a middleware —
+    // same partition, same parser, same chain assembly.
+    "waf",
+    "waf-threshold",
+];
 
 /// One layer of the pipeline. Both phases are synchronous (see the module doc).
 ///
@@ -140,6 +150,10 @@ pub struct ReqCtx {
     /// "revalidated", or None when the route doesn't cache / the request
     /// wasn't cacheable. The log's version of the `X-Cache` header.
     pub cache: Option<&'static str>,
+    /// Level 13: the WAF's anomaly score, when non-zero on a waf-enabled
+    /// route. In the log (never in a response header — no oracle) so an
+    /// operator can tune a threshold against real traffic in detect mode.
+    pub waf_score: Option<u32>,
 }
 
 impl ReqCtx {
@@ -162,6 +176,7 @@ impl ReqCtx {
             t_first_byte: None,
             pooled: false,
             cache: None,
+            waf_score: None,
         }
     }
 }
@@ -256,6 +271,9 @@ pub struct MiddlewareConfig {
     burst: Option<f64>,
     request_id: bool,
     access_log: bool,
+    /// Level 13: `Some(mode)` when `waf=` was given on the route.
+    waf: Option<crate::waf::WafMode>,
+    waf_threshold: Option<u32>,
 }
 
 impl MiddlewareConfig {
@@ -275,6 +293,8 @@ impl MiddlewareConfig {
             burst: None,
             request_id,
             access_log,
+            waf: None,
+            waf_threshold: None,
         };
 
         for raw in opts.split(';') {
@@ -304,6 +324,18 @@ impl MiddlewareConfig {
                     }
                     cfg.burst = Some(b);
                 }
+                "waf" => {
+                    cfg.waf = Some(crate::waf::WafMode::parse(value).map_err(err)?);
+                }
+                "waf-threshold" => {
+                    let t: u32 = value
+                        .parse()
+                        .map_err(|_| err(format!("waf-threshold {value:?} is not a number")))?;
+                    if t == 0 {
+                        return Err(err("waf-threshold must be >= 1".to_string()));
+                    }
+                    cfg.waf_threshold = Some(t);
+                }
                 // Unreachable: the router partition only hands us L6 keys.
                 other => return Err(err(format!("unknown option {other:?}"))),
             }
@@ -322,6 +354,11 @@ impl MiddlewareConfig {
         // it would drain once and reject forever. Almost certainly a mistake.
         if cfg.burst.is_some() && cfg.rate.is_none() {
             return Err(err("burst= needs a rate= on the same route".to_string()));
+        }
+        // Level 13, same spirit: a threshold with no waf= tunes a middleware
+        // that will never exist.
+        if cfg.waf_threshold.is_some() && cfg.waf.is_none() {
+            return Err(err("waf-threshold= needs a waf= on the same route".to_string()));
         }
 
         Ok(cfg)
@@ -343,6 +380,19 @@ impl MiddlewareConfig {
         }
         if self.request_id {
             mws.push(Box::new(RequestId::new()));
+        }
+        if let Some(mode) = self.waf {
+            // Level 13, chain position: after request-id (a blocked request
+            // still gets its id + log line via the response-phase unwind),
+            // BEFORE ratelimit and auth — hostility is refused before it can
+            // consume a rate token or trigger a credential comparison. The
+            // reputation store is process-wide (set in main): an attacker
+            // probing two routes is one offender, not two.
+            mws.push(Box::new(crate::waf::Waf {
+                mode,
+                threshold: self.waf_threshold.unwrap_or(crate::waf::DEFAULT_THRESHOLD),
+                reputation: crate::waf::shared_reputation(),
+            }));
         }
         if let Some(rate) = self.rate {
             // Default burst = one second of rate, floored at 1 so a sub-1/s
