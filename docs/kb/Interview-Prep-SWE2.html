@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ferrum KB — SWE-2 Interview Prep</title>
+<meta name="description" content="A complete, plain-English map of the Barracuda Networks product portfolio: every product family (Email, Application, Network, Data Protection, Managed XDR, MSP) and the BarracudaONE platform — what each product is, what it does, and what problem it solves." />
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    flowchart: { htmlLabels: true, useMaxWidth: true, padding: 12, nodeSpacing: 55, rankSpacing: 55 },
+    startOnLoad: true, theme: 'base', securityLevel: 'loose',
+    themeVariables: {
+      fontFamily: 'Arial, Helvetica, sans-serif', fontSize: '15px',
+      primaryColor: '#e7e8ea', primaryTextColor: '#15203a', primaryBorderColor: '#7e848c',
+      lineColor: '#6a6f77', secondaryColor: '#dddfe2', tertiaryColor: '#f3f4f6',
+      noteBkgColor: '#fff3d6', noteTextColor: '#3a2f12', noteBorderColor: '#caa84a',
+      actorBkg: '#e7e8ea', actorTextColor: '#15203a', actorBorder: '#7e848c',
+      clusterBkg: '#eef0f2', clusterBorder: '#a0a4aa'
+    }
+  });
+</script>
+<style>
+  :root{--bg:#0f1320;--panel:#161c2e;--panel-2:#1d2540;--ink:#e8ecf5;--muted:#9aa6c4;--accent:#7c5cff;--accent-2:#22d3a6;--warn:#ffb454;--danger:#ff6b81;--line:#2a3354;--code-bg:#0b0f1a;--max:1100px;}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:linear-gradient(180deg,#0c1020,#0f1320 40%);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  a{color:var(--accent-2);text-decoration:none}a:hover{text-decoration:underline}
+  header.hero{padding:56px 24px 40px;text-align:center;background:radial-gradient(1200px 400px at 50% -10%,rgba(255,107,129,.18),transparent 60%);border-bottom:1px solid var(--line);}
+  header.hero .eyebrow{letter-spacing:.25em;text-transform:uppercase;color:var(--accent-2);font-size:.75rem;font-weight:700}
+  header.hero h1{font-size:clamp(1.9rem,4vw,3rem);margin:.3em 0 .2em;line-height:1.1}
+  header.hero p.sub{color:var(--muted);max-width:790px;margin:0 auto;font-size:1.05rem}
+  .badges{margin-top:18px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  .badge{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);padding:4px 12px;border-radius:999px;font-size:.8rem}
+  .layout{display:grid;grid-template-columns:260px 1fr;gap:32px;align-items:start;max-width:1320px;margin:0 auto;padding:0 22px}
+  nav.toc{position:sticky;top:0;max-height:100vh;overflow:auto;padding:28px 10px 60px;border-right:1px solid var(--line);font-size:.9rem;}
+  nav.toc h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.18em;color:var(--muted);margin:18px 8px 6px}
+  nav.toc a{display:block;color:var(--muted);padding:5px 10px;border-radius:8px;border-left:2px solid transparent}
+  nav.toc a:hover{background:var(--panel);color:var(--ink);text-decoration:none;border-left-color:var(--accent)}
+  main{padding:34px 0 80px;min-width:0}
+  section{margin:0 0 46px;scroll-margin-top:18px}
+  section>h2{font-size:1.7rem;margin:0 0 .5em;padding-bottom:.3em;border-bottom:2px solid var(--line);display:flex;align-items:center;gap:.5em;}
+  h3{font-size:1.25rem;margin:1.6em 0 .4em;color:#fff}
+  h4{font-size:1.02rem;margin:1.2em 0 .3em;color:var(--accent-2);text-transform:uppercase;letter-spacing:.04em}
+  p,li{color:var(--ink)}.muted{color:var(--muted)}
+  article.concept{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px 24px;margin:22px 0}
+  article.concept>h3:first-child{margin-top:0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  @media(max-width:900px){.grid2,.grid3{grid-template-columns:1fr} .layout{grid-template-columns:1fr} nav.toc{position:static;max-height:none;border-right:none;border-bottom:1px solid var(--line)}}
+  .card{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card h4{margin-top:.2em}
+  .callout{border-left:4px solid var(--accent);background:var(--panel-2);padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0}
+  .callout.analogy{border-left-color:var(--accent-2)}.callout.warn{border-left-color:var(--warn)}.callout.danger{border-left-color:var(--danger)}.callout.story{border-left-color:#5ec2ff}
+  .tag{display:inline-block;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:2px 8px;border-radius:6px;margin-bottom:6px}
+  .tag.beg{background:rgba(34,211,166,.15);color:var(--accent-2)}.tag.tech{background:rgba(124,92,255,.18);color:#b9a6ff}.tag.adv{background:rgba(255,107,129,.15);color:var(--danger)}
+  code{background:var(--code-bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.86em;color:#ffd9a0}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto;font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:.85rem;line-height:1.55}
+  pre code{background:none;border:none;padding:0;color:#d7e0f5}
+  pre.art{color:#ffd9a0;font-size:.95rem;line-height:1.4;letter-spacing:.04em}
+  pre.mermaid{background:#f7f8fc;color:#111;text-align:center}
+  .mermaid svg text,.mermaid text{fill:#15203a !important}
+  .mermaid .nodeLabel,.mermaid .edgeLabel,.mermaid .label,.mermaid span,.mermaid p,.mermaid div,.mermaid foreignObject *{color:#15203a !important;fill:#15203a !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p{background:#f3f5fc !important}
+  .mermaid .cluster-label .nodeLabel,.mermaid .cluster-label p,.mermaid .cluster span,.mermaid .cluster p{color:#3c4046 !important}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.92rem;overflow:hidden;border-radius:10px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel-2);color:#fff}
+  tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  details{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:12px 0}
+  details summary{cursor:pointer;font-weight:600;color:var(--accent-2);padding:6px 0}
+  details[open] summary{border-bottom:1px solid var(--line);margin-bottom:10px}
+  figure{margin:18px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+  figcaption{color:var(--muted);font-size:.85rem;text-align:center;margin-top:8px;font-style:italic}
+  .qa{margin:10px 0}.qa .q{font-weight:600}.qa .a{color:var(--muted);margin:2px 0 0}
+  ol.flow{counter-reset:step;list-style:none;padding-left:0}
+  ol.flow>li{counter-increment:step;position:relative;padding:10px 0 10px 52px;border-bottom:1px dashed var(--line)}
+  ol.flow>li::before{content:counter(step);position:absolute;left:0;top:8px;width:34px;height:34px;background:var(--accent);color:#fff;border-radius:50%;display:grid;place-items:center;font-weight:700}
+  .rank{font-weight:800;color:var(--accent);margin-right:6px}
+  footer{border-top:1px solid var(--line);padding:30px 22px;text-align:center;color:var(--muted);font-size:.88rem}
+  .lead{font-size:1.08rem}
+  .formula{background:var(--code-bg);border:1px dashed var(--accent);border-radius:10px;padding:12px 16px;font-family:monospace;color:#ffd9a0;text-align:center;margin:14px 0}
+
+  /* KB-THEME START */
+  /* Azure (blue palette) */
+  :root{--bg:#0e1c30;--panel:#152740;--panel-2:#1d3458;--ink:#e6edf7;--muted:#93a6c4;--accent:#1a8ae5;--accent-2:#41a7f5;--warn:#d6a96a;--danger:#d98a8a;--line:#264064;--code-bg:#0b1626;}
+  body{background:linear-gradient(180deg,var(--bg),var(--bg))}
+  header.hero{background:radial-gradient(1100px 400px at 50% -10%,rgba(20,119,210,.26),transparent 60%)}
+  h3,.parthead{color:var(--ink)}
+  th{color:var(--ink)}
+  .tag.tech{background:rgba(65,167,245,.16);color:var(--accent-2)}
+  ol.flow>li::before{color:#0b1626}
+  /* KB-THEME END */
+  /* prevent node/edge label clipping */
+  .mermaid foreignObject{overflow:visible !important}
+  .mermaid .nodeLabel,.mermaid .label,.mermaid foreignObject>div,.mermaid foreignObject span,.mermaid foreignObject p{white-space:nowrap !important;overflow:visible !important}
+  .mermaid .edgeLabel,.mermaid .edgeLabel p,.mermaid .edgeLabel span{white-space:nowrap !important;overflow:visible !important;padding:1px 4px}
+  .mermaid svg{max-width:100%;height:auto}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyebrow">Ferrum KB &middot; Interview Prep &middot; SWE-2 level</div>
+  <h1>Interview Questions You Can Now Answer<br/><span style="font-size:.6em;color:var(--muted)">Mapped from the 14 levels to the rounds where they get asked</span></h1>
+  <p class="sub">Everything below is a real interview question shape &mdash; systems design, networking, concurrency, debugging, behavioral &mdash; that the Ferrum build prepares you to answer <em>from experience</em> rather than from a book. Each question names the level(s) whose work is the answer. The per-level quizzes (on each level page) test recall; this page tests whether you can <em>deploy</em> the material under interview conditions.</p>
+  <div class="badges">
+    <span class="badge">Target: SWE-2 / mid-level</span>
+    <span class="badge">72 questions across 7 rounds + 10 rapid-fire</span>
+    <span class="badge">Answers = the levels, not a key</span>
+  </div>
+  <p style="text-align:center;margin-top:.8em"><a href="index.html">&larr; Course index</a></p>
+</header>
+
+<div class="layout">
+<nav class="toc">
+  <h2>Orientation</h2>
+  <a href="#how-to-use">How To Use This Page</a>
+  <h2>Rounds</h2>
+  <a href="#networking">HTTP &amp; Networking</a>
+  <a href="#systems-design">Systems Design</a>
+  <a href="#concurrency">Concurrency &amp; Async</a>
+  <a href="#security">Security</a>
+  <a href="#debugging">Debugging &amp; Ops</a>
+  <a href="#language">Rust / Language Design</a>
+  <a href="#behavioral">Behavioral / Experience</a>
+  <h2>Reference</h2>
+  <a href="#stories">Your Five War Stories</a>
+  <a href="#one-liners">30-Second Answers</a>
+</nav>
+
+<main>
+
+<section id="how-to-use">
+  <h2>How To Use This Page</h2>
+  <article class="concept">
+    <p>An SWE-2 interview rarely asks "define a circuit breaker." It asks <em>"your service's dependency starts timing out &mdash; what do you do?"</em> and listens for whether the breaker, the retry budget, and the health-check asymmetry come out unprompted, connected, and with trade-offs. You built all three, so the preparation here is not memorizing answers &mdash; it is practicing the <strong>retrieval path from question-shape to the thing you built</strong>.</p>
+    <div class="callout"><strong>Method.</strong> For each question: (1) say the one-sentence answer out loud, (2) name the mechanism you built and the file it lives in, (3) name the trade-off you accepted and the alternative you rejected. That three-beat structure &mdash; answer, evidence, trade-off &mdash; is what separates a mid-level answer from a junior one. The level references tell you where to reread when a retrieval fails.</div>
+    <div class="callout warn"><strong>Honesty rule, again.</strong> Ferrum is a teaching build. In an interview, "I built a from-scratch reverse proxy to understand X" is a strong story precisely <em>because</em> you can say what production systems do differently &mdash; every level page's industry section arms that sentence. Never present the teaching build as production experience; present it as depth.</div>
+  </article>
+</section>
+
+<section id="networking">
+  <h2>Round: HTTP &amp; Networking</h2>
+  <div class="qa"><p class="q">1. Walk me through what happens when a client sends a request through a reverse proxy. Be precise about connections.</p><p class="a">Two sockets, one per side; independent lifetimes (keep-alive and pooling per side); parse &rarr; route &rarr; rewrite &rarr; forward &rarr; relay. <em>L1, index pipeline diagram.</em></p></div>
+  <div class="qa"><p class="q">2. How do you know where an HTTP request body ends? All the cases.</p><p class="a">Content-Length / chunked / until-close / none &mdash; and why requests can't use until-close. <em>L1 framing.</em></p></div>
+  <div class="qa"><p class="q">3. What is request smuggling and how would you prevent it in a proxy you wrote?</p><p class="a">CL+TE disagreement between parsers; reject ambiguity at parse time, own the framing headers on re-emit. <em>L1, L5.</em></p></div>
+  <div class="qa"><p class="q">4. Why must a proxy strip hop-by-hop headers? Name some.</p><p class="a">Connection/TE/Upgrade etc. describe ONE hop; forwarding them desyncs the next. <em>L1, L5.</em></p></div>
+  <div class="qa"><p class="q">5. X-Forwarded-For arrives on an inbound request. Trust it?</p><p class="a">Append, never replace; trust only from known ranges (CDN case); key limits on the socket peer. <em>L5, L6, L14.</em></p></div>
+  <div class="qa"><p class="q">6. What's the difference between no-cache and no-store? s-maxage and max-age?</p><p class="a">no-cache = store but revalidate every use; no-store = never write; s-maxage targets shared caches and wins there. <em>L11.</em></p></div>
+  <div class="qa"><p class="q">7. How does ETag revalidation actually save bandwidth? Trace both directions.</p><p class="a">Proxy&rarr;origin If-None-Match &rarr; 304 restamps the entry (no body transfer); client&rarr;proxy 304 with no body. <em>L11.</em></p></div>
+  <div class="qa"><p class="q">8. Why does Vary have to be part of a cache key, and what's the worst bug if it isn't?</p><p class="a">Serving gzip to a client that can't read it &mdash; or one user's variant to another; the key IS the isolation boundary. <em>L11.</em></p></div>
+  <div class="qa"><p class="q">9. Keep-alive vs pipelining vs connection pooling &mdash; three different things. Distinguish them.</p><p class="a">Reuse of one client connection / multiple in-flight requests on it / a pool of warm backend connections. <em>L1, L7.</em></p></div>
+  <div class="qa"><p class="q">10. When can a proxy safely retry a failed backend request?</p><p class="a">Idempotent method AND no body bytes committed AND attempts capped &mdash; the three-gate rule; retry storms kill degraded fleets. <em>L4, L7.</em></p></div>
+  <div class="qa"><p class="q">11. What status codes does a proxy itself generate, versus pass through?</p><p class="a">400/404/408/413/429/431/502/503/504 with the exact trigger for each. <em>L1&ndash;L8 cheat sheets.</em></p></div>
+  <div class="qa"><p class="q">12. TLS termination: what does the backend lose when the proxy terminates, and how do you give it back?</p><p class="a">The client's scheme and identity &mdash; X-Forwarded-Proto as an observation (listener's scheme), never a client assertion. <em>L5, L8.</em></p></div>
+</section>
+
+<section id="systems-design">
+  <h2>Round: Systems Design</h2>
+  <div class="qa"><p class="q">13. Design a load balancer. (The classic.)</p><p class="a">You built seven algorithms; lead with RR &rarr; upgrade-on-evidence, name affinity (iphash/chash) and the inflight-count race you accepted. <em>L3.</em></p></div>
+  <div class="qa"><p class="q">14. How should a system handle a dependency that starts failing? Design the full failure path.</p><p class="a">Passive detection + active probes feeding one breaker; ejection, backoff-doubling recovery probes, flap-preventing asymmetry (down after 3, up after 2). <em>L4.</em></p></div>
+  <div class="qa"><p class="q">15. Design a rate limiter. Now make it work across N instances.</p><p class="a">Token bucket, sharded, lazy refill, keyed on socket IP; at N instances: per-instance &divide;N or Redis-replicated approximate counts &mdash; exact distributed counting costs a round-trip per request. <em>L6, L14.</em></p></div>
+  <div class="qa"><p class="q">16. Design an HTTP cache. What's the hardest correctness problem?</p><p class="a">The key (route + pre-rewrite target + Vary values, full equality on collision); then the RFC semantics; then stampedes &mdash; which you can DESCRIBE as recorded debt. <em>L11.</em></p></div>
+  <div class="qa"><p class="q">17. How do you deploy a config change to a proxy with zero dropped requests?</p><p class="a">Validate wholesale off to the side, swap one Arc pointer, per-exchange snapshots; invalid config can never take the proxy down. <em>L12.</em></p></div>
+  <div class="qa"><p class="q">18. How do you shut a service down gracefully? What's the deadline for?</p><p class="a">Stop accepting &rarr; drain with Connection: close &rarr; deadline so a hung client can't hold the deploy hostage; RAII connection accounting IS the drain tracker. <em>L12.</em></p></div>
+  <div class="qa"><p class="q">19. One proxy instance isn't enough anymore. Take me from 1 to N.</p><p class="a">The whole L14 ladder: DNS &rarr; VRRP &rarr; anycast &rarr; L4-over-L7; then the state audit &mdash; what ships unchanged, what goes approximate, what needs consensus. <em>L14.</em></p></div>
+  <div class="qa"><p class="q">20. Where does session affinity belong in a modern system?</p><p class="a">Nowhere, ideally &mdash; externalize sessions (Redis/JWT) so any instance serves any user; iphash/chash is the fallback for legacy state. <em>L3, L14.</em></p></div>
+  <div class="qa"><p class="q">21. What belongs in metrics vs logs vs traces? Design the observability for a proxy.</p><p class="a">Aggregates vs events vs per-request stages; status-class labels (cardinality bomb), histograms-not-averages, request-id propagation. <em>L10.</em></p></div>
+  <div class="qa"><p class="q">22. Why are histogram buckets fixed and cumulative in Prometheus? What breaks otherwise?</p><p class="a">Fixed = comparable across scrapes; percentiles at query time from bucket counts; record O(1), cumulate at scrape. <em>L10.</em></p></div>
+  <div class="qa"><p class="q">23. Design a WAF. What can it promise and what can't it?</p><p class="a">Normalize &rarr; match &rarr; anomaly-score &rarr; detect-before-block; a speed bump not a wall &mdash; real fixes are parameterized queries; the honesty checkpoint IS the senior answer. <em>L13.</em></p></div>
+  <div class="qa"><p class="q">24. Your service sits behind a CDN. What changes?</p><p class="a">Client IP becomes a CDN node (trusted-range XFF), your cache becomes layer two (s-maxage), origin pull is a keep-alive client. <em>L14.</em></p></div>
+  <div class="qa"><p class="q">25. Control plane vs data plane &mdash; what's the split and why does everyone converge on it?</p><p class="a">Data plane stays simple and never dies on bad input (validate-and-swap); the control plane owns distributed truth; L12's reload is the data-plane half of xDS. <em>L12, L14.</em></p></div>
+  <div class="qa"><p class="q">26. When do you actually need consensus (Raft/etcd)? When is it overkill?</p><p class="a">Only exactly-once duties (leader election, cert renewal); health state and rate limits deliberately DON'T need it &mdash; the don't-share/approximate/consensus hierarchy. <em>L14.</em></p></div>
+</section>
+
+<section id="concurrency">
+  <h2>Round: Concurrency &amp; Async</h2>
+  <div class="qa"><p class="q">27. How does async I/O actually work, kernel to callback? No hand-waving.</p><p class="a">Non-blocking read attempted first (fast path), EWOULDBLOCK &rarr; register Waker &rarr; epoll/kqueue wait &rarr; wake &rarr; re-poll resuming the state machine at the await point. <em>L9.</em></p></div>
+  <div class="qa"><p class="q">28. Why did epoll solve C10K when select couldn't?</p><p class="a">O(ready) vs O(n) per wait &mdash; 9,999 idle connections cost nothing vs cost work every time. <em>L9.</em></p></div>
+  <div class="qa"><p class="q">29. Task-per-connection vs thread-per-connection vs event loop &mdash; costs of each?</p><p class="a">Heap state machine vs stack + context switches vs hand-written state machines; Tokio = the compiler writes nginx's state machines for you. <em>L1, L9.</em></p></div>
+  <div class="qa"><p class="q">30. "Never hold a lock across an await." Why, and how would you ENFORCE it?</p><p class="a">Executor starvation + deadlock risk; enforce by making every locking fn a plain fn &mdash; .await can't appear there, so the compiler is the reviewer. <em>L9.</em></p></div>
+  <div class="qa"><p class="q">31. When is a std::sync::Mutex fine in async code?</p><p class="a">Short critical sections never crossing await &mdash; the sharded limiter/cache/reputation pattern; tokio::sync::Mutex is for holding across awaits, which we never need. <em>L6, L9, L11.</em></p></div>
+  <div class="qa"><p class="q">32. How do you share config across 10k concurrent tasks with zero locks on the hot path?</p><p class="a">Arc snapshots; readers clone under a nanosecond read lock (or arc-swap); old config frees when the last holder drops &mdash; ownership solves the torn-read problem. <em>L2, L12.</em></p></div>
+  <div class="qa"><p class="q">33. Two threads increment a Relaxed atomic counter. Can increments be lost? What DOESN'T Relaxed guarantee?</p><p class="a">RMW never loses increments; Relaxed gives no cross-variable ordering &mdash; a scrape sees torn snapshots, which metrics tolerate by design. <em>L10.</em></p></div>
+  <div class="qa"><p class="q">34. How do you shut down a background task without a kill channel?</p><p class="a">Hand it a Weak; upgrade per tick; the failed upgrade IS the signal &mdash; lifetime tied to the data it serves. <em>L12.</em></p></div>
+  <div class="qa"><p class="q">35. What's a TOCTOU race? Give one from real experience and its fix.</p><p class="a">The pooled connection that died between checkout and first write &mdash; fixed by making the head-write retriable exactly like a connect failure. <em>L7.</em></p></div>
+  <div class="qa"><p class="q">36. Why is one accept loop enough for thousands of connections, and what must NEVER run inside it?</p><p class="a">It only dequeues + spawns; anything slow (a TLS handshake!) stalls every new client &mdash; one ClientHello byte = total DoS. <em>L1, L8.</em></p></div>
+  <div class="qa"><p class="q">37. RAII beyond memory: give three resource types you'd manage with Drop and why.</p><p class="a">Inflight counts (lease), limiter slots, connection gauges &mdash; many exit paths, one release point; cleanup you can't forget. <em>L3, L8, L10.</em></p></div>
+</section>
+
+<section id="security">
+  <h2>Round: Security</h2>
+  <div class="qa"><p class="q">38. Where does a TLS handshake belong architecturally, and what's the DoS if you get it wrong?</p><p class="a">Inside the per-connection task with a deadline; in the accept loop, one stalled handshake blocks every new connection process-wide. <em>L8.</em></p></div>
+  <div class="qa"><p class="q">39. mTLS: what does each side prove, and what are the three sane server postures?</p><p class="a">Client certs verified against a CA; off/optional/required &mdash; and the config incoherencies to reject at boot. <em>L8.</em></p></div>
+  <div class="qa"><p class="q">40. Why do WAFs normalize before matching? Walk %252e%252e%2f through your normalizer.</p><p class="a">Evasion is encoding games; two decode passes, the changed second pass IS double-encoding and scores on its own. <em>L13.</em></p></div>
+  <div class="qa"><p class="q">41. Why anomaly scoring instead of blocking on any signature hit?</p><p class="a">O'Brien buys coffee: a lone quote is ambient noise; scoring is the difference between a WAF and a false-positive generator ops disables. <em>L13.</em></p></div>
+  <div class="qa"><p class="q">42. Why must a WAF's error page never name the rule that fired?</p><p class="a">It's a payload-tuning oracle &mdash; the attacker binary-searches your ruleset; hits go to logs only. <em>L13.</em></p></div>
+  <div class="qa"><p class="q">43. Log injection: the classic attack and the JSON-era upgrade.</p><p class="a">CRLF forged whole lines; in JSON logs an unescaped quote forges FIELDS and a control byte hides the line from jq entirely. <em>L6, L10.</em></p></div>
+  <div class="qa"><p class="q">44. Timing attacks on credential checks &mdash; the bug and the fix.</p><p class="a">Early-exit comparison leaks prefix length; constant-time compare over both full buffers. <em>L6.</em></p></div>
+  <div class="qa"><p class="q">45. Why key rate limits and reputation on the socket IP instead of X-Forwarded-For?</p><p class="a">XFF is client-controlled: unlimited throughput via random values, plus poisoning any victim's bucket. Three levels made this same choice. <em>L5, L6, L13.</em></p></div>
+  <div class="qa"><p class="q">46. Slowloris: the attack, and every layer you must defend at.</p><p class="a">Slow bytes hold resources: head-read deadline, TLS handshake deadline, admin-plane deadline &mdash; the timeout moves down a layer each time you add one. <em>L1, L8, L10.</em></p></div>
+  <div class="qa"><p class="q">47. Why is /metrics on a separate listener?</p><p class="a">Route names, backend addrs, error rates = reconnaissance; the admin plane is a different socket, exposure is an explicit choice. <em>L10.</em></p></div>
+  <div class="qa"><p class="q">48. Path traversal: why "canonicalize then check", and why convict the ATTEMPT even when the result is innocent?</p><p class="a">Encoded/mixed forms defeat raw matching; you can't know how the BACKEND resolves paths, so the probe itself is the signal. <em>L2, L13.</em></p></div>
+  <div class="qa"><p class="q">49. Why is Rust's regex crate refusing backreferences a SECURITY feature?</p><p class="a">No backtracking = guaranteed linear time = catastrophic-backtracking ReDoS is inexpressible; per-request regex on user input is safe only because of it. <em>L2, L9, L13.</em></p></div>
+</section>
+
+<section id="debugging">
+  <h2>Round: Debugging &amp; Ops</h2>
+  <div class="qa"><p class="q">50. "The site is slow." You have 30 seconds of the operator's attention. What did you instrument yesterday to answer this today?</p><p class="a">Per-stage timings (parse/route/connect/TTFB/transfer) in the access log split "us vs them vs the network"; histograms give which percentile. <em>L10.</em></p></div>
+  <div class="qa"><p class="q">51. p50 is 40ms, an average is 40ms &mdash; which user is angry and why can't the average see them?</p><p class="a">p99's 1-in-100 (your biggest customers hourly); an average of 40ms hides 1% at 4 seconds. <em>L10.</em></p></div>
+  <div class="qa"><p class="q">52. A backend hangs after accepting a request. What does your system do, second by second?</p><p class="a">Response-head deadline fires &rarr; 504 to the client &rarr; breaker fed &rarr; ejection after threshold &rarr; recovery probes with backoff. <em>L4, L7.</em></p></div>
+  <div class="qa"><p class="q">53. A latency regression affects only SOME requests. What log field splits the population?</p><p class="a">pooled:true/false &mdash; pool misses pay connect cost; without the field the regression looks like a slow backend. <em>L7, L10.</em></p></div>
+  <div class="qa"><p class="q">54. Your health endpoint shows degraded but the supervisor shouldn't restart the process. Why is /health still 200?</p><p class="a">The PROXY is alive; a backend outage restarted into a proxy outage makes it worse &mdash; readiness of the proxy &ne; health of its backends. <em>L10.</em></p></div>
+  <div class="qa"><p class="q">55. Tests pass but the binary misbehaves. Give a real class of bug that unit tests structurally can't catch.</p><p class="a">Cross-task composition (the TOCTOU pool bug passed every per-task review) and harness bugs (the pkill that killed the proxy itself). <em>L7, PROGRESS.</em></p></div>
+  <div class="qa"><p class="q">56. What's a dead-code warning good for besides tidiness?</p><p class="a">It's a wiring detector: render_prometheus unwired, three times this course a warning exposed a missing hookup. <em>L13 story.</em></p></div>
+  <div class="qa"><p class="q">57. Why do log levels exist mechanically &mdash; what must a suppressed debug! NOT cost?</p><p class="a">A thrown-away format! allocation; check the level before evaluating args &mdash; one atomic load. <em>L10.</em></p></div>
+  <div class="qa"><p class="q">58. Config drift: how does a config FILE fight it, and why are duplicate keys an error not last-wins?</p><p class="a">One vocabulary (file lowers onto CLI), one parser per value; a duplicated key is drift in progress and last-wins is how it hides. <em>L12.</em></p></div>
+  <div class="qa"><p class="q">59. Why does --validate have to run the ENTIRE boot path?</p><p class="a">A validator that answers a different question than boot is worse than none; parse-clean-but-invalid configs (unknown upstream) must fail it. <em>L12.</em></p></div>
+</section>
+
+<section id="language">
+  <h2>Round: Rust / Language Design</h2>
+  <div class="qa"><p class="q">60. Generics vs trait objects on a hot path &mdash; how do you choose?</p><p class="a">Static dispatch for the per-read hot loop (Conn&lt;S&gt;, two monomorphized copies); dyn for the middleware chain where flexibility wins and calls are per-request. <em>L1, L6, L8.</em></p></div>
+  <div class="qa"><p class="q">61. Why is the classic O(1) LRU miserable in safe Rust, and what do production caches do instead?</p><p class="a">Doubly-linked aliasing + mutation is what the borrow checker exists to reject (LRU aliasing bugs are real C CVEs); shard the map, approximate the recency. <em>L11.</em></p></div>
+  <div class="qa"><p class="q">62. An async fn that's never awaited &mdash; what runs?</p><p class="a">Nothing; futures are inert values until polled; no thread exists behind them. The most common async misconception. <em>L9.</em></p></div>
+  <div class="qa"><p class="q">63. Why does an owned-Response middleware API force you to buffer bodies, and what did you do instead?</p><p class="a">The onion's post-processing needs the whole body in hand; two sync passes over heads keeps 2GB downloads at 16KB of memory. <em>L6.</em></p></div>
+  <div class="qa"><p class="q">64. Arc vs Weak: when is a Weak reference the CORRECT design, not a cycle-break hack?</p><p class="a">When a task must not extend its data's lifetime &mdash; probers die with their table; the Weak upgrade failing IS the protocol. <em>L12.</em></p></div>
+  <div class="qa"><p class="q">65. Where do enums beat booleans-and-options structurally?</p><p class="a">BodyFraming, BreakerState, Lookup{Hit/Stale/Miss}, Decision &mdash; invalid states unrepresentable, match forces every arm handled. <em>L1, L4, L11.</em></p></div>
+  <div class="qa"><p class="q">66. Zero dependencies as a policy: steelman it, then attack it.</p><p class="a">For: one parser per value, no drift, you understand every byte. Against: you rewrote chrono/tracing/lru poorly &mdash; fine for teaching, wrong for a team on a deadline; the two granted exceptions (regex, rustls) show where the line is. <em>Whole course.</em></p></div>
+</section>
+
+<section id="behavioral">
+  <h2>Round: Behavioral / Experience</h2>
+  <div class="qa"><p class="q">67. Tell me about a subtle bug you found. (Have three.)</p><p class="a">The TOCTOU pooled-connection silent failure (L7); the HalfOpen recovery deadlock (L4); the pkill harness bug that killed the proxy itself (L10 verification).</p></div>
+  <div class="qa"><p class="q">68. Tell me about a time a review process caught what individual reviews missed.</p><p class="a">The whole-branch L7 review: every task passed its own review; the composition bug (no response at all on a dead pooled connection) was invisible to any single diff.</p></div>
+  <div class="qa"><p class="q">69. Tell me about a decision you reversed and why.</p><p class="a">L8's 403-on-denied-CIDR reversed to silent close: answering costs a TLS handshake on the attacker's behalf &mdash; the design doc said one thing, implementation evidence said another, the reversal was recorded not hidden.</p></div>
+  <div class="qa"><p class="q">70. How do you decide build-vs-buy?</p><p class="a">The course's two exceptions are the rubric: buy when hand-rolling is DANGEROUS (crypto), build when the internals ARE the value (metrics, cache) &mdash; and know which situation you're in.</p></div>
+  <div class="qa"><p class="q">71. Tell me about scope you cut deliberately.</p><p class="a">Cache stampede defenses, W3C traceparent, body-inspecting WAF, graceful restart &mdash; each cut with the reason recorded and the failure mode documented; cutting with receipts is the skill.</p></div>
+  <div class="qa"><p class="q">72. How do you verify your own work beyond unit tests?</p><p class="a">Live verification against real backends every level; kill backends mid-flight; the harness is untested code and it bit three times &mdash; say that sentence in the interview.</p></div>
+</section>
+
+<section id="stories">
+  <h2>Your Five War Stories</h2>
+  <p>Behavioral rounds reward prepared narratives. These five, told with the three-beat structure (situation &rarr; mechanism &rarr; what it taught), cover most behavioral question shapes:</p>
+  <div class="grid2">
+    <div class="card"><h3>1. The invisible composition bug</h3><p>Every per-task review passed; the whole-branch review found a request path that returned NO response. Teaches: review granularity, TOCTOU, retry semantics. <em>(L7)</em></p></div>
+    <div class="card"><h3>2. The breaker that couldn't recover</h3><p>HalfOpen deadlock with default thresholds &mdash; found live, fixed with a regression test that drives recovery the way the prober does. Teaches: state machines, testing the path not the unit. <em>(L4)</em></p></div>
+    <div class="card"><h3>3. The handshake in the wrong place</h3><p>One ClientHello byte could stall every connection; moving one .await changed the security posture of the whole proxy. Teaches: architecture IS security. <em>(L8)</em></p></div>
+    <div class="card"><h3>4. The reversal with receipts</h3><p>Design said 403 on denied IPs; implementation showed that spends crypto on the attacker's behalf; closed silently instead and wrote down why. Teaches: evidence over plan-adherence. <em>(L8)</em></p></div>
+    <div class="card"><h3>5. The harness that lied</h3><p>pkill pattern matched the proxy's own argv; unquoted zsh $args made four guardrail tests pass vacuously. Teaches: test infrastructure is untested code. <em>(L7/L8/L10)</em></p></div>
+  </div>
+</section>
+
+<section id="one-liners">
+  <h2>30-Second Answers</h2>
+  <p>The compressed versions &mdash; when the interviewer wants the shape, not the essay:</p>
+  <table>
+    <thead><tr><th>Prompt</th><th>The 30-second answer</th></tr></thead>
+    <tbody>
+      <tr><td>Circuit breaker</td><td>Three states; failures open it, a timer half-opens it, successes close it; asymmetric thresholds prevent flapping; backoff doubles on failed recovery.</td></tr>
+      <tr><td>Consistent hashing</td><td>Hash servers onto a ring many times; a key maps to the next point clockwise; adding a server moves ~1/N of keys instead of nearly all (modulo's failure).</td></tr>
+      <tr><td>Token bucket</td><td>Capacity = burst, refill = rate; take one per request; lazy refill on access needs no timer; per-key buckets shard to avoid a global lock.</td></tr>
+      <tr><td>Cache stampede</td><td>Popular key expires, N requests all miss at once; fixes: request coalescing (one fetch, N-1 waiters), stale-while-revalidate, TTL jitter.</td></tr>
+      <tr><td>Graceful shutdown</td><td>Catch signal, close listener, drain in-flight with Connection: close, hard deadline, exit; the deploy must not be hostage to a hung client.</td></tr>
+      <tr><td>Hot reload</td><td>Build the new config completely off to the side; validate wholesale; swap one pointer; in-flight keeps its snapshot; invalid input changes nothing.</td></tr>
+      <tr><td>Anomaly scoring</td><td>Rules add points, block at a threshold: one weak signal is noise, three together are a conviction &mdash; false-positive control is the product.</td></tr>
+      <tr><td>epoll vs select</td><td>select scans all N fds every call (O(n)); epoll returns only ready ones (O(ready)) &mdash; idle connections become free, which dissolved C10K.</td></tr>
+      <tr><td>Data/control plane</td><td>Data plane serves traffic with a simple, crash-proof config-swap interface; control plane computes and pushes the config; they fail independently.</td></tr>
+      <tr><td>Observability pillars</td><td>Metrics aggregate (cheap, queryable over months), logs record events (one JSON line per request), traces time stages; request-id stitches them.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+</main>
+</div>
+
+<footer>
+  Ferrum Knowledge Base &middot; SWE-2 interview prep &middot; <a href="index.html">Course index</a>
+</footer>
+
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral" });
+</script>
+</body>
+</html>
